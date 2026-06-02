@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "BMO",
+    "slug": "bmo-streaming",
+    "version": "1.0.0",
+    "scheme": "bmo",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/images/icon.png",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.bmo.streaming",
+      "icon": {
+        "light": "./assets/images/ios/icon-light.png",
+        "dark": "./assets/images/ios/icon-dark.png"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      },
+      "package": "com.bmo.streaming"
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

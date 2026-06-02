@@ -1,0 +1,12 @@
+{
+  "name": "@bmo/api",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "elysia": "^1.2.0",
+    "@elysiajs/cors": "^1.2.0"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "bmo-streaming",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "overrides": {
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:api": "bun run --cwd apps/api dev",
+    "dev:client": "bun run --cwd apps/client dev"
+  },
+  "devDependencies": {
+    "turbo": "^2.6.1"
+  },
+  "packageManager": "bun@1.3.10",
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.0.0"
+  }
+}
