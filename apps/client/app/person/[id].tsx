@@ -25,7 +25,11 @@ function dedupeSorted(credits: PersonCredit[], type: 'movie' | 'tv') {
       const mt = c.media_type ?? (c.name && !c.title ? 'tv' : 'movie')
       return mt === type && c.poster_path && !seen.has(c.id) && seen.add(c.id)
     })
-    .sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))
+    .sort(
+      (a, b) =>
+        ((b as { popularity?: number }).popularity ?? 0) -
+        ((a as { popularity?: number }).popularity ?? 0)
+    )
     .map((c) => ({ ...c, media_type: type }))
 }
 
