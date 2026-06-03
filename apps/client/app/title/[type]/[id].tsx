@@ -1,4 +1,4 @@
-import { useLocalSearchParams, Stack } from 'expo-router'
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router'
 import {
   ScrollView,
   View,
@@ -13,8 +13,21 @@ import { tmdb, backdropUrl, titleOf, yearOf, type MediaDetails } from '@/lib/tmd
 import { useAsync } from '@/lib/useAsync'
 
 export default function TitleScreen() {
+  const router = useRouter()
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>()
   const isTv = type === 'tv'
+
+  function play() {
+    router.push({
+      pathname: '/player',
+      params: {
+        type: isTv ? 'tv' : 'movie',
+        id,
+        title: data ? titleOf(data) : '',
+        ...(isTv ? { season: '1', episode: '1' } : {}),
+      },
+    })
+  }
 
   const { data, loading, error } = useAsync<MediaDetails>(
     () => (isTv ? tmdb.tv(id) : tmdb.movie(id)),
@@ -60,9 +73,11 @@ export default function TitleScreen() {
                 {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
               </View>
 
-              <Pressable style={styles.playButton}>
+              <Pressable style={styles.playButton} onPress={play}>
                 <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                <Text style={styles.playText}>Reproducir</Text>
+                <Text style={styles.playText}>
+                  {isTv ? 'Reproducir T1:E1' : 'Reproducir'}
+                </Text>
               </Pressable>
 
               {data.genres?.length ? (
