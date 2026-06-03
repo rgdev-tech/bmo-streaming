@@ -3,10 +3,8 @@ import { api, API_URL } from './api'
 export type ResolveInfo = {
   source: string
   captions: string[]
+  referer: string
 }
-
-// vidlink requiere este Referer para los segmentos del CDN
-export const STREAM_HEADERS = { Referer: 'https://vidlink.pro/' }
 
 export const stream = {
   // Calienta el cache y devuelve los idiomas de subtítulo disponibles

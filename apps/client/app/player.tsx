@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { SymbolView } from 'expo-symbols'
-import { stream, STREAM_HEADERS } from '@/lib/stream'
+import { stream } from '@/lib/stream'
 import { saveProgress, getProgress, type Progress } from '@/lib/library'
 
 export default function PlayerScreen() {
@@ -32,6 +32,7 @@ export default function PlayerScreen() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
+  const [referer, setReferer] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -42,8 +43,9 @@ export default function PlayerScreen() {
       resolveP,
       getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN),
     ])
-      .then(([, pos]) => {
+      .then(([info, pos]) => {
         if (cancelled) return
+        setReferer(info.referer)
         setStartAt(pos)
         setReady(true)
       })
@@ -98,22 +100,24 @@ export default function PlayerScreen() {
         </View>
       )}
 
-      {ready && <Player uri={masterUrl} startAt={startAt} meta={meta} />}
+      {ready && <Player uri={masterUrl} referer={referer} startAt={startAt} meta={meta} />}
     </View>
   )
 }
 
 function Player({
   uri,
+  referer,
   startAt,
   meta,
 }: {
   uri: string
+  referer: string
   startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
 }) {
   const seeked = useRef(false)
-  const player = useVideoPlayer({ uri, headers: STREAM_HEADERS }, (p) => {
+  const player = useVideoPlayer({ uri, headers: { Referer: referer } }, (p) => {
     p.timeUpdateEventInterval = 5
     p.play()
   })

@@ -1,12 +1,13 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream } from './resolver.service'
 
-// Devuelve metadata de resolución (calienta el cache + lista de subtítulos)
+// Devuelve metadata de resolución (calienta el cache + subtítulos + referer)
 function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
   if (!result) return null
   return {
     source: result.source,
     captions: result.captions.map((c) => c.language),
+    referer: result.headers.Referer,
   }
 }
 
