@@ -11,6 +11,7 @@ import { Image } from 'expo-image'
 import { SymbolView } from 'expo-symbols'
 import { tmdb, backdropUrl, titleOf, yearOf, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
+import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 
 export default function TitleScreen() {
   const router = useRouter()
@@ -73,12 +74,12 @@ export default function TitleScreen() {
                 {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
               </View>
 
-              <Pressable style={styles.playButton} onPress={play}>
-                <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                <Text style={styles.playText}>
-                  {isTv ? 'Reproducir T1:E1' : 'Reproducir'}
-                </Text>
-              </Pressable>
+              {!isTv && (
+                <Pressable style={styles.playButton} onPress={play}>
+                  <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+                  <Text style={styles.playText}>Reproducir</Text>
+                </Pressable>
+              )}
 
               {data.genres?.length ? (
                 <Text style={styles.genres}>
@@ -87,6 +88,14 @@ export default function TitleScreen() {
               ) : null}
 
               <Text style={styles.overview}>{data.overview || 'Sin sinopsis.'}</Text>
+
+              {isTv && data.seasons?.length ? (
+                <SeasonEpisodes
+                  tvId={id}
+                  title={titleOf(data)}
+                  seasons={data.seasons}
+                />
+              ) : null}
             </View>
           </>
         )}

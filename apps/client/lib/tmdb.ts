@@ -49,6 +49,23 @@ export type MediaDetails = MediaItem & {
   tagline?: string
 }
 
+export type Episode = {
+  id: number
+  episode_number: number
+  name: string
+  overview: string
+  still_path: string | null
+  runtime: number | null
+  air_date: string | null
+}
+
+export type SeasonDetail = {
+  id: number
+  name: string
+  season_number: number
+  episodes: Episode[]
+}
+
 export const tmdb = {
   home: () => api<HomeData>('/tmdb/home'),
   movies: () =>
@@ -59,6 +76,12 @@ export const tmdb = {
     api<Paged<MediaItem>>(`/tmdb/search?q=${encodeURIComponent(q)}`),
   movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
   tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
+  season: (id: string, season: number) =>
+    api<SeasonDetail>(`/tmdb/tv/${id}/season/${season}`),
+}
+
+export function stillUrl(path: string | null, size: 'w300' = 'w300') {
+  return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
 export function yearOf(item: MediaItem) {
