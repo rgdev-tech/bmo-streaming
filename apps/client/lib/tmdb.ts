@@ -116,6 +116,12 @@ export const tmdb = {
   tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
   season: (id: string, season: number) =>
     api<SeasonDetail>(`/tmdb/tv/${id}/season/${season}`),
+  logo: (type: 'movie' | 'tv', id: number) =>
+    api<{ logo: string | null }>(`/tmdb/images/${type}/${id}`),
+}
+
+export function logoUrl(path: string | null, size: 'w500' = 'w500') {
+  return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
 export function stillUrl(path: string | null, size: 'w300' = 'w300') {

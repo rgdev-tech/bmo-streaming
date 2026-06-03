@@ -3,7 +3,8 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
-import { type MediaItem, backdropUrl, titleOf, isUpcoming } from '@/lib/tmdb'
+import { useState, useEffect } from 'react'
+import { tmdb, type MediaItem, backdropUrl, titleOf, isUpcoming, logoUrl } from '@/lib/tmdb'
 
 const { width } = Dimensions.get('window')
 const HERO_HEIGHT = width * 1.25
@@ -13,6 +14,18 @@ export function Hero({ item }: { item: MediaItem }) {
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
   const bg = backdropUrl(item.backdrop_path, 'w1280')
   const upcoming = isUpcoming(item)
+
+  const [logo, setLogo] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    tmdb
+      .logo(isTv ? 'tv' : 'movie', item.id)
+      .then((r) => !cancelled && setLogo(logoUrl(r.logo)))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [item.id, isTv])
 
   function open() {
     router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)
@@ -46,9 +59,18 @@ export function Hero({ item }: { item: MediaItem }) {
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>
-          {titleOf(item)}
-        </Text>
+        {logo ? (
+          <Image
+            source={logo}
+            style={styles.logo}
+            contentFit="contain"
+            transition={300}
+          />
+        ) : (
+          <Text style={styles.title} numberOfLines={2}>
+            {titleOf(item)}
+          </Text>
+        )}
         <Text style={styles.overview} numberOfLines={2}>
           {item.overview}
         </Text>
@@ -87,6 +109,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   content: { position: 'absolute', bottom: 24, left: 0, right: 0, paddingHorizontal: 20 },
+  logo: {
+    width: width * 0.7,
+    height: 90,
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
   title: {
     color: '#fff',
     fontSize: 32,

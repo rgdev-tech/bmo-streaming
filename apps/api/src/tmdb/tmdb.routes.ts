@@ -44,6 +44,22 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     return { netflix, appletv, hbo, disney, prime }
   })
 
+  // Logo (PNG) del título para el hero — prioriza español, luego inglés
+  .get(
+    '/images/:type/:id',
+    async ({ params }) => {
+      const type = params.type === 'tv' ? 'tv' : 'movie'
+      const data: any = await tmdbService.images(type, Number(params.id))
+      const logos: any[] = data?.logos ?? []
+      const pick =
+        logos.find((l) => l.iso_639_1 === 'es') ??
+        logos.find((l) => l.iso_639_1 === 'en') ??
+        logos[0]
+      return { logo: pick?.file_path ?? null }
+    },
+    { params: t.Object({ type: t.String(), id: t.String() }) }
+  )
+
   // Búsqueda
   .get(
     '/search',
