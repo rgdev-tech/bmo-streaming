@@ -5,22 +5,26 @@ import { type MediaItem, posterUrl, titleOf } from '@/lib/tmdb'
 
 const CARD_WIDTH = 124
 
-export function PosterCard({ item }: { item: MediaItem }) {
+export function PosterCard({ item, width }: { item: MediaItem; width?: number }) {
   const router = useRouter()
   const uri = posterUrl(item.poster_path)
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
 
+  // En cuadrícula se pasa un ancho; en fila usa el ancho fijo
+  const cardStyle = width != null ? { width, marginRight: 0 } : null
+  const posterStyle = width != null ? { width, height: width * 1.5 } : null
+
   return (
     <Pressable
-      style={styles.card}
+      style={[styles.card, cardStyle]}
       onPress={() =>
         router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)
       }
     >
       {uri ? (
-        <Image source={uri} style={styles.poster} contentFit="cover" transition={200} />
+        <Image source={uri} style={[styles.poster, posterStyle]} contentFit="cover" transition={200} />
       ) : (
-        <View style={[styles.poster, styles.placeholder]}>
+        <View style={[styles.poster, posterStyle, styles.placeholder]}>
           <Text style={styles.placeholderText} numberOfLines={3}>
             {titleOf(item)}
           </Text>

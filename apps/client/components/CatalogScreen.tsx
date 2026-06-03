@@ -7,6 +7,7 @@ import {
   FlatList,
   ActivityIndicator,
   StyleSheet,
+  Dimensions,
 } from 'react-native'
 import { Stack } from 'expo-router'
 import { BlurView } from 'expo-blur'
@@ -15,6 +16,13 @@ import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from './PosterRow'
 import { PosterCard } from './PosterCard'
 import type { CatalogData, MediaItem } from '@/lib/tmdb'
+
+const GRID_GAP = 12
+const GRID_PAD = 20
+// Math.floor para dejar holgura: si da exacto, el subpíxel desborda la 3ª columna
+const GRID_CARD = Math.floor(
+  (Dimensions.get('window').width - GRID_PAD * 2 - GRID_GAP * 2) / 3
+)
 
 export function CatalogScreen({
   brand,
@@ -101,7 +109,11 @@ export function CatalogScreen({
       {selected ? (
         <View style={styles.grid}>
           {selected.map((item) => (
-            <PosterCard key={item.id} item={{ ...item, media_type: kind } as MediaItem} />
+            <PosterCard
+              key={item.id}
+              item={{ ...item, media_type: kind } as MediaItem}
+              width={GRID_CARD}
+            />
           ))}
         </View>
       ) : (
@@ -144,8 +156,8 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    gap: GRID_GAP,
+    paddingHorizontal: GRID_PAD,
     paddingTop: 12,
     paddingBottom: 120,
   },
