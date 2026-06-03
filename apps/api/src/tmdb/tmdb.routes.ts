@@ -68,6 +68,11 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     return { netflix, appletv, hbo, disney, prime }
   })
 
+  // Detalle de persona (actor) con filmografía
+  .get('/person/:id', ({ params }) => tmdbService.personDetails(Number(params.id)), {
+    params: t.Object({ id: t.String() }),
+  })
+
   // Logo (PNG) del título para el hero — prioriza español, luego inglés
   .get(
     '/images/:type/:id',

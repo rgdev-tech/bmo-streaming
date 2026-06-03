@@ -1,8 +1,10 @@
-import { View, Text, FlatList, StyleSheet } from 'react-native'
+import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
+import { useRouter } from 'expo-router'
 import { type CastMember, profileUrl } from '@/lib/tmdb'
 
 export function CastRow({ cast }: { cast: CastMember[] }) {
+  const router = useRouter()
   const people = cast.slice(0, 15)
   if (!people.length) return null
 
@@ -18,7 +20,10 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
         renderItem={({ item }) => {
           const img = profileUrl(item.profile_path)
           return (
-            <View style={styles.person}>
+            <Pressable
+              style={styles.person}
+              onPress={() => router.push(`/person/${item.id}` as never)}
+            >
               {img ? (
                 <Image source={img} style={styles.photo} contentFit="cover" transition={150} />
               ) : (
@@ -28,7 +33,7 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
               )}
               <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
               <Text style={styles.character} numberOfLines={1}>{item.character}</Text>
-            </View>
+            </Pressable>
           )
         }}
       />

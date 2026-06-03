@@ -83,4 +83,8 @@ export const tmdbService = {
   // Logos (PNG transparente) del título, en varios idiomas
   images: (type: 'movie' | 'tv', id: number) =>
     tmdb(`/${type}/${id}/images`, { include_image_language: 'es,en,null' }),
+
+  // Persona (actor/director) + su filmografía
+  personDetails: (id: number) =>
+    tmdb(`/person/${id}`, { append_to_response: 'combined_credits' }),
 }

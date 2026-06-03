@@ -8,6 +8,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ contentStyle: { backgroundColor: '#000' } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="title/[type]/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="person/[id]" options={{ headerShown: false }} />
         <Stack.Screen
           name="player"
           options={{

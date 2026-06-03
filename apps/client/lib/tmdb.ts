@@ -66,8 +66,20 @@ export type MediaDetails = MediaItem & {
   similar?: Paged<MediaItem>
 }
 
-export function profileUrl(path: string | null, size: 'w185' = 'w185') {
+export function profileUrl(path: string | null, size: 'w185' | 'h632' = 'w185') {
   return path ? `${IMG_BASE}/${size}${path}` : null
+}
+
+export type PersonCredit = MediaItem & { character?: string }
+export type PersonDetails = {
+  id: number
+  name: string
+  biography: string
+  profile_path: string | null
+  birthday: string | null
+  place_of_birth: string | null
+  known_for_department: string
+  combined_credits: { cast: PersonCredit[] }
 }
 
 // Busca el mejor tráiler de YouTube (Trailer > Teaser)
@@ -124,6 +136,7 @@ export const tmdb = {
     api<SeasonDetail>(`/tmdb/tv/${id}/season/${season}`),
   logo: (type: 'movie' | 'tv', id: number) =>
     api<{ logo: string | null }>(`/tmdb/images/${type}/${id}`),
+  person: (id: string) => api<PersonDetails>(`/tmdb/person/${id}`),
 }
 
 export function logoUrl(path: string | null, size: 'w500' = 'w500') {
