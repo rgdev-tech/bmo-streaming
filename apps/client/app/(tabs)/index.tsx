@@ -1,12 +1,25 @@
+import { useCallback, useState } from 'react'
 import { ScrollView, View, ActivityIndicator, Text, StyleSheet } from 'react-native'
+import { useFocusEffect, useRouter } from 'expo-router'
 import { tmdb } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from '@/components/PosterRow'
 import { HeroCarousel } from '@/components/HeroCarousel'
+import { ContinueRow } from '@/components/ContinueRow'
+import { getContinueWatching, type Progress } from '@/lib/library'
 
 export default function HomeScreen() {
   const { data, loading, error } = useAsync(() => tmdb.home())
   const { data: collections } = useAsync(() => tmdb.collections())
+
+  const router = useRouter()
+
+  // Se recarga al volver a la pestaña (refleja lo que acabas de ver)
+  const [watching, setWatching] = useState<Progress[]>([])
+  const loadWatching = useCallback(() => {
+    getContinueWatching().then(setWatching)
+  }, [])
+  useFocusEffect(loadWatching)
 
   if (loading) {
     return (
@@ -29,6 +42,11 @@ export default function HomeScreen() {
       <HeroCarousel items={data.trending.results} />
 
       <View style={styles.rows}>
+        <ContinueRow
+          items={watching}
+          onChange={loadWatching}
+          onSeeAll={() => router.navigate('/library')}
+        />
         <PosterRow title="Tendencias" items={data.trending.results} />
 
         {collections && (

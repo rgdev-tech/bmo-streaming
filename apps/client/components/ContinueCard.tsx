@@ -1,12 +1,30 @@
-import { Pressable, View, Text, StyleSheet } from 'react-native'
+import { Pressable, View, Text, StyleSheet, Alert } from 'react-native'
 import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
+import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { backdropUrl, posterUrl } from '@/lib/tmdb'
-import type { Progress } from '@/lib/library'
+import { removeProgress, type Progress } from '@/lib/library'
 
-const CARD_WIDTH = 200
+const CARD_WIDTH = 300
 
-export function ContinueCard({ item }: { item: Progress }) {
+function remainingLabel(p: Progress) {
+  const rem = Math.max(0, p.duration - p.position)
+  const mins = Math.round(rem / 60)
+  const time = mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`
+  if (p.media_type === 'tv' && p.season) {
+    return `T${p.season}, E${p.episode} · ${time}`
+  }
+  return time
+}
+
+export function ContinueCard({
+  item,
+  onRemove,
+}: {
+  item: Progress
+  onRemove?: () => void
+}) {
   const router = useRouter()
   const img = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path)
   const ratio = item.duration > 0 ? item.position / item.duration : 0
@@ -27,65 +45,80 @@ export function ContinueCard({ item }: { item: Progress }) {
     })
   }
 
+  function more() {
+    Alert.alert(item.title, undefined, [
+      {
+        text: 'Quitar de Seguir viendo',
+        style: 'destructive',
+        onPress: async () => {
+          await removeProgress(item.id, item.media_type)
+          onRemove?.()
+        },
+      },
+      { text: 'Cancelar', style: 'cancel' },
+    ])
+  }
+
   return (
     <Pressable style={styles.card} onPress={resume}>
-      <View style={styles.thumbWrap}>
-        {img ? (
-          <Image source={img} style={styles.thumb} contentFit="cover" transition={150} />
-        ) : (
-          <View style={[styles.thumb, styles.empty]} />
-        )}
-        <View style={styles.playOverlay}>
-          <Text style={styles.playIcon}>▶</Text>
+      {img ? (
+        <Image source={img} style={styles.thumb} contentFit="cover" transition={150} />
+      ) : (
+        <View style={[styles.thumb, styles.empty]} />
+      )}
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.85)']}
+        style={styles.overlay}
+      />
+
+      <View style={styles.bottom}>
+        <View style={styles.left}>
+          <SymbolView name="play.fill" tintColor="#fff" style={styles.playIcon} />
+          <View style={styles.track}>
+            <View style={[styles.fill, { width: `${Math.round(ratio * 100)}%` }]} />
+          </View>
+          <Text style={styles.time} numberOfLines={1}>
+            {remainingLabel(item)}
+          </Text>
         </View>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${Math.round(ratio * 100)}%` }]} />
-        </View>
+        <Pressable onPress={more} hitSlop={12}>
+          <SymbolView name="ellipsis" tintColor="#fff" style={styles.more} />
+        </Pressable>
       </View>
-      <Text style={styles.title} numberOfLines={1}>
-        {item.title}
-        {item.media_type === 'tv' && item.season
-          ? `  ·  T${item.season}:E${item.episode}`
-          : ''}
-      </Text>
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
-  card: { width: CARD_WIDTH, marginRight: 12 },
-  thumbWrap: { position: 'relative' },
-  thumb: {
+  card: {
     width: CARD_WIDTH,
-    height: CARD_WIDTH * 0.56,
-    borderRadius: 10,
+    height: CARD_WIDTH * 0.58,
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginRight: 12,
     backgroundColor: '#1C1C1E',
   },
+  thumb: { ...StyleSheet.absoluteFillObject },
   empty: { backgroundColor: '#1C1C1E' },
-  playOverlay: {
+  overlay: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '55%' },
+  bottom: {
     position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
+    left: 12,
+    right: 12,
+    bottom: 10,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
-  playIcon: {
-    color: '#fff',
-    fontSize: 16,
-    textShadowColor: 'rgba(0,0,0,0.6)',
-    textShadowRadius: 6,
-  },
-  progressTrack: {
-    position: 'absolute',
-    bottom: 6,
-    left: 8,
-    right: 8,
+  left: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  playIcon: { width: 13, height: 13 },
+  track: {
+    width: 54,
     height: 3,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
   },
-  progressFill: { height: 3, borderRadius: 2, backgroundColor: '#fff' },
-  title: { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '500', marginTop: 6 },
+  fill: { height: 3, borderRadius: 2, backgroundColor: '#fff' },
+  time: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  more: { width: 20, height: 20 },
 })

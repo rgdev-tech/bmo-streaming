@@ -1,12 +1,5 @@
 import { useCallback, useState } from 'react'
-import {
-  ScrollView,
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  Dimensions,
-} from 'react-native'
+import { ScrollView, View, Text, StyleSheet, Dimensions } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import {
   getMyList,
@@ -15,7 +8,7 @@ import {
   type Progress,
 } from '@/lib/library'
 import { PosterCard } from '@/components/PosterCard'
-import { ContinueCard } from '@/components/ContinueCard'
+import { ContinueRow } from '@/components/ContinueRow'
 import type { MediaItem } from '@/lib/tmdb'
 
 const GRID_GAP = 12
@@ -28,12 +21,11 @@ export default function LibraryScreen() {
   const [list, setList] = useState<LibraryItem[]>([])
   const [watching, setWatching] = useState<Progress[]>([])
 
-  useFocusEffect(
-    useCallback(() => {
-      getMyList().then(setList)
-      getContinueWatching().then(setWatching)
-    }, [])
-  )
+  const reload = useCallback(() => {
+    getMyList().then(setList)
+    getContinueWatching().then(setWatching)
+  }, [])
+  useFocusEffect(reload)
 
   const empty = list.length === 0 && watching.length === 0
 
@@ -49,19 +41,7 @@ export default function LibraryScreen() {
         </View>
       )}
 
-      {watching.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.heading}>Seguir viendo</Text>
-          <FlatList
-            horizontal
-            data={watching}
-            keyExtractor={(i) => `${i.media_type}-${i.id}`}
-            renderItem={({ item }) => <ContinueCard item={item} />}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.row}
-          />
-        </View>
-      )}
+      <ContinueRow items={watching} onChange={reload} />
 
       {list.length > 0 && (
         <View style={styles.section}>
