@@ -41,6 +41,18 @@ export const tmdbService = {
   searchMulti: (query: string, page = 1) =>
     tmdb('/search/multi', { query, page, include_adult: 'false' }),
 
+  trendingMovies: () => tmdb('/trending/movie/week'),
+  trendingSeries: () => tmdb('/trending/tv/week'),
+
+  // Descubrir por género
+  discoverByGenre: (genreId: number, type: 'movie' | 'tv' = 'movie', page = 1) =>
+    tmdb(`/discover/${type}`, {
+      with_genres: genreId,
+      sort_by: 'popularity.desc',
+      page,
+      'vote_count.gte': 100,
+    }),
+
   // Descubrir por plataforma (watch provider)
   discoverByProvider: (
     providerId: number,

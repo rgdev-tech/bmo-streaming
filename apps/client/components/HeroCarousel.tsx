@@ -1,27 +1,63 @@
-import { useRef, useState, useEffect } from 'react'
-import { FlatList, View, StyleSheet, Dimensions } from 'react-native'
+import { useRef, useEffect, useMemo, useCallback, memo } from 'react'
+import {
+  FlatList,
+  View,
+  StyleSheet,
+  Dimensions,
+  Animated,
+  type ListRenderItem,
+} from 'react-native'
 import { Hero } from './Hero'
 import { type MediaItem } from '@/lib/tmdb'
 
 const { width } = Dimensions.get('window')
+const AUTO_MS = 6000
+
+const HeroSlide = memo(Hero)
 
 export function HeroCarousel({ items }: { items: MediaItem[] }) {
   const ref = useRef<FlatList<MediaItem>>(null)
-  const [index, setIndex] = useState(0)
-  const data = items.filter((i) => i.backdrop_path).slice(0, 6)
+  const scrollX = useRef(new Animated.Value(0)).current
+  const dir = useRef(1)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-avance cada 6s
-  useEffect(() => {
-    if (data.length < 2) return
-    const t = setInterval(() => {
-      setIndex((prev) => {
-        const next = (prev + 1) % data.length
+  const data = useMemo(
+    () => items.filter((i) => i.backdrop_path).slice(0, 6),
+    [items]
+  )
+
+  const clear = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current)
+  }, [])
+
+  const schedule = useCallback(
+    (from: number) => {
+      clear()
+      if (data.length < 2) return
+      timer.current = setTimeout(() => {
+        let next = from + dir.current
+        if (next >= data.length) {
+          dir.current = -1
+          next = from - 1
+        } else if (next < 0) {
+          dir.current = 1
+          next = from + 1
+        }
         ref.current?.scrollToIndex({ index: next, animated: true })
-        return next
-      })
-    }, 6000)
-    return () => clearInterval(t)
-  }, [data.length])
+      }, AUTO_MS)
+    },
+    [data.length, clear]
+  )
+
+  useEffect(() => {
+    schedule(0)
+    return clear
+  }, [schedule, clear])
+
+  const renderItem = useCallback<ListRenderItem<MediaItem>>(
+    ({ item }) => <HeroSlide item={item} />,
+    []
+  )
 
   return (
     <View>
@@ -32,19 +68,43 @@ export function HeroCarousel({ items }: { items: MediaItem[] }) {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         keyExtractor={(i) => String(i.id)}
-        renderItem={({ item }) => <Hero item={item} />}
-        onMomentumScrollEnd={(e) =>
-          setIndex(Math.round(e.nativeEvent.contentOffset.x / width))
-        }
+        renderItem={renderItem}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: false }
+        )}
+        scrollEventThrottle={16}
+        onScrollBeginDrag={clear}
+        onMomentumScrollEnd={(e) => {
+          schedule(Math.round(e.nativeEvent.contentOffset.x / width))
+        }}
         getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+        windowSize={3}
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        removeClippedSubviews
+        decelerationRate="fast"
       />
       <View style={styles.dots}>
-        {data.map((item, i) => (
-          <View
-            key={item.id}
-            style={[styles.dot, i === index && styles.dotActive]}
-          />
-        ))}
+        {data.map((item, i) => {
+          const inputRange = [(i - 1) * width, i * width, (i + 1) * width]
+          const dotWidth = scrollX.interpolate({
+            inputRange,
+            outputRange: [6, 20, 6],
+            extrapolate: 'clamp',
+          })
+          const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.3, 1, 0.3],
+            extrapolate: 'clamp',
+          })
+          return (
+            <Animated.View
+              key={item.id}
+              style={[styles.dot, { width: dotWidth, opacity }]}
+            />
+          )
+        })}
       </View>
     </View>
   )
@@ -58,10 +118,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   dot: {
-    width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: '#fff',
   },
-  dotActive: { backgroundColor: '#fff', width: 18 },
 })

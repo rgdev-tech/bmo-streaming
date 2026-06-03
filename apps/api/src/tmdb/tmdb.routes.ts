@@ -14,22 +14,46 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     return { trending, popularMovies, popularSeries, topMovies }
   })
 
-  // Películas
+  // Películas: tendencias + populares + mejor valoradas + filas por género
   .get('/movies', async () => {
-    const [popular, topRated] = await Promise.all([
+    const GENRES: [string, number][] = [
+      ['Acción', 28],
+      ['Comedia', 35],
+      ['Terror', 27],
+      ['Ciencia ficción', 878],
+      ['Animación', 16],
+      ['Drama', 18],
+      ['Romance', 10749],
+    ]
+    const [trending, popular, topRated, ...genreResults] = await Promise.all([
+      tmdbService.trendingMovies(),
       tmdbService.popularMovies(),
       tmdbService.topRatedMovies(),
+      ...GENRES.map(([, id]) => tmdbService.discoverByGenre(id, 'movie')),
     ])
-    return { popular, topRated }
+    const genres = GENRES.map(([name], i) => ({ name, results: (genreResults[i] as any).results }))
+    return { trending, popular, topRated, genres }
   })
 
-  // Series
+  // Series: tendencias + populares + mejor valoradas + filas por género
   .get('/series', async () => {
-    const [popular, topRated] = await Promise.all([
+    const GENRES: [string, number][] = [
+      ['Drama', 18],
+      ['Comedia', 35],
+      ['Crimen', 80],
+      ['Sci-Fi y Fantasía', 10765],
+      ['Acción y Aventura', 10759],
+      ['Animación', 16],
+      ['Misterio', 9648],
+    ]
+    const [trending, popular, topRated, ...genreResults] = await Promise.all([
+      tmdbService.trendingSeries(),
       tmdbService.popularSeries(),
       tmdbService.topRatedSeries(),
+      ...GENRES.map(([, id]) => tmdbService.discoverByGenre(id, 'tv')),
     ])
-    return { popular, topRated }
+    const genres = GENRES.map(([name], i) => ({ name, results: (genreResults[i] as any).results }))
+    return { trending, popular, topRated, genres }
   })
 
   // Colecciones por plataforma (Netflix, Apple TV+, HBO Max, Disney+, Prime)

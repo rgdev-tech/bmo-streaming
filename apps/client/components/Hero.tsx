@@ -9,7 +9,7 @@ import { tmdb, type MediaItem, backdropUrl, titleOf, isUpcoming, logoUrl } from 
 const { width } = Dimensions.get('window')
 const HERO_HEIGHT = width * 1.25
 
-export function Hero({ item }: { item: MediaItem }) {
+export function Hero({ item, brand = 'BMO' }: { item: MediaItem; brand?: string }) {
   const router = useRouter()
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
   const bg = backdropUrl(item.backdrop_path, 'w1280')
@@ -55,7 +55,7 @@ export function Hero({ item }: { item: MediaItem }) {
       />
 
       <View style={styles.brand}>
-        <Text style={styles.brandText}>BMO</Text>
+        <Text style={styles.brandText}>{brand}</Text>
       </View>
 
       <View style={styles.content}>

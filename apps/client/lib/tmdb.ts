@@ -103,13 +103,19 @@ export type Collections = {
   prime: Paged<MediaItem>
 }
 
+export type GenreRow = { name: string; results: MediaItem[] }
+export type CatalogData = {
+  trending: Paged<MediaItem>
+  popular: Paged<MediaItem>
+  topRated: Paged<MediaItem>
+  genres: GenreRow[]
+}
+
 export const tmdb = {
   home: () => api<HomeData>('/tmdb/home'),
   collections: () => api<Collections>('/tmdb/collections'),
-  movies: () =>
-    api<{ popular: Paged<MediaItem>; topRated: Paged<MediaItem> }>('/tmdb/movies'),
-  series: () =>
-    api<{ popular: Paged<MediaItem>; topRated: Paged<MediaItem> }>('/tmdb/series'),
+  movies: () => api<CatalogData>('/tmdb/movies'),
+  series: () => api<CatalogData>('/tmdb/series'),
   search: (q: string) =>
     api<Paged<MediaItem>>(`/tmdb/search?q=${encodeURIComponent(q)}`),
   movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
