@@ -32,6 +32,18 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     return { popular, topRated }
   })
 
+  // Colecciones por plataforma (Netflix, Apple TV+, HBO Max, Disney+, Prime)
+  .get('/collections', async () => {
+    const [netflix, appletv, hbo, disney, prime] = await Promise.all([
+      tmdbService.discoverByProvider(8), // Netflix
+      tmdbService.discoverByProvider(350, 'tv'), // Apple TV+ (más series)
+      tmdbService.discoverByProvider(1899), // HBO Max / Max
+      tmdbService.discoverByProvider(337), // Disney+
+      tmdbService.discoverByProvider(9), // Amazon Prime Video
+    ])
+    return { netflix, appletv, hbo, disney, prime }
+  })
+
   // Búsqueda
   .get(
     '/search',

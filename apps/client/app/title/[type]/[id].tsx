@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import { SymbolView } from 'expo-symbols'
-import { tmdb, backdropUrl, titleOf, yearOf, type MediaDetails } from '@/lib/tmdb'
+import { tmdb, backdropUrl, titleOf, yearOf, isReleased, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 
@@ -74,12 +74,20 @@ export default function TitleScreen() {
                 {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
               </View>
 
-              {!isTv && (
-                <Pressable style={styles.playButton} onPress={play}>
-                  <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                  <Text style={styles.playText}>Reproducir</Text>
-                </Pressable>
-              )}
+              {!isTv &&
+                (isReleased(data.release_date) ? (
+                  <Pressable style={styles.playButton} onPress={play}>
+                    <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+                    <Text style={styles.playText}>Reproducir</Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.soonButton}>
+                    <SymbolView name="clock" tintColor="rgba(255,255,255,0.7)" style={styles.playIcon} />
+                    <Text style={styles.soonText}>
+                      Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
+                    </Text>
+                  </View>
+                ))}
 
               {data.genres?.length ? (
                 <Text style={styles.genres}>
@@ -121,6 +129,17 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 8,
   },
+  soonButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 20,
+    gap: 8,
+  },
+  soonText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
   playIcon: { width: 16, height: 16 },
   playText: { color: '#000', fontSize: 16, fontWeight: '700' },
   genres: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 20 },

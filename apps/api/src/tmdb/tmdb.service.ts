@@ -41,6 +41,19 @@ export const tmdbService = {
   searchMulti: (query: string, page = 1) =>
     tmdb('/search/multi', { query, page, include_adult: 'false' }),
 
+  // Descubrir por plataforma (watch provider)
+  discoverByProvider: (
+    providerId: number,
+    type: 'movie' | 'tv' = 'movie',
+    region = 'US'
+  ) =>
+    tmdb(`/discover/${type}`, {
+      with_watch_providers: providerId,
+      watch_region: region,
+      sort_by: 'popularity.desc',
+      watch_monetization_types: 'flatrate',
+    }),
+
   // Detalle
   movieDetails: (id: number) =>
     tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,similar' }),

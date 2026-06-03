@@ -24,7 +24,6 @@ export default function PlayerScreen() {
   const isTv = type === 'tv'
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [langs, setLangs] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -32,11 +31,7 @@ export default function PlayerScreen() {
       ? stream.resolveTv(id, Number(season ?? 1), Number(episode ?? 1))
       : stream.resolveMovie(id)
     run
-      .then((info) => {
-        if (cancelled) return
-        setLangs(info.captions)
-        setReady(true)
-      })
+      .then(() => !cancelled && setReady(true))
       .catch((e) => !cancelled && setError(String(e)))
     return () => {
       cancelled = true
@@ -69,20 +64,23 @@ export default function PlayerScreen() {
 
       {error && (
         <View style={styles.center}>
-          <SymbolView name="exclamationmark.triangle" tintColor="#FF6B6B" style={styles.errIcon} />
-          <Text style={styles.errText}>No pude obtener el stream</Text>
+          <SymbolView name="film.stack" tintColor="rgba(255,255,255,0.4)" style={styles.errIcon} />
+          <Text style={styles.errText}>No disponible todavía</Text>
+          <Text style={styles.errSub}>
+            Este título aún no tiene una fuente para reproducir.
+          </Text>
           <Pressable style={styles.retry} onPress={() => router.back()}>
             <Text style={styles.retryText}>Volver</Text>
           </Pressable>
         </View>
       )}
 
-      {ready && <Player uri={masterUrl} langs={langs} />}
+      {ready && <Player uri={masterUrl} />}
     </View>
   )
 }
 
-function Player({ uri, langs }: { uri: string; langs: string[] }) {
+function Player({ uri }: { uri: string }) {
   const player = useVideoPlayer(
     { uri, headers: STREAM_HEADERS },
     (p) => {
@@ -91,22 +89,14 @@ function Player({ uri, langs }: { uri: string; langs: string[] }) {
   )
 
   return (
-    <>
-      <VideoView
-        player={player}
-        style={styles.video}
-        allowsFullscreen
-        allowsPictureInPicture
-        nativeControls
-        contentFit="contain"
-      />
-      {langs.length > 0 && (
-        <Text style={styles.subsHint}>
-          {langs.length} subtítulo{langs.length > 1 ? 's' : ''} · toca el ícono de
-          subtítulos en los controles
-        </Text>
-      )}
-    </>
+    <VideoView
+      player={player}
+      style={styles.video}
+      allowsFullscreen
+      allowsPictureInPicture
+      nativeControls
+      contentFit="contain"
+    />
   )
 }
 
@@ -122,17 +112,15 @@ const styles = StyleSheet.create({
     marginTop: 16,
     textAlign: 'center',
   },
-  subsHint: {
-    position: 'absolute',
-    bottom: 40,
-    alignSelf: 'center',
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    paddingHorizontal: 20,
-    textAlign: 'center',
-  },
   errIcon: { width: 48, height: 48 },
-  errText: { color: '#fff', fontSize: 17, fontWeight: '600', marginTop: 16 },
+  errText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
+  errSub: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
   retry: {
     marginTop: 24,
     backgroundColor: '#fff',

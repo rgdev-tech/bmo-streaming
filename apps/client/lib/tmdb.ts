@@ -66,8 +66,17 @@ export type SeasonDetail = {
   episodes: Episode[]
 }
 
+export type Collections = {
+  netflix: Paged<MediaItem>
+  appletv: Paged<MediaItem>
+  hbo: Paged<MediaItem>
+  disney: Paged<MediaItem>
+  prime: Paged<MediaItem>
+}
+
 export const tmdb = {
   home: () => api<HomeData>('/tmdb/home'),
+  collections: () => api<Collections>('/tmdb/collections'),
   movies: () =>
     api<{ popular: Paged<MediaItem>; topRated: Paged<MediaItem> }>('/tmdb/movies'),
   series: () =>
@@ -87,6 +96,19 @@ export function stillUrl(path: string | null, size: 'w300' = 'w300') {
 export function yearOf(item: MediaItem) {
   const date = item.release_date ?? item.first_air_date ?? ''
   return date.slice(0, 4)
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// Estrenado = tiene fecha y ya pasó. Sin fecha o fecha futura = próximamente.
+export function isReleased(date?: string | null) {
+  return !!date && date <= todayISO()
+}
+
+export function isUpcoming(item: MediaItem) {
+  return !isReleased(item.release_date ?? item.first_air_date)
 }
 
 export function titleOf(item: MediaItem) {

@@ -9,7 +9,7 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
-import { tmdb, stillUrl, type Season, type Episode } from '@/lib/tmdb'
+import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 
 export function SeasonEpisodes({
@@ -81,22 +81,26 @@ function EpisodeRow({
 }) {
   const router = useRouter()
   const still = stillUrl(ep.still_path)
+  const released = isReleased(ep.air_date)
+
+  function open() {
+    router.push({
+      pathname: '/player',
+      params: {
+        type: 'tv',
+        id: tvId,
+        season: String(season),
+        episode: String(ep.episode_number),
+        title: `${title} · T${season}:E${ep.episode_number}`,
+      },
+    })
+  }
 
   return (
     <Pressable
-      style={styles.epRow}
-      onPress={() =>
-        router.push({
-          pathname: '/player',
-          params: {
-            type: 'tv',
-            id: tvId,
-            season: String(season),
-            episode: String(ep.episode_number),
-            title: `${title} · T${season}:E${ep.episode_number}`,
-          },
-        })
-      }
+      style={[styles.epRow, !released && styles.epRowSoon]}
+      onPress={released ? open : undefined}
+      disabled={!released}
     >
       <View style={styles.thumbWrap}>
         {still ? (
@@ -105,14 +109,16 @@ function EpisodeRow({
           <View style={[styles.thumb, styles.thumbEmpty]} />
         )}
         <View style={styles.playBadge}>
-          <Text style={styles.playBadgeIcon}>▶</Text>
+          <Text style={styles.playBadgeIcon}>{released ? '▶' : '○'}</Text>
         </View>
       </View>
       <View style={styles.epInfo}>
         <Text style={styles.epTitle} numberOfLines={1}>
           {ep.episode_number}. {ep.name}
         </Text>
-        {ep.overview ? (
+        {!released ? (
+          <Text style={styles.epSoon}>Próximamente</Text>
+        ) : ep.overview ? (
           <Text style={styles.epOverview} numberOfLines={2}>
             {ep.overview}
           </Text>
@@ -136,6 +142,7 @@ const styles = StyleSheet.create({
   seasonTextActive: { color: '#000' },
   spinner: { marginVertical: 30 },
   epRow: { flexDirection: 'row', marginBottom: 18, gap: 12 },
+  epRowSoon: { opacity: 0.5 },
   thumbWrap: { position: 'relative' },
   thumb: { width: 130, height: 74, borderRadius: 8, backgroundColor: '#1C1C1E' },
   thumbEmpty: { backgroundColor: '#1C1C1E' },
@@ -157,6 +164,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.45)',
     fontSize: 13,
     lineHeight: 18,
+    marginTop: 4,
+  },
+  epSoon: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 13,
+    fontWeight: '600',
     marginTop: 4,
   },
 })

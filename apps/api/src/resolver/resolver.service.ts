@@ -129,6 +129,19 @@ async function scrape(
   const url = playlist || fallbackM3u8
   if (!url) return null
 
+  // Validamos que el playlist tenga video real (vidlink "resuelve" títulos
+  // que no tiene, devolviendo un m3u8 vacío/roto)
+  try {
+    const check = await fetch(url, {
+      headers: { Referer: REFERER, 'User-Agent': UA },
+    })
+    if (!check.ok) return null
+    const text = await check.text()
+    if (!/#EXT-X-STREAM-INF|#EXTINF/.test(text)) return null
+  } catch {
+    return null
+  }
+
   const rawCaptions: any[] = apiJson?.stream?.captions ?? []
   const captions: Caption[] = rawCaptions
     .filter((c) => c?.url && c?.language)
