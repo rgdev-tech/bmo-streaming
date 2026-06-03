@@ -89,6 +89,43 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     { params: t.Object({ type: t.String(), id: t.String() }) }
   )
 
+  // Categorías para la pantalla de Buscar (género + arte representativo)
+  .get('/categories', async () => {
+    const CATS: [string, 'movie' | 'tv', number][] = [
+      ['Acción', 'movie', 28],
+      ['Comedia', 'movie', 35],
+      ['Terror', 'movie', 27],
+      ['Ciencia ficción', 'movie', 878],
+      ['Animación', 'movie', 16],
+      ['Drama', 'movie', 18],
+      ['Crimen', 'tv', 80],
+      ['Romance', 'movie', 10749],
+      ['Aventura', 'movie', 12],
+      ['Documentales', 'movie', 99],
+      ['Familia', 'movie', 10751],
+      ['Suspenso', 'movie', 53],
+    ]
+    const results = await Promise.all(
+      CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))
+    )
+    return CATS.map(([name, type, genreId], i) => {
+      const list = (results[i] as any).results as any[]
+      const art = list.find((x) => x.backdrop_path) ?? list[0]
+      return { name, type, genreId, backdrop_path: art?.backdrop_path ?? null }
+    })
+  })
+
+  // Discover por género (cuadrícula de una categoría)
+  .get(
+    '/discover/:type/:genreId',
+    ({ params }) =>
+      tmdbService.discoverByGenre(
+        Number(params.genreId),
+        params.type === 'tv' ? 'tv' : 'movie'
+      ),
+    { params: t.Object({ type: t.String(), genreId: t.String() }) }
+  )
+
   // Búsqueda
   .get(
     '/search',

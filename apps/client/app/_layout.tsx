@@ -9,6 +9,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="title/[type]/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="person/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="browse/[type]/[id]" options={{ headerShown: false }} />
         <Stack.Screen
           name="player"
           options={{

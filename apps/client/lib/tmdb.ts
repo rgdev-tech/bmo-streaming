@@ -21,9 +21,31 @@ export type MediaItem = {
   media_type?: 'movie' | 'tv' | 'person'
   release_date?: string
   first_air_date?: string
+  genre_ids?: number[]
+}
+
+const GENRE_NAMES: Record<number, string> = {
+  28: 'Acción', 12: 'Aventura', 16: 'Animación', 35: 'Comedia', 80: 'Crimen',
+  99: 'Documental', 18: 'Drama', 10751: 'Familia', 14: 'Fantasía', 36: 'Historia',
+  27: 'Terror', 10402: 'Música', 9648: 'Misterio', 10749: 'Romance',
+  878: 'Ciencia ficción', 53: 'Suspenso', 10752: 'Bélica', 37: 'Western',
+  10759: 'Acción y Aventura', 10762: 'Infantil', 10764: 'Reality',
+  10765: 'Sci-Fi y Fantasía', 10766: 'Telenovela', 10768: 'Guerra y Política',
+}
+
+export function genreNames(ids?: number[], max = 2) {
+  if (!ids) return []
+  return ids.map((id) => GENRE_NAMES[id]).filter(Boolean).slice(0, max)
 }
 
 export type Paged<T> = { results: T[]; page: number; total_pages: number }
+
+export type Category = {
+  name: string
+  type: 'movie' | 'tv'
+  genreId: number
+  backdrop_path: string | null
+}
 
 export type HomeData = {
   trending: Paged<MediaItem>
@@ -130,6 +152,9 @@ export const tmdb = {
   series: () => api<CatalogData>('/tmdb/series'),
   search: (q: string) =>
     api<Paged<MediaItem>>(`/tmdb/search?q=${encodeURIComponent(q)}`),
+  categories: () => api<Category[]>('/tmdb/categories'),
+  discover: (type: 'movie' | 'tv', genreId: string | number) =>
+    api<Paged<MediaItem>>(`/tmdb/discover/${type}/${genreId}`),
   movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
   tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
   season: (id: string, season: number) =>

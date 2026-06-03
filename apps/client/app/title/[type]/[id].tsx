@@ -7,11 +7,13 @@ import {
   StyleSheet,
   ActivityIndicator,
   Pressable,
+  Dimensions,
 } from 'react-native'
 import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import * as WebBrowser from 'expo-web-browser'
-import { tmdb, backdropUrl, titleOf, yearOf, isReleased, trailerKey, type MediaDetails } from '@/lib/tmdb'
+import { tmdb, backdropUrl, logoUrl, titleOf, yearOf, isReleased, trailerKey, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
@@ -47,6 +49,18 @@ export default function TitleScreen() {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
 
+  const [logo, setLogo] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    tmdb
+      .logo(isTv ? 'tv' : 'movie', Number(id))
+      .then((r) => !cancelled && setLogo(logoUrl(r.logo)))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [id, isTv])
+
   async function onToggleList() {
     if (!data) return
     const added = await toggleMyList(toLibraryItem({ ...data, media_type: isTv ? 'tv' : 'movie' }))
@@ -74,29 +88,42 @@ export default function TitleScreen() {
 
         {data && (
           <>
-            {backdropUrl(data.backdrop_path) && (
-              <Image
-                source={backdropUrl(data.backdrop_path)}
-                style={styles.backdrop}
-                contentFit="cover"
-                transition={250}
+            <View style={styles.hero}>
+              {backdropUrl(data.backdrop_path, 'w1280') && (
+                <Image
+                  source={backdropUrl(data.backdrop_path, 'w1280')}
+                  style={styles.heroBg}
+                  contentFit="cover"
+                  transition={250}
+                />
+              )}
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.5)', '#000']}
+                locations={[0, 0.7, 1]}
+                style={styles.heroGradient}
               />
-            )}
+              <View style={styles.heroContent}>
+                {logo ? (
+                  <Image source={logo} style={styles.logo} contentFit="contain" transition={300} />
+                ) : (
+                  <Text style={styles.title} numberOfLines={2}>
+                    {titleOf(data)}
+                  </Text>
+                )}
+                <View style={styles.metaRow}>
+                  {yearOf(data) ? <Text style={styles.meta}>{yearOf(data)}</Text> : null}
+                  {data.vote_average ? (
+                    <Text style={styles.meta}>★ {data.vote_average.toFixed(1)}</Text>
+                  ) : null}
+                  {isTv && data.number_of_seasons ? (
+                    <Text style={styles.meta}>{data.number_of_seasons} temp.</Text>
+                  ) : null}
+                  {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
+                </View>
+              </View>
+            </View>
 
             <View style={styles.body}>
-              <Text style={styles.title}>{titleOf(data)}</Text>
-
-              <View style={styles.metaRow}>
-                {yearOf(data) ? <Text style={styles.meta}>{yearOf(data)}</Text> : null}
-                {data.vote_average ? (
-                  <Text style={styles.meta}>★ {data.vote_average.toFixed(1)}</Text>
-                ) : null}
-                {isTv && data.number_of_seasons ? (
-                  <Text style={styles.meta}>{data.number_of_seasons} temp.</Text>
-                ) : null}
-                {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
-              </View>
-
               {!isTv &&
                 (isReleased(data.release_date) ? (
                   <Pressable style={styles.playButton} onPress={play}>
@@ -164,13 +191,33 @@ export default function TitleScreen() {
   )
 }
 
+const { width } = Dimensions.get('window')
+const HERO_H = width * 0.95
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  backdrop: { width: '100%', height: 240, backgroundColor: '#1C1C1E' },
-  body: { padding: 20 },
-  title: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -0.5 },
-  metaRow: { flexDirection: 'row', gap: 14, marginTop: 8 },
-  meta: { color: 'rgba(255,255,255,0.5)', fontSize: 14, fontWeight: '500' },
+  hero: { width, height: HERO_H, backgroundColor: '#1C1C1E' },
+  heroBg: { ...StyleSheet.absoluteFillObject },
+  heroGradient: { ...StyleSheet.absoluteFillObject },
+  heroContent: {
+    position: 'absolute',
+    bottom: 16,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  logo: { width: width * 0.7, height: 84 },
+  body: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 20 },
+  title: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -0.5,
+    textAlign: 'center',
+  },
+  metaRow: { flexDirection: 'row', gap: 14, marginTop: 10, justifyContent: 'center' },
+  meta: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '500' },
   playButton: {
     flexDirection: 'row',
     alignItems: 'center',
