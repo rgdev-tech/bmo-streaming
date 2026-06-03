@@ -10,9 +10,12 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import { SymbolView } from 'expo-symbols'
-import { tmdb, backdropUrl, titleOf, yearOf, isReleased, type MediaDetails } from '@/lib/tmdb'
+import * as WebBrowser from 'expo-web-browser'
+import { tmdb, backdropUrl, titleOf, yearOf, isReleased, trailerKey, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
+import { CastRow } from '@/components/CastRow'
+import { PosterRow } from '@/components/PosterRow'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 
 export default function TitleScreen() {
@@ -48,6 +51,11 @@ export default function TitleScreen() {
     if (!data) return
     const added = await toggleMyList(toLibraryItem({ ...data, media_type: isTv ? 'tv' : 'movie' }))
     setInList(added)
+  }
+
+  const trailer = trailerKey(data?.videos?.results)
+  function openTrailer() {
+    if (trailer) WebBrowser.openBrowserAsync(`https://www.youtube.com/watch?v=${trailer}`)
   }
 
   return (
@@ -104,14 +112,22 @@ export default function TitleScreen() {
                   </View>
                 ))}
 
-              <Pressable style={styles.listButton} onPress={onToggleList}>
-                <SymbolView
-                  name={inList ? 'checkmark' : 'plus'}
-                  tintColor="#fff"
-                  style={styles.listIcon}
-                />
-                <Text style={styles.listText}>Mi Lista</Text>
-              </Pressable>
+              <View style={styles.secondaryRow}>
+                <Pressable style={styles.secondaryBtn} onPress={onToggleList}>
+                  <SymbolView
+                    name={inList ? 'checkmark' : 'plus'}
+                    tintColor="#fff"
+                    style={styles.listIcon}
+                  />
+                  <Text style={styles.listText}>Mi Lista</Text>
+                </Pressable>
+                {trailer && (
+                  <Pressable style={styles.secondaryBtn} onPress={openTrailer}>
+                    <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />
+                    <Text style={styles.listText}>Tráiler</Text>
+                  </Pressable>
+                )}
+              </View>
 
               {data.genres?.length ? (
                 <Text style={styles.genres}>
@@ -130,7 +146,17 @@ export default function TitleScreen() {
                   backdrop={data.backdrop_path}
                 />
               ) : null}
+
+              {data.credits?.cast?.length ? (
+                <CastRow cast={data.credits.cast} />
+              ) : null}
             </View>
+
+            {data.similar?.results?.length ? (
+              <View style={styles.similar}>
+                <PosterRow title="Similares" items={data.similar.results} />
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -168,13 +194,16 @@ const styles = StyleSheet.create({
   soonText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
   playIcon: { width: 16, height: 16 },
   playText: { color: '#000', fontSize: 16, fontWeight: '700' },
-  listButton: {
+  secondaryRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  secondaryBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 12,
-    marginTop: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   listIcon: { width: 18, height: 18 },
   listText: { color: '#fff', fontSize: 15, fontWeight: '600' },
@@ -185,6 +214,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginTop: 12,
   },
+  similar: { marginTop: 8, marginBottom: 24 },
   spinner: { marginTop: 120 },
   error: { color: '#FF6B6B', textAlign: 'center', marginTop: 120 },
 })

@@ -41,12 +41,41 @@ export type Season = {
   poster_path: string | null
 }
 
+export type CastMember = {
+  id: number
+  name: string
+  character: string
+  profile_path: string | null
+}
+
+export type Video = {
+  key: string
+  site: string
+  type: string
+  name: string
+}
+
 export type MediaDetails = MediaItem & {
   genres: Genre[]
   runtime?: number
   number_of_seasons?: number
   seasons?: Season[]
   tagline?: string
+  credits?: { cast: CastMember[] }
+  videos?: { results: Video[] }
+  similar?: Paged<MediaItem>
+}
+
+export function profileUrl(path: string | null, size: 'w185' = 'w185') {
+  return path ? `${IMG_BASE}/${size}${path}` : null
+}
+
+// Busca el mejor tráiler de YouTube (Trailer > Teaser)
+export function trailerKey(videos?: Video[]): string | null {
+  if (!videos?.length) return null
+  const yt = videos.filter((v) => v.site === 'YouTube')
+  const trailer = yt.find((v) => v.type === 'Trailer') ?? yt.find((v) => v.type === 'Teaser') ?? yt[0]
+  return trailer?.key ?? null
 }
 
 export type Episode = {

@@ -54,11 +54,17 @@ export const tmdbService = {
       watch_monetization_types: 'flatrate',
     }),
 
-  // Detalle
+  // Detalle (videos en es+en para maximizar tráilers disponibles)
   movieDetails: (id: number) =>
-    tmdb(`/movie/${id}`, { append_to_response: 'credits,videos,similar' }),
+    tmdb(`/movie/${id}`, {
+      append_to_response: 'credits,videos,similar',
+      include_video_language: 'es,en',
+    }),
   tvDetails: (id: number) =>
-    tmdb(`/tv/${id}`, { append_to_response: 'credits,videos,similar' }),
+    tmdb(`/tv/${id}`, {
+      append_to_response: 'credits,videos,similar',
+      include_video_language: 'es,en',
+    }),
   tvSeason: (id: number, season: number) =>
     tmdb(`/tv/${id}/season/${season}`),
 }
