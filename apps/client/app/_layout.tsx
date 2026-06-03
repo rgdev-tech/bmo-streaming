@@ -1,73 +1,24 @@
-import { Tabs } from 'expo-router'
-import { Platform } from 'react-native'
-import { BlurView } from 'expo-blur'
+import { NativeTabs, Icon, Label } from 'expo-router/unstable-native-tabs'
 import { StatusBar } from 'expo-status-bar'
-import { SymbolView } from 'expo-symbols'
 
 export default function RootLayout() {
   return (
     <>
       <StatusBar style="light" />
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: '#FFFFFF',
-          tabBarInactiveTintColor: 'rgba(255,255,255,0.4)',
-          tabBarStyle: {
-            position: 'absolute',
-            backgroundColor: 'transparent',
-            borderTopWidth: 0,
-            elevation: 0,
-          },
-          tabBarBackground: () => (
-            <BlurView
-              intensity={80}
-              tint="systemChromeMaterialDark"
-              style={{ flex: 1 }}
-            />
-          ),
-        }}
-      >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Inicio',
-            tabBarIcon: ({ color }) => (
-              <SymbolView
-                name="house.fill"
-                tintColor={color}
-                style={{ width: 24, height: 24 }}
-              />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="search"
-          options={{
-            title: 'Buscar',
-            tabBarIcon: ({ color }) => (
-              <SymbolView
-                name="magnifyingglass"
-                tintColor={color}
-                style={{ width: 24, height: 24 }}
-              />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="library"
-          options={{
-            title: 'Biblioteca',
-            tabBarIcon: ({ color }) => (
-              <SymbolView
-                name="bookmark.fill"
-                tintColor={color}
-                style={{ width: 24, height: 24 }}
-              />
-            ),
-          }}
-        />
-      </Tabs>
+      <NativeTabs>
+        <NativeTabs.Trigger name="index">
+          <Icon sf="house.fill" />
+          <Label>Inicio</Label>
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="search" role="search">
+          <Icon sf="magnifyingglass" />
+          <Label>Buscar</Label>
+        </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="library">
+          <Icon sf="bookmark.fill" />
+          <Label>Biblioteca</Label>
+        </NativeTabs.Trigger>
+      </NativeTabs>
     </>
   )
 }

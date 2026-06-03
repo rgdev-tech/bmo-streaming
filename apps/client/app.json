@@ -14,10 +14,12 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.bmo.streaming",
+      "deploymentTarget": "18.0",
       "icon": {
         "light": "./assets/images/ios/icon-light.png",
         "dark": "./assets/images/ios/icon-dark.png"
-      }
+      },
+      "appleTeamId": "27F869D4P7"
     },
     "android": {
       "adaptiveIcon": {
@@ -34,6 +36,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2e610774-117f-4285-bddc-4313a2696290"
+      }
     }
   }
 }
