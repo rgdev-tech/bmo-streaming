@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -10,28 +10,43 @@ import {
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { SymbolView } from 'expo-symbols'
 import { stream, STREAM_HEADERS } from '@/lib/stream'
+import { saveProgress, getProgress, type Progress } from '@/lib/library'
 
 export default function PlayerScreen() {
   const router = useRouter()
-  const { type, id, season, episode, title } = useLocalSearchParams<{
+  const params = useLocalSearchParams<{
     type: string
     id: string
     season?: string
     episode?: string
     title?: string
+    poster?: string
+    backdrop?: string
   }>()
+  const { type, id, season, episode, title } = params
 
   const isTv = type === 'tv'
+  const seasonN = season ? Number(season) : undefined
+  const episodeN = episode ? Number(episode) : undefined
+
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [startAt, setStartAt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    const run = isTv
-      ? stream.resolveTv(id, Number(season ?? 1), Number(episode ?? 1))
+    const resolveP = isTv
+      ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1)
       : stream.resolveMovie(id)
-    run
-      .then(() => !cancelled && setReady(true))
+    Promise.all([
+      resolveP,
+      getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN),
+    ])
+      .then(([, pos]) => {
+        if (cancelled) return
+        setStartAt(pos)
+        setReady(true)
+      })
       .catch((e) => !cancelled && setError(String(e)))
     return () => {
       cancelled = true
@@ -39,8 +54,18 @@ export default function PlayerScreen() {
   }, [type, id, season, episode])
 
   const masterUrl = isTv
-    ? stream.masterTv(id, Number(season ?? 1), Number(episode ?? 1))
+    ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
     : stream.masterMovie(id)
+
+  const meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'> = {
+    id: Number(id),
+    media_type: isTv ? 'tv' : 'movie',
+    title: title ?? '',
+    poster_path: params.poster ?? null,
+    backdrop_path: params.backdrop ?? null,
+    season: seasonN,
+    episode: episodeN,
+  }
 
   return (
     <View style={styles.container}>
@@ -56,9 +81,7 @@ export default function PlayerScreen() {
             {title ?? ''}
             {season ? `  ·  T${season}:E${episode}` : ''}
           </Text>
-          <Text style={styles.loadingHint}>
-            Rompiendo ads y extrayendo el video
-          </Text>
+          <Text style={styles.loadingHint}>Rompiendo ads y extrayendo el video</Text>
         </View>
       )}
 
@@ -75,18 +98,47 @@ export default function PlayerScreen() {
         </View>
       )}
 
-      {ready && <Player uri={masterUrl} />}
+      {ready && <Player uri={masterUrl} startAt={startAt} meta={meta} />}
     </View>
   )
 }
 
-function Player({ uri }: { uri: string }) {
-  const player = useVideoPlayer(
-    { uri, headers: STREAM_HEADERS },
-    (p) => {
-      p.play()
-    }
-  )
+function Player({
+  uri,
+  startAt,
+  meta,
+}: {
+  uri: string
+  startAt: number
+  meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
+}) {
+  const seeked = useRef(false)
+  const player = useVideoPlayer({ uri, headers: STREAM_HEADERS }, (p) => {
+    p.timeUpdateEventInterval = 5
+    p.play()
+  })
+
+  // Retomar donde quedó
+  useEffect(() => {
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay' && !seeked.current && startAt > 5) {
+        player.currentTime = startAt
+        seeked.current = true
+      }
+    })
+    return () => sub.remove()
+  }, [player, startAt])
+
+  // Guardar progreso cada 5s
+  useEffect(() => {
+    const sub = player.addListener('timeUpdate', ({ currentTime }) => {
+      const duration = player.duration
+      if (duration > 0 && currentTime > 0) {
+        saveProgress({ ...meta, position: currentTime, duration })
+      }
+    })
+    return () => sub.remove()
+  }, [player])
 
   return (
     <VideoView

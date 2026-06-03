@@ -25,6 +25,8 @@ export function Hero({ item }: { item: MediaItem }) {
         type: isTv ? 'tv' : 'movie',
         id: String(item.id),
         title: titleOf(item),
+        poster: item.poster_path ?? '',
+        backdrop: item.backdrop_path ?? '',
         ...(isTv ? { season: '1', episode: '1' } : {}),
       },
     })

@@ -16,10 +16,14 @@ export function SeasonEpisodes({
   tvId,
   title,
   seasons,
+  poster,
+  backdrop,
 }: {
   tvId: string
   title: string
   seasons: Season[]
+  poster: string | null
+  backdrop: string | null
 }) {
   // Solo temporadas reales (descarta "Especiales" = 0 y vacías)
   const real = seasons
@@ -62,6 +66,8 @@ export function SeasonEpisodes({
           title={title}
           season={selected}
           ep={ep}
+          poster={poster}
+          backdrop={backdrop}
         />
       ))}
     </View>
@@ -73,11 +79,15 @@ function EpisodeRow({
   title,
   season,
   ep,
+  poster,
+  backdrop,
 }: {
   tvId: string
   title: string
   season: number
   ep: Episode
+  poster: string | null
+  backdrop: string | null
 }) {
   const router = useRouter()
   const still = stillUrl(ep.still_path)
@@ -92,6 +102,8 @@ function EpisodeRow({
         season: String(season),
         episode: String(ep.episode_number),
         title: `${title} · T${season}:E${ep.episode_number}`,
+        poster: poster ?? '',
+        backdrop: backdrop ?? '',
       },
     })
   }

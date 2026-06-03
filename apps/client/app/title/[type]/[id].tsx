@@ -1,4 +1,5 @@
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router'
+import { useEffect, useState } from 'react'
 import {
   ScrollView,
   View,
@@ -12,6 +13,7 @@ import { SymbolView } from 'expo-symbols'
 import { tmdb, backdropUrl, titleOf, yearOf, isReleased, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
+import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 
 export default function TitleScreen() {
   const router = useRouter()
@@ -25,6 +27,8 @@ export default function TitleScreen() {
         type: isTv ? 'tv' : 'movie',
         id,
         title: data ? titleOf(data) : '',
+        poster: data?.poster_path ?? '',
+        backdrop: data?.backdrop_path ?? '',
         ...(isTv ? { season: '1', episode: '1' } : {}),
       },
     })
@@ -34,6 +38,17 @@ export default function TitleScreen() {
     () => (isTv ? tmdb.tv(id) : tmdb.movie(id)),
     [type, id]
   )
+
+  const [inList, setInList] = useState(false)
+  useEffect(() => {
+    isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
+  }, [id, isTv])
+
+  async function onToggleList() {
+    if (!data) return
+    const added = await toggleMyList(toLibraryItem({ ...data, media_type: isTv ? 'tv' : 'movie' }))
+    setInList(added)
+  }
 
   return (
     <>
@@ -89,6 +104,15 @@ export default function TitleScreen() {
                   </View>
                 ))}
 
+              <Pressable style={styles.listButton} onPress={onToggleList}>
+                <SymbolView
+                  name={inList ? 'checkmark' : 'plus'}
+                  tintColor="#fff"
+                  style={styles.listIcon}
+                />
+                <Text style={styles.listText}>Mi Lista</Text>
+              </Pressable>
+
               {data.genres?.length ? (
                 <Text style={styles.genres}>
                   {data.genres.map((g) => g.name).join(' · ')}
@@ -102,6 +126,8 @@ export default function TitleScreen() {
                   tvId={id}
                   title={titleOf(data)}
                   seasons={data.seasons}
+                  poster={data.poster_path}
+                  backdrop={data.backdrop_path}
                 />
               ) : null}
             </View>
@@ -142,6 +168,16 @@ const styles = StyleSheet.create({
   soonText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
   playIcon: { width: 16, height: 16 },
   playText: { color: '#000', fontSize: 16, fontWeight: '700' },
+  listButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    marginTop: 10,
+  },
+  listIcon: { width: 18, height: 18 },
+  listText: { color: '#fff', fontSize: 15, fontWeight: '600' },
   genres: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 20 },
   overview: {
     color: 'rgba(255,255,255,0.8)',
