@@ -1,22 +1,30 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream } from './resolver.service'
 
+// Devuelve metadata de resolución (calienta el cache + lista de subtítulos)
+function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
+  if (!result) return null
+  return {
+    source: result.source,
+    captions: result.captions.map((c) => c.language),
+  }
+}
+
 export const resolverRoutes = new Elysia({ prefix: '/resolve' })
-  // Película
   .get(
     '/movie/:id',
     async ({ params, set }) => {
       const result = await resolveStream('movie', Number(params.id))
-      if (!result) {
+      const summary = summarize(result)
+      if (!summary) {
         set.status = 404
         return { error: 'No se encontró stream para esta película' }
       }
-      return result
+      return summary
     },
     { params: t.Object({ id: t.String() }) }
   )
 
-  // Serie (temporada / capítulo)
   .get(
     '/tv/:id/:season/:episode',
     async ({ params, set }) => {
@@ -26,11 +34,12 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
         Number(params.season),
         Number(params.episode)
       )
-      if (!result) {
+      const summary = summarize(result)
+      if (!summary) {
         set.status = 404
         return { error: 'No se encontró stream para este capítulo' }
       }
-      return result
+      return summary
     },
     {
       params: t.Object({
