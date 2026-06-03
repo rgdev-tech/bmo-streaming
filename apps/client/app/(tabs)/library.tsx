@@ -5,6 +5,7 @@ import {
   Text,
   FlatList,
   StyleSheet,
+  Dimensions,
 } from 'react-native'
 import { useFocusEffect } from 'expo-router'
 import {
@@ -16,6 +17,12 @@ import {
 import { PosterCard } from '@/components/PosterCard'
 import { ContinueCard } from '@/components/ContinueCard'
 import type { MediaItem } from '@/lib/tmdb'
+
+const GRID_GAP = 12
+const GRID_PAD = 20
+const GRID_CARD = Math.floor(
+  (Dimensions.get('window').width - GRID_PAD * 2 - GRID_GAP * 2) / 3
+)
 
 export default function LibraryScreen() {
   const [list, setList] = useState<LibraryItem[]>([])
@@ -61,7 +68,11 @@ export default function LibraryScreen() {
           <Text style={styles.heading}>Mi Lista</Text>
           <View style={styles.grid}>
             {list.map((item) => (
-              <PosterCard key={`${item.media_type}-${item.id}`} item={item as MediaItem} />
+              <PosterCard
+                key={`${item.media_type}-${item.id}`}
+                item={item as MediaItem}
+                width={GRID_CARD}
+              />
             ))}
           </View>
         </View>
@@ -101,7 +112,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    gap: GRID_GAP,
+    paddingHorizontal: GRID_PAD,
   },
 })
