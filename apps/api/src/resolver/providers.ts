@@ -1,4 +1,4 @@
-import type { Page } from 'playwright'
+import type { Page } from 'playwright-core'
 
 export type Caption = { language: string; url: string; type: string }
 export type ProviderResult = { url: string; captions: Caption[] }
