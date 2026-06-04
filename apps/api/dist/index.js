@@ -5673,7 +5673,7 @@ function getBrowser() {
       if (isVercel) {
         const sparticuzChromium = (await import("@sparticuz/chromium-min")).default;
         const executablePath = await sparticuzChromium.executablePath(
-          "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.tar"
+          "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar"
         );
         return chromium.launch({
           headless: true,
