@@ -1,0 +1,5 @@
+name = "bmo-stream-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Sin bindings ni secretos: es un proxy puro de reenvío.

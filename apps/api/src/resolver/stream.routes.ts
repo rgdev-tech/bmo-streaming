@@ -5,22 +5,27 @@ import { langCode, srtToVtt, rewriteMaster } from './hls'
 
 const HLS_MIME = 'application/vnd.apple.mpegurl'
 
+// Algunos CDNs devuelven VTT con doble header "WEBVTT". Lo normalizamos a uno solo.
+function normalizeVtt(raw: string): string {
+  const trimmed = raw.trimStart()
+  if (!trimmed.startsWith('WEBVTT')) return `WEBVTT\n\n${trimmed}`
+  // Partir en líneas, mantener la primera WEBVTT y descartar las repeticiones
+  const lines = trimmed.split('\n')
+  const out: string[] = [lines[0]] // primera línea = "WEBVTT ..."
+  let i = 1
+  while (i < lines.length) {
+    if (lines[i].trimStart().startsWith('WEBVTT')) {
+      i++ // saltar el header duplicado
+    } else {
+      out.push(lines[i])
+      i++
+    }
+  }
+  return out.join('\n')
+}
+
 // Cachea el playlist procesado (con subs inyectados) para no re-descargar del CDN
 const playlistCache = new TTLCache<string>(60 * 60 * 1000) // 1h
-
-// Convierte URLs relativas del playlist a absolutas usando la URL del CDN
-function absolutifyUrls(content: string, cdnUrl: string): string {
-  const base = new URL(cdnUrl)
-  const origin = base.origin // e.g. https://lunarleopardlife.net
-  const dir = cdnUrl.substring(0, cdnUrl.lastIndexOf('/') + 1) // directory of the m3u8
-
-  return content.split('\n').map((line) => {
-    if (line.startsWith('#') || line.trim() === '') return line
-    if (line.startsWith('http://') || line.startsWith('https://')) return line
-    if (line.startsWith('/')) return `${origin}${line}`
-    return `${dir}${line}`
-  }).join('\n')
-}
 
 type Query = {
   type: string
@@ -42,9 +47,12 @@ function qs(q: Query) {
   return `type=${q.type}&id=${q.id}&season=${q.season ?? ''}&episode=${q.episode ?? ''}`
 }
 
-function baseUrl(host?: string) {
-  const h = host ?? 'localhost:3000'
-  return `https://${h}`
+function baseUrl(request: Request): string {
+  const host = request.headers.get('host') ?? 'localhost:3000'
+  // En Vercel siempre HTTPS; en local (IP privada o localhost) → HTTP
+  const isLocal = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)
+  const proto = (!isLocal || process.env.VERCEL) ? 'https' : 'http'
+  return `${proto}://${host}`
 }
 
 export const streamRoutes = new Elysia({ prefix: '/stream' })
@@ -69,7 +77,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         return 'No stream'
       }
 
-      const base = baseUrl(request.headers.get('host') ?? undefined)
+      const base = baseUrl(request)
       const query_string = qs(query as Query)
       const cacheKey = `playlist:${query_string}`
 
@@ -125,13 +133,15 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         return 'No caption'
       }
 
-      const base = baseUrl(request.headers.get('host') ?? undefined)
+      const base = baseUrl(request)
       const qs_str = qs(q)
-
-      const vttUrl = `${base}/stream/sub.vtt?${qs_str}`
+      // i= debe incluirse para que sub.vtt sirva el idioma correcto
+      const vttUrl = `${base}/stream/sub.vtt?${qs_str}&i=${idx}`
 
       set.headers['content-type'] = HLS_MIME
-      return `#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:6.0,\n${vttUrl}`
+      // 99999s cubre cualquier película/serie — AVPlayer necesita que la duración
+      // del segmento sea >= la duración real del archivo de subtítulos
+      return `#EXTM3U\n#EXT-X-TARGETDURATION:99999\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:99999.0,\n${vttUrl}\n#EXT-X-ENDLIST`
     },
     {
       query: t.Object({
@@ -162,16 +172,14 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         return 'No caption'
       }
 
-      const vtt =
-        cap.type === 'vtt'
-          ? cap.url.startsWith('http')
-            ? await fetch(cap.url).then((r) => r.text())
-            : cap.url
-          : srtToVtt(
-              cap.url.startsWith('http')
-                ? await fetch(cap.url).then((r) => r.text())
-                : cap.url
-            )
+      const referer = result.headers.Referer ?? ''
+      const fetchSub = (url: string) =>
+        fetch(url, { headers: referer ? { Referer: referer } : {} }).then((r) => r.text())
+
+      const raw = cap.url.startsWith('http') ? await fetchSub(cap.url) : cap.url
+      // Detectar por contenido real, no por el tipo declarado (vidlink devuelve type:'srt'
+      // pero las URLs son .vtt y el contenido ya empieza con WEBVTT)
+      const vtt = raw.trimStart().startsWith('WEBVTT') ? normalizeVtt(raw) : srtToVtt(raw)
 
       set.headers['content-type'] = 'text/vtt'
       return vtt
@@ -206,13 +214,14 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       const headers = Object.fromEntries(
         Object.entries(result.headers).filter(([, v]) => v != null)
       ) as Record<string, string>
-      const segment = await fetch(q.url, { headers }).catch((e) => {
-        set.status = 503
-        return { text: () => String(e) }
-      })
+      const resp = await fetch(q.url, { headers }).catch(() => null)
+      if (!resp?.ok) {
+        set.status = 502
+        return 'Segment fetch failed'
+      }
 
       set.headers['content-type'] = 'video/mp2t'
-      return await segment.text()
+      return new Uint8Array(await resp.arrayBuffer())
     },
     {
       query: t.Object({
