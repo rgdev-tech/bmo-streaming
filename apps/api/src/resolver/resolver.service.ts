@@ -1,4 +1,3 @@
-import { getBrowser } from './browser'
 import { TTLCache } from './cache'
 import { PROVIDERS, type Provider, type Caption } from './providers'
 
@@ -37,6 +36,7 @@ async function tryProvider(
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
+  const { getBrowser } = await import('./browser')
   const browser = await getBrowser()
   const context = await browser.newContext({
     userAgent: UA,

@@ -1,14 +1,20 @@
 {
   "name": "@bmo/api",
   "version": "0.0.1",
+  "type": "module",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "start": "bun src/index.ts"
+    "start": "bun src/index.ts",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:playwright-core --external:@sparticuz/chromium-min"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
     "@sparticuz/chromium-min": "^149.0.0",
     "elysia": "^1.2.0",
     "playwright-core": "^1.60.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "esbuild": "^0.28.0"
   }
 }
