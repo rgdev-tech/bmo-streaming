@@ -71,7 +71,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment:
       name: production
-      url: https://api-rodruiz-team.vercel.app
+      url: https://bmo-streaming-api.vercel.app
     steps:
       - uses: actions/checkout@v4
 
