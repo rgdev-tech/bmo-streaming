@@ -6,6 +6,9 @@ export type ProviderResult = { url: string; captions: Caption[] }
 export type Provider = {
   name: string
   referer: string
+  // tier 1 = primarios (corren primero, en paralelo).
+  // tier 2+ = respaldo (solo si todo el tier anterior falla).
+  tier?: number
   embed: (type: 'movie' | 'tv', id: number, season?: number, episode?: number) => string
   attach: (page: Page) => Promise<() => ProviderResult | null>
 }
@@ -34,11 +37,34 @@ function blockAds(page: Page, extra?: (url: string, route: any) => boolean | Pro
   })
 }
 
+// Captura genérica: toma el primer .m3u8 que aparezca en la red.
+// Sirve para la mayoría de embeds que cargan HLS directamente.
+function m3u8Sniffer(name: string, referer: string, tier: number, embedFn: Provider['embed']): Provider {
+  return {
+    name,
+    referer,
+    tier,
+    embed: embedFn,
+    attach: async (page) => {
+      let m3u8 = ''
+      page.on('request', (req) => {
+        const u = req.url()
+        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u
+      })
+      await blockAds(page)
+      return () => (m3u8 ? { url: m3u8, captions: [] } : null)
+    },
+  }
+}
+
 export const PROVIDERS: Provider[] = [
+  // ─── TIER 1: primarios (rápidos y confiables, en paralelo) ───
+
   // vidlink: fuente primaria — subtítulos multi-idioma vía su API
   {
     name: 'vidlink',
     referer: 'https://vidlink.pro/',
+    tier: 1,
     embed: (type, id, s, e) =>
       type === 'tv'
         ? `https://vidlink.pro/tv/${id}/${s}/${e}`
@@ -78,41 +104,36 @@ export const PROVIDERS: Provider[] = [
     },
   },
 
-  // videasy: respaldo — captura m3u8 de red
-  {
-    name: 'videasy',
-    referer: 'https://player.videasy.net/',
-    embed: (type, id, s, e) =>
-      type === 'tv'
-        ? `https://player.videasy.net/tv/${id}/${s}/${e}`
-        : `https://player.videasy.net/movie/${id}`,
-    attach: async (page) => {
-      let m3u8 = ''
-      page.on('request', (req) => {
-        const u = req.url()
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u
-      })
-      await blockAds(page)
-      return () => (m3u8 ? { url: m3u8, captions: [] } : null)
-    },
-  },
+  // videasy: segundo primario — captura m3u8 de red
+  m3u8Sniffer('videasy', 'https://player.videasy.net/', 1, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://player.videasy.net/tv/${id}/${s}/${e}`
+      : `https://player.videasy.net/movie/${id}`
+  ),
 
-  // autoembed: tercer proveedor — captura m3u8 de red
-  {
-    name: 'autoembed',
-    referer: 'https://autoembed.cc/',
-    embed: (type, id, s, e) =>
-      type === 'tv'
-        ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}`
-        : `https://autoembed.cc/movie/tmdb/${id}`,
-    attach: async (page) => {
-      let m3u8 = ''
-      page.on('request', (req) => {
-        const u = req.url()
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u
-      })
-      await blockAds(page)
-      return () => (m3u8 ? { url: m3u8, captions: [] } : null)
-    },
-  },
+  // ─── TIER 2: respaldo (solo si todo el Tier 1 falla) ───
+
+  m3u8Sniffer('autoembed', 'https://autoembed.cc/', 2, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}`
+      : `https://autoembed.cc/movie/tmdb/${id}`
+  ),
+
+  m3u8Sniffer('vidsrc.cc', 'https://vidsrc.cc/', 2, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`
+      : `https://vidsrc.cc/v2/embed/movie/${id}`
+  ),
+
+  m3u8Sniffer('2embed', 'https://www.2embed.cc/', 2, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}`
+      : `https://www.2embed.cc/embed/${id}`
+  ),
+
+  m3u8Sniffer('moviesapi', 'https://moviesapi.club/', 2, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://moviesapi.club/tv/${id}-${s}-${e}`
+      : `https://moviesapi.club/movie/${id}`
+  ),
 ]

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   View,
   Text,
@@ -8,9 +8,11 @@ import {
   ActivityIndicator,
 } from 'react-native'
 import { Image } from 'expo-image'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
+import { SymbolView } from 'expo-symbols'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
+import { getWatchedEpisodes, toggleEpisodeWatched } from '@/lib/library'
 
 export function SeasonEpisodes({
   tvId,
@@ -25,13 +27,24 @@ export function SeasonEpisodes({
   poster: string | null
   backdrop: string | null
 }) {
-  // Solo temporadas reales (descarta "Especiales" = 0 y vacías)
   const real = seasons
     .filter((s) => s.season_number >= 1 && s.episode_count > 0)
     .sort((a, b) => a.season_number - b.season_number)
 
   const [selected, setSelected] = useState(real[0]?.season_number ?? 1)
   const { data, loading } = useAsync(() => tmdb.season(tvId, selected), [selected])
+
+  // Episodios vistos de esta serie ("season:episode")
+  const [watched, setWatched] = useState<Set<string>>(new Set())
+  const reloadWatched = useCallback(() => {
+    getWatchedEpisodes(tvId).then(setWatched)
+  }, [tvId])
+  useFocusEffect(reloadWatched)
+
+  async function toggle(season: number, episode: number) {
+    await toggleEpisodeWatched(tvId, season, episode)
+    reloadWatched()
+  }
 
   return (
     <View style={styles.wrap}>
@@ -68,6 +81,8 @@ export function SeasonEpisodes({
           ep={ep}
           poster={poster}
           backdrop={backdrop}
+          watched={watched.has(`${selected}:${ep.episode_number}`)}
+          onToggleWatched={() => toggle(selected, ep.episode_number)}
         />
       ))}
     </View>
@@ -81,6 +96,8 @@ function EpisodeRow({
   ep,
   poster,
   backdrop,
+  watched,
+  onToggleWatched,
 }: {
   tvId: string
   title: string
@@ -88,6 +105,8 @@ function EpisodeRow({
   ep: Episode
   poster: string | null
   backdrop: string | null
+  watched: boolean
+  onToggleWatched: () => void
 }) {
   const router = useRouter()
   const still = stillUrl(ep.still_path)
@@ -120,12 +139,26 @@ function EpisodeRow({
         ) : (
           <View style={[styles.thumb, styles.thumbEmpty]} />
         )}
+        {/* Overlay de visto */}
+        {watched && released && (
+          <View style={styles.watchedOverlay}>
+            <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.watchedCheck} />
+          </View>
+        )}
         <View style={styles.playBadge}>
-          <Text style={styles.playBadgeIcon}>{released ? '▶' : '○'}</Text>
+          <SymbolView
+            name={released ? 'play.fill' : 'clock'}
+            tintColor="#fff"
+            style={styles.playBadgeIcon}
+          />
         </View>
       </View>
+
       <View style={styles.epInfo}>
-        <Text style={styles.epTitle} numberOfLines={1}>
+        <Text
+          style={[styles.epTitle, watched && styles.epTitleWatched]}
+          numberOfLines={1}
+        >
           {ep.episode_number}. {ep.name}
         </Text>
         {!released ? (
@@ -136,6 +169,21 @@ function EpisodeRow({
           </Text>
         ) : null}
       </View>
+
+      {/* Botón marcar visto/no visto */}
+      {released && (
+        <Pressable
+          style={styles.markBtn}
+          onPress={onToggleWatched}
+          hitSlop={10}
+        >
+          <SymbolView
+            name={watched ? 'checkmark.circle.fill' : 'circle'}
+            tintColor={watched ? '#34C759' : 'rgba(255,255,255,0.5)'}
+            style={styles.markIcon}
+          />
+        </Pressable>
+      )}
     </Pressable>
   )
 }
@@ -153,11 +201,19 @@ const styles = StyleSheet.create({
   seasonText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
   seasonTextActive: { color: '#000' },
   spinner: { marginVertical: 30 },
-  epRow: { flexDirection: 'row', marginBottom: 18, gap: 12 },
+  epRow: { flexDirection: 'row', marginBottom: 18, gap: 12, alignItems: 'center' },
   epRowSoon: { opacity: 0.5 },
   thumbWrap: { position: 'relative' },
   thumb: { width: 130, height: 74, borderRadius: 8, backgroundColor: '#1C1C1E' },
   thumbEmpty: { backgroundColor: '#1C1C1E' },
+  watchedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  watchedCheck: { width: 26, height: 26 },
   playBadge: {
     position: 'absolute',
     bottom: 6,
@@ -169,9 +225,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playBadgeIcon: { color: '#fff', fontSize: 9, marginLeft: 1 },
+  playBadgeIcon: { width: 10, height: 10 },
   epInfo: { flex: 1, justifyContent: 'center' },
   epTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  epTitleWatched: { color: 'rgba(255,255,255,0.5)' },
   epOverview: {
     color: 'rgba(255,255,255,0.45)',
     fontSize: 13,
@@ -184,4 +241,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
+  markBtn: {
+    paddingLeft: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markIcon: { width: 24, height: 24 },
 })

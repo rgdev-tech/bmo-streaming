@@ -31,6 +31,74 @@ function srtToVtt(srt: string): string {
   return `WEBVTT\n\n${body}`
 }
 
+// Extrae el BANDWIDTH de una línea #EXT-X-STREAM-INF (0 si no tiene)
+function bandwidthOf(streamInf: string): number {
+  const m = streamInf.match(/BANDWIDTH=(\d+)/)
+  return m ? Number(m[1]) : 0
+}
+
+/**
+ * Reescribe el master playlist:
+ *  1. Inyecta las pistas de subtítulos tras #EXTM3U.
+ *  2. Reordena las variantes de video por BANDWIDTH descendente, para que
+ *     el reproductor arranque en la MÁXIMA calidad (en vez de la más baja).
+ *  3. Añade SUBTITLES="subs" a cada variante si hay subtítulos.
+ */
+function rewriteMaster(orig: string, subLines: string[]): string {
+  const lines = orig.split('\n')
+
+  // Si no es un master con variantes, se sirve casi tal cual (solo subs)
+  if (!orig.includes('#EXT-X-STREAM-INF')) {
+    if (!subLines.length) return orig
+    const out: string[] = []
+    for (const line of lines) {
+      out.push(line)
+      if (line.startsWith('#EXTM3U')) out.push(...subLines)
+    }
+    return out.join('\n')
+  }
+
+  const header: string[] = []      // todo antes de la primera variante
+  const variants: { inf: string; uri: string; bw: number }[] = []
+
+  let i = 0
+  // Recolectar cabecera (incluye #EXT-X-MEDIA de audio/subs)
+  while (i < lines.length && !lines[i].startsWith('#EXT-X-STREAM-INF')) {
+    header.push(lines[i])
+    i++
+  }
+
+  // Recolectar pares (STREAM-INF + su URL)
+  while (i < lines.length) {
+    const line = lines[i]
+    if (line.startsWith('#EXT-X-STREAM-INF')) {
+      const inf = subLines.length ? `${line},SUBTITLES="subs"` : line
+      // La URL es la siguiente línea no vacía / no comentario
+      let j = i + 1
+      while (j < lines.length && (lines[j].trim() === '' || lines[j].startsWith('#'))) j++
+      const uri = lines[j] ?? ''
+      variants.push({ inf, uri, bw: bandwidthOf(line) })
+      i = j + 1
+    } else {
+      i++
+    }
+  }
+
+  // Ordenar por calidad descendente (mayor bitrate primero)
+  variants.sort((a, b) => b.bw - a.bw)
+
+  const out: string[] = []
+  for (const line of header) {
+    out.push(line)
+    if (line.startsWith('#EXTM3U') && subLines.length) out.push(...subLines)
+  }
+  for (const v of variants) {
+    out.push(v.inf)
+    out.push(v.uri)
+  }
+  return out.join('\n')
+}
+
 type Query = {
   type: string
   id: string
@@ -88,19 +156,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
           return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri}"`
         })
 
-        // Reescribimos el master: inyectamos subs y añadimos SUBTITLES="subs"
-        const out: string[] = []
-        for (const line of orig.split('\n')) {
-          if (line.startsWith('#EXTM3U')) {
-            out.push(line)
-            if (subLines.length) out.push(...subLines)
-          } else if (line.startsWith('#EXT-X-STREAM-INF') && subLines.length) {
-            out.push(`${line},SUBTITLES="subs"`)
-          } else {
-            out.push(line)
-          }
-        }
-        return out.join('\n')
+        return rewriteMaster(orig, subLines)
       })
 
       set.headers['content-type'] = HLS_MIME

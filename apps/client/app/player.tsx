@@ -30,6 +30,13 @@ export default function PlayerScreen() {
   const [startAt, setStartAt] = useState(0)
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+
+  function retry() {
+    setError(null)
+    setReady(false)
+    setRetryCount((c) => c + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -48,7 +55,7 @@ export default function PlayerScreen() {
       })
       .catch((e) => !cancelled && setError(String(e)))
     return () => { cancelled = true }
-  }, [type, id, season, episode])
+  }, [type, id, season, episode, retryCount])
 
   const masterUrl = isTv
     ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
@@ -125,11 +132,20 @@ export default function PlayerScreen() {
       {error && (
         <View style={styles.center}>
           <SymbolView name="film.stack" tintColor="rgba(255,255,255,0.4)" style={styles.errIcon} />
-          <Text style={styles.errText}>No disponible</Text>
-          <Text style={styles.errSub}>Este título aún no tiene una fuente de reproducción.</Text>
-          <Pressable style={styles.retry} onPress={() => router.back()}>
-            <Text style={styles.retryText}>Volver</Text>
-          </Pressable>
+          <Text style={styles.errText}>No se pudo cargar</Text>
+          <Text style={styles.errSub}>
+            No encontramos una fuente disponible. Puede ser contenido muy
+            reciente o un fallo temporal — intenta de nuevo.
+          </Text>
+          <View style={styles.errButtons}>
+            <Pressable style={styles.retry} onPress={retry}>
+              <SymbolView name="arrow.clockwise" tintColor="#000" style={styles.retryIcon} />
+              <Text style={styles.retryText}>Reintentar</Text>
+            </Pressable>
+            <Pressable style={styles.errBackBtn} onPress={() => router.back()}>
+              <Text style={styles.errBackText}>Volver</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -294,9 +310,19 @@ const styles = StyleSheet.create({
 
   errIcon: { width: 48, height: 48 },
   errText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
-  errSub: { color: 'rgba(255,255,255,0.5)', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 20 },
-  retry: { marginTop: 24, backgroundColor: '#fff', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 12 },
-  retryText: { color: '#000', fontWeight: '700' },
+  errSub: { color: 'rgba(255,255,255,0.5)', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 28, lineHeight: 20 },
+  errButtons: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 28 },
+  retry: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fff', paddingHorizontal: 24, paddingVertical: 13, borderRadius: 12,
+  },
+  retryIcon: { width: 15, height: 15 },
+  retryText: { color: '#000', fontWeight: '700', fontSize: 15 },
+  errBackBtn: {
+    paddingHorizontal: 22, paddingVertical: 13, borderRadius: 12,
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)',
+  },
+  errBackText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 
   // Siguiente episodio
   nextContainer: { flex: 1, backgroundColor: '#000' },

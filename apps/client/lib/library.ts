@@ -3,6 +3,7 @@ import type { MediaItem } from './tmdb'
 
 const LIST_KEY = 'bmo:mylist'
 const PROGRESS_KEY = 'bmo:progress'
+const WATCHED_KEY = 'bmo:watched'
 
 export type LibraryItem = {
   id: number
@@ -84,6 +85,10 @@ export async function saveProgress(p: Omit<Progress, 'updatedAt'>) {
   )
   const ratio = p.duration > 0 ? p.position / p.duration : 0
   if (ratio > 0.92 || p.position < 10) {
+    // Si terminó un episodio de serie, lo marcamos como visto
+    if (ratio > 0.92 && p.media_type === 'tv' && p.season != null && p.episode != null) {
+      await markEpisodeWatched(p.id, p.season, p.episode)
+    }
     await write(PROGRESS_KEY, filtered)
     return
   }
@@ -113,4 +118,57 @@ export async function removeProgress(id: number, type: 'movie' | 'tv') {
     PROGRESS_KEY,
     all.filter((i) => !(i.id === id && i.media_type === type))
   )
+}
+
+// ---- Episodios vistos ----
+// Cada entrada es una clave "tvId:season:episode"
+
+function epKey(tvId: number | string, season: number, episode: number) {
+  return `${tvId}:${season}:${episode}`
+}
+
+// Devuelve un Set de claves "season:episode" vistas de una serie
+export async function getWatchedEpisodes(
+  tvId: number | string
+): Promise<Set<string>> {
+  const all = await read<string>(WATCHED_KEY)
+  const prefix = `${tvId}:`
+  const set = new Set<string>()
+  for (const k of all) {
+    if (k.startsWith(prefix)) set.add(k.slice(prefix.length))
+  }
+  return set
+}
+
+export async function isEpisodeWatched(
+  tvId: number | string,
+  season: number,
+  episode: number
+): Promise<boolean> {
+  const all = await read<string>(WATCHED_KEY)
+  return all.includes(epKey(tvId, season, episode))
+}
+
+export async function markEpisodeWatched(
+  tvId: number | string,
+  season: number,
+  episode: number,
+  watched = true
+) {
+  const all = await read<string>(WATCHED_KEY)
+  const key = epKey(tvId, season, episode)
+  const next = watched
+    ? all.includes(key) ? all : [key, ...all]
+    : all.filter((k) => k !== key)
+  await write(WATCHED_KEY, next)
+}
+
+export async function toggleEpisodeWatched(
+  tvId: number | string,
+  season: number,
+  episode: number
+): Promise<boolean> {
+  const watched = await isEpisodeWatched(tvId, season, episode)
+  await markEpisodeWatched(tvId, season, episode, !watched)
+  return !watched
 }
