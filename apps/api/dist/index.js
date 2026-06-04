@@ -22292,16 +22292,6 @@ var PROVIDERS = [
 var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var STREAM_TTL = 4 * 60 * 60 * 1e3;
 var cache = new TTLCache(STREAM_TTL);
-async function isPlayable(url, headers) {
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8e3) });
-    if (!res.ok) return false;
-    const text = await res.text();
-    return /#EXT-X-STREAM-INF|#EXTINF/.test(text);
-  } catch {
-    return false;
-  }
-}
 async function tryProvider(provider, type, tmdbId, season, episode) {
   const { getBrowser: getBrowser2 } = await Promise.resolve().then(() => (init_browser(), browser_exports));
   let browser;
@@ -22340,11 +22330,7 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
     console.error(`[${provider.name}] captured:`, captured?.url ?? "null");
     if (captured) {
       const headers = { Referer: provider.referer, "User-Agent": UA };
-      const playable = await isPlayable(captured.url, headers);
-      console.error(`[${provider.name}] playable:`, playable);
-      if (playable) {
-        result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
-      }
+      result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
     }
   } catch (e) {
     console.error(`[${provider.name}] scrape error:`, e);

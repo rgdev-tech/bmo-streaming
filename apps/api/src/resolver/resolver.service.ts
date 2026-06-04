@@ -18,16 +18,6 @@ export type StreamResult = {
 
 const cache = new TTLCache<StreamResult | null>(STREAM_TTL)
 
-async function isPlayable(url: string, headers: Record<string, string>) {
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return false
-    const text = await res.text()
-    return /#EXT-X-STREAM-INF|#EXTINF/.test(text)
-  } catch {
-    return false
-  }
-}
 
 async function tryProvider(
   provider: Provider,
@@ -78,11 +68,7 @@ async function tryProvider(
     console.error(`[${provider.name}] captured:`, captured?.url ?? 'null')
     if (captured) {
       const headers = { Referer: provider.referer, 'User-Agent': UA }
-      const playable = await isPlayable(captured.url, headers)
-      console.error(`[${provider.name}] playable:`, playable)
-      if (playable) {
-        result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
-      }
+      result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
     }
   } catch (e) {
     console.error(`[${provider.name}] scrape error:`, e)
