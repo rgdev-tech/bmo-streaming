@@ -17,7 +17,7 @@ import { tmdb, backdropUrl, type MediaItem } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from '@/components/PosterRow'
 import { RankedRow } from '@/components/RankedRow'
-import { FeaturedCard } from '@/components/FeaturedCard'
+import { FeaturedCarousel } from '@/components/FeaturedCarousel'
 import { BackdropRow } from '@/components/BackdropRow'
 
 const { width } = Dimensions.get('window')
@@ -34,18 +34,25 @@ export default function BrowseScreen() {
   const kind = type === 'tv' ? 'tv' : 'movie'
   const { data, loading, error } = useAsync(() => tmdb.genre(kind, id!), [type, id])
 
-  const heroUrl = backdropUrl(data?.hero ?? null, 'w1280')
-
   // Tag all items with the correct media_type
   const tag = (items: MediaItem[]) => items.map((i) => ({ ...i, media_type: kind }))
   const popular = tag(data?.popular ?? [])
   const topRated = tag(data?.topRated ?? [])
   const recent = tag(data?.recent ?? [])
 
-  // Featured = top popular item with backdrop + overview
-  const featured = popular.find((i) => i.backdrop_path && i.overview)
-  // The rest go to the populares row
-  const popularRest = featured ? popular.filter((i) => i.id !== featured.id) : popular
+  // Hero: primer item popular (backdrop distinto al carrusel)
+  const heroItem = popular[0]
+  const heroUrl = backdropUrl(heroItem?.backdrop_path ?? data?.hero ?? null, 'w1280')
+
+  // Carrusel destacado: siguientes items con backdrop + overview (saltar el del hero)
+  const carouselItems = popular
+    .slice(1)
+    .filter((i) => i.backdrop_path && i.overview)
+    .slice(0, 6)
+
+  // Populares: los que no están en el carrusel
+  const carouselIds = new Set(carouselItems.map((i) => i.id))
+  const popularRest = popular.filter((i) => i.id !== heroItem?.id && !carouselIds.has(i.id))
 
   return (
     <View style={styles.container}>
@@ -81,11 +88,11 @@ export default function BrowseScreen() {
         ) : (
           <View style={styles.sections}>
 
-            {/* Destacado: big card with overview */}
-            {featured && (
+            {/* Destacado: carrusel swipeable */}
+            {carouselItems.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>Destacado</Text>
-                <FeaturedCard item={featured} />
+                <FeaturedCarousel items={carouselItems} />
               </View>
             )}
 
