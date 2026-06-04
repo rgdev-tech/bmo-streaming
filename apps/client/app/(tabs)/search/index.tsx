@@ -38,46 +38,37 @@ export default function SearchScreen() {
     finally { setLoading(false) }
   }
 
-  const topPad = insets.top + 8
-
-  if (searching) {
-    return (
-      <>
-        <Stack.Screen options={{ headerShown: false }} />
-        <FlatList
-          style={styles.list}
-          data={results}
-          keyExtractor={(item) => `${item.media_type}-${item.id}`}
-          numColumns={3}
-          columnWrapperStyle={styles.resCol}
-          contentContainerStyle={[styles.content, { paddingTop: topPad }]}
-          keyboardDismissMode="on-drag"
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => <PosterCard item={item} width={RES_W} />}
-          ListEmptyComponent={
-            loading
-              ? <ActivityIndicator color="#fff" style={styles.spinner} />
-              : <View style={styles.empty}><Text style={styles.hint}>Sin resultados</Text></View>
-          }
-        />
-      </>
-    )
-  }
-
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <FlatList
         style={styles.list}
-        data={categories ?? []}
-        keyExtractor={(c) => `${c.type}-${c.genreId}`}
+        data={searching ? results : (categories ?? [])}
+        keyExtractor={(item: any) =>
+          searching
+            ? `${item.media_type}-${item.id}`
+            : `${item.type}-${item.genreId}`
+        }
         numColumns={3}
-        columnWrapperStyle={styles.catCol}
-        contentContainerStyle={[styles.content, { paddingTop: topPad }]}
+        columnWrapperStyle={styles.col}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 8 },
+        ]}
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => <CategoryCard cat={item} width={CAT_W} />}
-        ListEmptyComponent={<ActivityIndicator color="#fff" style={styles.spinner} />}
+        renderItem={({ item }: any) =>
+          searching
+            ? <PosterCard item={item} width={RES_W} />
+            : <CategoryCard cat={item} width={CAT_W} />
+        }
+        ListEmptyComponent={
+          searching && loading
+            ? <ActivityIndicator color="#fff" style={styles.spinner} />
+            : searching
+            ? <View style={styles.empty}><Text style={styles.hint}>Sin resultados</Text></View>
+            : <ActivityIndicator color="#fff" style={styles.spinner} />
+        }
       />
     </>
   )
@@ -86,8 +77,7 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: '#000' },
   content: { padding: 16, paddingBottom: 120 },
-  catCol: { gap: 12, marginBottom: 12 },
-  resCol: { gap: 12, marginBottom: 12, justifyContent: 'flex-start' },
+  col: { gap: 12, marginBottom: 12, justifyContent: 'flex-start' },
   spinner: { marginTop: 80 },
   empty: { marginTop: 100, alignItems: 'center' },
   hint: { color: 'rgba(255,255,255,0.4)', fontSize: 16 },
