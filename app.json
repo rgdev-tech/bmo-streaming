@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "aae681fe-13bc-4df1-a601-e48f2de6d744"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.rgdevowner.bmostreaming",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}

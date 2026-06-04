@@ -1,13 +1,9 @@
+import { makeProviders, makeStandardFetcher, targets, type SourcererOutput } from '@movie-web/providers'
 import { TTLCache } from './cache'
-import { PROVIDERS, type Provider, type Caption } from './providers'
 
-const UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-
-// Links HLS de estos proveedores duran 4-8h; el TTL de 20min era demasiado corto.
 const STREAM_TTL = 4 * 60 * 60 * 1000
 
-export type { Caption }
+export type Caption = { language: string; url: string; type: string }
 
 export type StreamResult = {
   url: string
@@ -18,77 +14,59 @@ export type StreamResult = {
 
 const cache = new TTLCache<StreamResult | null>(STREAM_TTL)
 
+const providers = makeProviders({
+  fetcher: makeStandardFetcher(fetch),
+  target: targets.ANY,
+})
 
-async function tryProvider(
-  provider: Provider,
+async function trySource(
+  sourceId: string,
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  const { getBrowser } = await import('./browser')
-  let browser: Awaited<ReturnType<typeof getBrowser>>
   try {
-    browser = await getBrowser()
+    const media = type === 'tv'
+      ? { type: 'show' as const, tmdbId: String(tmdbId), season: { number: season ?? 1 }, episode: { number: episode ?? 1 }, title: '', releaseYear: 2000 }
+      : { type: 'movie' as const, tmdbId: String(tmdbId), title: '', releaseYear: 2000 }
+
+    const output: SourcererOutput = await providers.runSourceScraper({ sourceId, media })
+
+    // Buscar el mejor stream HLS
+    const streams = output.stream ?? []
+    for (const stream of streams) {
+      if (stream.type === 'hls' && stream.playlist) {
+        const captions: Caption[] = (stream.captions ?? []).map((c: any) => ({
+          language: c.language ?? c.langIso ?? 'und',
+          url: c.url,
+          type: c.type ?? 'vtt',
+        }))
+        console.error(`[${sourceId}] found HLS stream`)
+        return {
+          url: stream.playlist,
+          captions,
+          headers: stream.preferredHeaders ?? {},
+          source: sourceId,
+        }
+      }
+    }
+    console.error(`[${sourceId}] no HLS stream in output`)
+    return null
   } catch (e) {
-    console.error(`[${provider.name}] getBrowser failed:`, e)
+    console.error(`[${sourceId}] error:`, (e as Error).message)
     return null
   }
-  const context = await browser.newContext({
-    userAgent: UA,
-    viewport: { width: 1280, height: 720 },
-    locale: 'es-ES',
-    // Bloquea imágenes y media a nivel de contexto para mayor velocidad
-    javaScriptEnabled: true,
-  })
-  const page = await context.newPage()
-
-  // Bloquea recursos pesados que no necesitamos antes de ir a la URL
-  await context.route(/\.(png|jpg|jpeg|gif|webp|svg|woff2?|ttf|eot)(\?.*)?$/i, (r) => r.abort())
-
-  let result: StreamResult | null = null
-  try {
-    const getResult = await provider.attach(page)
-    await page.goto(provider.embed(type, tmdbId, season, episode), {
-      waitUntil: 'domcontentloaded',
-      timeout: 22000,
-    })
-
-    // Clic para activar el player (algunos requieren interacción del usuario)
-    await page.waitForTimeout(500)
-    try { await page.mouse.click(640, 360) } catch {}
-
-    // Espera hasta que el proveedor capture el m3u8 (máx 12s)
-    const start = Date.now()
-    while (!getResult() && Date.now() - start < 12000) {
-      await page.waitForTimeout(200)
-    }
-
-    const captured = getResult()
-    console.error(`[${provider.name}] captured:`, captured?.url ?? 'null')
-    if (captured) {
-      const headers = { Referer: provider.referer, 'User-Agent': UA }
-      result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
-    }
-  } catch (e) {
-    console.error(`[${provider.name}] scrape error:`, e)
-    result = null
-  } finally {
-    try { await context.close() } catch {}
-  }
-
-  return result
 }
 
-// Corre proveedores con concurrencia limitada (máx 2 simultáneos) para evitar OOM.
-// Devuelve el primero que tenga éxito.
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  const CONCURRENCY = 2
+  const sources = providers.listSources()
+  const CONCURRENCY = 3
   let resolved = false
   let active = 0
   let index = 0
@@ -96,14 +74,14 @@ async function scrape(
   return new Promise((resolve) => {
     function next() {
       if (resolved) return
-      if (index >= PROVIDERS.length && active === 0) {
+      if (index >= sources.length && active === 0) {
         resolve(null)
         return
       }
-      while (active < CONCURRENCY && index < PROVIDERS.length) {
-        const provider = PROVIDERS[index++]
+      while (active < CONCURRENCY && index < sources.length) {
+        const source = sources[index++]
         active++
-        tryProvider(provider, type, tmdbId, season, episode).then((result) => {
+        trySource(source.id, type, tmdbId, season, episode).then((result) => {
           active--
           if (!resolved && result) {
             resolved = true

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
+    "@movie-web/providers": "^2.4.13",
     "@sparticuz/chromium-min": "^149.0.0",
     "elysia": "^1.2.0",
     "playwright-core": "^1.60.0"
