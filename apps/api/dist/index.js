@@ -5670,18 +5670,24 @@ function getBrowser() {
     browserPromise = (async () => {
       const { chromium } = await import("playwright-core");
       const isVercel = !!process.env.VERCEL;
+      let browser;
       if (isVercel) {
         const sparticuzChromium = (await import("@sparticuz/chromium-min")).default;
         const executablePath = await sparticuzChromium.executablePath(
-          "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.tar"
+          "https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar"
         );
-        return chromium.launch({
+        browser = await chromium.launch({
           headless: true,
           executablePath,
           args: [...sparticuzChromium.args, "--disable-blink-features=AutomationControlled"]
         });
+      } else {
+        browser = await chromium.launch({ headless: true, args: LOCAL_ARGS });
       }
-      return chromium.launch({ headless: true, args: LOCAL_ARGS });
+      browser.on("disconnected", () => {
+        browserPromise = null;
+      });
+      return browser;
     })();
   }
   return browserPromise;
@@ -22170,11 +22176,30 @@ function blockAds(page, extra) {
     return route.continue();
   });
 }
+function m3u8Sniffer(name, referer, tier, embedFn) {
+  return {
+    name,
+    referer,
+    tier,
+    embed: embedFn,
+    attach: async (page) => {
+      let m3u8 = "";
+      page.on("request", (req) => {
+        const u = req.url();
+        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
+      });
+      await blockAds(page);
+      return () => m3u8 ? { url: m3u8, captions: [] } : null;
+    }
+  };
+}
 var PROVIDERS = [
+  // ─── TIER 1: primarios (rápidos y confiables, en paralelo) ───
   // vidlink: fuente primaria — subtítulos multi-idioma vía su API
   {
     name: "vidlink",
     referer: "https://vidlink.pro/",
+    tier: 1,
     embed: (type, id, s, e) => type === "tv" ? `https://vidlink.pro/tv/${id}/${s}/${e}` : `https://vidlink.pro/movie/${id}`,
     attach: async (page) => {
       let apiJson = null;
@@ -22211,55 +22236,71 @@ var PROVIDERS = [
       };
     }
   },
-  // videasy: respaldo — captura m3u8 de red
-  {
-    name: "videasy",
-    referer: "https://player.videasy.net/",
-    embed: (type, id, s, e) => type === "tv" ? `https://player.videasy.net/tv/${id}/${s}/${e}` : `https://player.videasy.net/movie/${id}`,
-    attach: async (page) => {
-      let m3u8 = "";
-      page.on("request", (req) => {
-        const u = req.url();
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
-      });
-      await blockAds(page);
-      return () => m3u8 ? { url: m3u8, captions: [] } : null;
-    }
-  },
-  // autoembed: tercer proveedor — captura m3u8 de red
-  {
-    name: "autoembed",
-    referer: "https://autoembed.cc/",
-    embed: (type, id, s, e) => type === "tv" ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}` : `https://autoembed.cc/movie/tmdb/${id}`,
-    attach: async (page) => {
-      let m3u8 = "";
-      page.on("request", (req) => {
-        const u = req.url();
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
-      });
-      await blockAds(page);
-      return () => m3u8 ? { url: m3u8, captions: [] } : null;
-    }
-  }
+  // videasy: segundo primario — captura m3u8 de red
+  m3u8Sniffer(
+    "videasy",
+    "https://player.videasy.net/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://player.videasy.net/tv/${id}/${s}/${e}` : `https://player.videasy.net/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "vidsrc.to",
+    "https://vidsrc.to/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : `https://vidsrc.to/embed/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "superembed",
+    "https://superembed.stream/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://superembed.stream/embed?tmdb=1&tv=1&id=${id}&season=${s}&episode=${e}` : `https://superembed.stream/embed?tmdb=1&id=${id}`
+  ),
+  // ─── TIER 2: respaldo ───
+  m3u8Sniffer(
+    "embed.su",
+    "https://embed.su/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://embed.su/embed/tv/${id}/${s}/${e}` : `https://embed.su/embed/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "autoembed",
+    "https://autoembed.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}` : `https://autoembed.cc/movie/tmdb/${id}`
+  ),
+  m3u8Sniffer(
+    "vidsrc.cc",
+    "https://vidsrc.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}` : `https://vidsrc.cc/v2/embed/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "2embed",
+    "https://www.2embed.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` : `https://www.2embed.cc/embed/${id}`
+  ),
+  m3u8Sniffer(
+    "moviesapi",
+    "https://moviesapi.club/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://moviesapi.club/tv/${id}-${s}-${e}` : `https://moviesapi.club/movie/${id}`
+  )
 ];
 
 // src/resolver/resolver.service.ts
 var UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 var STREAM_TTL = 4 * 60 * 60 * 1e3;
 var cache = new TTLCache(STREAM_TTL);
-async function isPlayable(url, headers) {
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8e3) });
-    if (!res.ok) return false;
-    const text = await res.text();
-    return /#EXT-X-STREAM-INF|#EXTINF/.test(text);
-  } catch {
-    return false;
-  }
-}
 async function tryProvider(provider, type, tmdbId, season, episode) {
   const { getBrowser: getBrowser2 } = await Promise.resolve().then(() => (init_browser(), browser_exports));
-  const browser = await getBrowser2();
+  let browser;
+  try {
+    browser = await getBrowser2();
+  } catch (e) {
+    console.error(`[${provider.name}] getBrowser failed:`, e);
+    return null;
+  }
   const context = await browser.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
@@ -22286,31 +22327,50 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
       await page.waitForTimeout(200);
     }
     const captured = getResult();
+    console.error(`[${provider.name}] captured:`, captured?.url ?? "null");
     if (captured) {
       const headers = { Referer: provider.referer, "User-Agent": UA };
-      if (await isPlayable(captured.url, headers)) {
-        result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
-      }
+      result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
     }
-  } catch {
+  } catch (e) {
+    console.error(`[${provider.name}] scrape error:`, e);
     result = null;
   } finally {
-    await context.close();
+    try {
+      await context.close();
+    } catch {
+    }
   }
   return result;
 }
 async function scrape(type, tmdbId, season, episode) {
-  try {
-    return await Promise.any(
-      PROVIDERS.map(async (provider) => {
-        const result = await tryProvider(provider, type, tmdbId, season, episode);
-        if (!result) throw new Error(`${provider.name}: no stream`);
-        return result;
-      })
-    );
-  } catch {
-    return null;
-  }
+  const CONCURRENCY = 2;
+  let resolved = false;
+  let active = 0;
+  let index = 0;
+  return new Promise((resolve) => {
+    function next() {
+      if (resolved) return;
+      if (index >= PROVIDERS.length && active === 0) {
+        resolve(null);
+        return;
+      }
+      while (active < CONCURRENCY && index < PROVIDERS.length) {
+        const provider = PROVIDERS[index++];
+        active++;
+        tryProvider(provider, type, tmdbId, season, episode).then((result) => {
+          active--;
+          if (!resolved && result) {
+            resolved = true;
+            resolve(result);
+          } else {
+            next();
+          }
+        });
+      }
+    }
+    next();
+  });
 }
 function resolveStream(type, tmdbId, season, episode) {
   const key = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
@@ -22329,7 +22389,9 @@ function summarize(result) {
 var resolverRoutes = new Elysia({ prefix: "/resolve" }).get(
   "/movie/:id",
   async ({ params, set }) => {
+    console.error(`[resolve] movie ${params.id} start`);
     const result = await resolveStream("movie", Number(params.id));
+    console.error(`[resolve] movie ${params.id} result:`, result?.source ?? "null");
     const summary = summarize(result);
     if (!summary) {
       set.status = 404;
@@ -22387,6 +22449,65 @@ function srtToVtt(srt) {
 
 ${body}`;
 }
+function bandwidthOf(streamInf) {
+  const m = streamInf.match(/BANDWIDTH=(\d+)/);
+  return m ? Number(m[1]) : 0;
+}
+function absolutifyUrls(content, cdnUrl) {
+  const base = new URL(cdnUrl);
+  const origin = base.origin;
+  const dir = cdnUrl.substring(0, cdnUrl.lastIndexOf("/") + 1);
+  return content.split("\n").map((line) => {
+    if (line.startsWith("#") || line.trim() === "") return line;
+    if (line.startsWith("http://") || line.startsWith("https://")) return line;
+    if (line.startsWith("/")) return `${origin}${line}`;
+    return `${dir}${line}`;
+  }).join("\n");
+}
+function rewriteMaster(orig, subLines, cdnUrl) {
+  const content = cdnUrl ? absolutifyUrls(orig, cdnUrl) : orig;
+  const lines = content.split("\n");
+  if (!content.includes("#EXT-X-STREAM-INF")) {
+    if (!subLines.length) return content;
+    const out2 = [];
+    for (const line of lines) {
+      out2.push(line);
+      if (line.startsWith("#EXTM3U")) out2.push(...subLines);
+    }
+    return out2.join("\n");
+  }
+  const header = [];
+  const variants = [];
+  let i = 0;
+  while (i < lines.length && !lines[i].startsWith("#EXT-X-STREAM-INF")) {
+    header.push(lines[i]);
+    i++;
+  }
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("#EXT-X-STREAM-INF")) {
+      const inf = subLines.length ? `${line},SUBTITLES="subs"` : line;
+      let j = i + 1;
+      while (j < lines.length && (lines[j].trim() === "" || lines[j].startsWith("#"))) j++;
+      const uri2 = lines[j] ?? "";
+      variants.push({ inf, uri: uri2, bw: bandwidthOf(line) });
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  variants.sort((a, b) => b.bw - a.bw);
+  const out = [];
+  for (const line of header) {
+    out.push(line);
+    if (line.startsWith("#EXTM3U") && subLines.length) out.push(...subLines);
+  }
+  for (const v of variants) {
+    out.push(v.inf);
+    out.push(v.uri);
+  }
+  return out.join("\n");
+}
 function resolveFromQuery(q) {
   return resolveStream(
     q.type === "tv" ? "tv" : "movie",
@@ -22426,18 +22547,7 @@ var streamRoutes = new Elysia({ prefix: "/stream" }).get(
         const uri2 = `${base}/stream/sub.m3u8?${query_string}&i=${i}`;
         return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri2}"`;
       });
-      const out = [];
-      for (const line of orig.split("\n")) {
-        if (line.startsWith("#EXTM3U")) {
-          out.push(line);
-          if (subLines.length) out.push(...subLines);
-        } else if (line.startsWith("#EXT-X-STREAM-INF") && subLines.length) {
-          out.push(`${line},SUBTITLES="subs"`);
-        } else {
-          out.push(line);
-        }
-      }
-      return out.join("\n");
+      return rewriteMaster(orig, subLines, result.url);
     });
     set.headers["content-type"] = HLS_MIME;
     return playlist;

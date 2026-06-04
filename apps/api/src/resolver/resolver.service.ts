@@ -22,16 +22,6 @@ const CACHE_FILE = process.env.VERCEL
   : '.cache/streams.json'
 const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
 
-async function isPlayable(url: string, headers: Record<string, string>) {
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) })
-    if (!res.ok) return false
-    const text = await res.text()
-    return /#EXT-X-STREAM-INF|#EXTINF/.test(text)
-  } catch {
-    return false
-  }
-}
 
 async function tryProvider(
   provider: Provider,
@@ -41,7 +31,13 @@ async function tryProvider(
   episode?: number
 ): Promise<StreamResult | null> {
   const { getBrowser } = await import('./browser')
-  const browser = await getBrowser()
+  let browser: Awaited<ReturnType<typeof getBrowser>>
+  try {
+    browser = await getBrowser()
+  } catch (e) {
+    console.error(`[${provider.name}] getBrowser failed:`, e)
+    return null
+  }
   const context = await browser.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
@@ -73,66 +69,57 @@ async function tryProvider(
     }
 
     const captured = getResult()
+    console.error(`[${provider.name}] captured:`, captured?.url ?? 'null')
     if (captured) {
       const headers = { Referer: provider.referer, 'User-Agent': UA }
-      if (await isPlayable(captured.url, headers)) {
-        result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
-      }
+      result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
     }
-  } catch {
+  } catch (e) {
+    console.error(`[${provider.name}] scrape error:`, e)
     result = null
   } finally {
-    await context.close()
+    try { await context.close() } catch {}
   }
 
   return result
 }
 
-// Lanza todos los proveedores en paralelo y devuelve el primero que tenga éxito.
-// Lanza un grupo de proveedores en paralelo; devuelve el primero con éxito.
-async function raceTier(
-  providers: Provider[],
-  type: 'movie' | 'tv',
-  tmdbId: number,
-  season?: number,
-  episode?: number
-): Promise<StreamResult | null> {
-  if (providers.length === 0) return null
-  try {
-    return await Promise.any(
-      providers.map(async (provider) => {
-        const result = await tryProvider(provider, type, tmdbId, season, episode)
-        if (!result) throw new Error(`${provider.name}: no stream`)
-        return result
-      })
-    )
-  } catch {
-    return null
-  }
-}
-
-// Fallback por tiers: cada tier corre en paralelo; si todo el tier falla,
-// pasa al siguiente. Evita lanzar todos los browsers a la vez.
+// Corre proveedores con concurrencia limitada (máx 2 simultáneos) para evitar OOM.
+// Devuelve el primero que tenga éxito.
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  // Agrupar proveedores por su tier (default = 1)
-  const tiers = new Map<number, Provider[]>()
-  for (const p of PROVIDERS) {
-    const t = p.tier ?? 1
-    if (!tiers.has(t)) tiers.set(t, [])
-    tiers.get(t)!.push(p)
-  }
+  const CONCURRENCY = 2
+  let resolved = false
+  let active = 0
+  let index = 0
 
-  // Recorrer tiers en orden ascendente
-  for (const tier of [...tiers.keys()].sort((a, b) => a - b)) {
-    const result = await raceTier(tiers.get(tier)!, type, tmdbId, season, episode)
-    if (result) return result
-  }
-  return null
+  return new Promise((resolve) => {
+    function next() {
+      if (resolved) return
+      if (index >= PROVIDERS.length && active === 0) {
+        resolve(null)
+        return
+      }
+      while (active < CONCURRENCY && index < PROVIDERS.length) {
+        const provider = PROVIDERS[index++]
+        active++
+        tryProvider(provider, type, tmdbId, season, episode).then((result) => {
+          active--
+          if (!resolved && result) {
+            resolved = true
+            resolve(result)
+          } else {
+            next()
+          }
+        })
+      }
+    }
+    next()
+  })
 }
 
 export function resolveStream(
