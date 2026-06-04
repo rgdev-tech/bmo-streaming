@@ -7,7 +7,8 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
+    "@sparticuz/chromium-min": "^149.0.0",
     "elysia": "^1.2.0",
-    "playwright": "^1.60.0"
+    "playwright-core": "^1.60.0"
   }
 }
