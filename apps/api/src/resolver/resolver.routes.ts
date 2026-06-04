@@ -15,7 +15,9 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   .get(
     '/movie/:id',
     async ({ params, set }) => {
+      console.log(`[resolve] movie ${params.id} start`)
       const result = await resolveStream('movie', Number(params.id))
+      console.log(`[resolve] movie ${params.id} result:`, result?.source ?? 'null')
       const summary = summarize(result)
       if (!summary) {
         set.status = 404
