@@ -22170,11 +22170,30 @@ function blockAds(page, extra) {
     return route.continue();
   });
 }
+function m3u8Sniffer(name, referer, tier, embedFn) {
+  return {
+    name,
+    referer,
+    tier,
+    embed: embedFn,
+    attach: async (page) => {
+      let m3u8 = "";
+      page.on("request", (req) => {
+        const u = req.url();
+        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
+      });
+      await blockAds(page);
+      return () => m3u8 ? { url: m3u8, captions: [] } : null;
+    }
+  };
+}
 var PROVIDERS = [
+  // ─── TIER 1: primarios (rápidos y confiables, en paralelo) ───
   // vidlink: fuente primaria — subtítulos multi-idioma vía su API
   {
     name: "vidlink",
     referer: "https://vidlink.pro/",
+    tier: 1,
     embed: (type, id, s, e) => type === "tv" ? `https://vidlink.pro/tv/${id}/${s}/${e}` : `https://vidlink.pro/movie/${id}`,
     attach: async (page) => {
       let apiJson = null;
@@ -22211,36 +22230,38 @@ var PROVIDERS = [
       };
     }
   },
-  // videasy: respaldo — captura m3u8 de red
-  {
-    name: "videasy",
-    referer: "https://player.videasy.net/",
-    embed: (type, id, s, e) => type === "tv" ? `https://player.videasy.net/tv/${id}/${s}/${e}` : `https://player.videasy.net/movie/${id}`,
-    attach: async (page) => {
-      let m3u8 = "";
-      page.on("request", (req) => {
-        const u = req.url();
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
-      });
-      await blockAds(page);
-      return () => m3u8 ? { url: m3u8, captions: [] } : null;
-    }
-  },
-  // autoembed: tercer proveedor — captura m3u8 de red
-  {
-    name: "autoembed",
-    referer: "https://autoembed.cc/",
-    embed: (type, id, s, e) => type === "tv" ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}` : `https://autoembed.cc/movie/tmdb/${id}`,
-    attach: async (page) => {
-      let m3u8 = "";
-      page.on("request", (req) => {
-        const u = req.url();
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u;
-      });
-      await blockAds(page);
-      return () => m3u8 ? { url: m3u8, captions: [] } : null;
-    }
-  }
+  // videasy: segundo primario — captura m3u8 de red
+  m3u8Sniffer(
+    "videasy",
+    "https://player.videasy.net/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://player.videasy.net/tv/${id}/${s}/${e}` : `https://player.videasy.net/movie/${id}`
+  ),
+  // ─── TIER 2: respaldo (solo si todo el Tier 1 falla) ───
+  m3u8Sniffer(
+    "autoembed",
+    "https://autoembed.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}` : `https://autoembed.cc/movie/tmdb/${id}`
+  ),
+  m3u8Sniffer(
+    "vidsrc.cc",
+    "https://vidsrc.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}` : `https://vidsrc.cc/v2/embed/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "2embed",
+    "https://www.2embed.cc/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}` : `https://www.2embed.cc/embed/${id}`
+  ),
+  m3u8Sniffer(
+    "moviesapi",
+    "https://moviesapi.club/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://moviesapi.club/tv/${id}-${s}-${e}` : `https://moviesapi.club/movie/${id}`
+  )
 ];
 
 // src/resolver/resolver.service.ts
@@ -22299,10 +22320,11 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
   }
   return result;
 }
-async function scrape(type, tmdbId, season, episode) {
+async function raceTier(providers, type, tmdbId, season, episode) {
+  if (providers.length === 0) return null;
   try {
     return await Promise.any(
-      PROVIDERS.map(async (provider) => {
+      providers.map(async (provider) => {
         const result = await tryProvider(provider, type, tmdbId, season, episode);
         if (!result) throw new Error(`${provider.name}: no stream`);
         return result;
@@ -22311,6 +22333,19 @@ async function scrape(type, tmdbId, season, episode) {
   } catch {
     return null;
   }
+}
+async function scrape(type, tmdbId, season, episode) {
+  const tiers = /* @__PURE__ */ new Map();
+  for (const p of PROVIDERS) {
+    const t2 = p.tier ?? 1;
+    if (!tiers.has(t2)) tiers.set(t2, []);
+    tiers.get(t2).push(p);
+  }
+  for (const tier of [...tiers.keys()].sort((a, b) => a - b)) {
+    const result = await raceTier(tiers.get(tier), type, tmdbId, season, episode);
+    if (result) return result;
+  }
+  return null;
 }
 function resolveStream(type, tmdbId, season, episode) {
   const key = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
@@ -22387,6 +22422,53 @@ function srtToVtt(srt) {
 
 ${body}`;
 }
+function bandwidthOf(streamInf) {
+  const m = streamInf.match(/BANDWIDTH=(\d+)/);
+  return m ? Number(m[1]) : 0;
+}
+function rewriteMaster(orig, subLines) {
+  const lines = orig.split("\n");
+  if (!orig.includes("#EXT-X-STREAM-INF")) {
+    if (!subLines.length) return orig;
+    const out2 = [];
+    for (const line of lines) {
+      out2.push(line);
+      if (line.startsWith("#EXTM3U")) out2.push(...subLines);
+    }
+    return out2.join("\n");
+  }
+  const header = [];
+  const variants = [];
+  let i = 0;
+  while (i < lines.length && !lines[i].startsWith("#EXT-X-STREAM-INF")) {
+    header.push(lines[i]);
+    i++;
+  }
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.startsWith("#EXT-X-STREAM-INF")) {
+      const inf = subLines.length ? `${line},SUBTITLES="subs"` : line;
+      let j = i + 1;
+      while (j < lines.length && (lines[j].trim() === "" || lines[j].startsWith("#"))) j++;
+      const uri2 = lines[j] ?? "";
+      variants.push({ inf, uri: uri2, bw: bandwidthOf(line) });
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  variants.sort((a, b) => b.bw - a.bw);
+  const out = [];
+  for (const line of header) {
+    out.push(line);
+    if (line.startsWith("#EXTM3U") && subLines.length) out.push(...subLines);
+  }
+  for (const v of variants) {
+    out.push(v.inf);
+    out.push(v.uri);
+  }
+  return out.join("\n");
+}
 function resolveFromQuery(q) {
   return resolveStream(
     q.type === "tv" ? "tv" : "movie",
@@ -22426,18 +22508,7 @@ var streamRoutes = new Elysia({ prefix: "/stream" }).get(
         const uri2 = `${base}/stream/sub.m3u8?${query_string}&i=${i}`;
         return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri2}"`;
       });
-      const out = [];
-      for (const line of orig.split("\n")) {
-        if (line.startsWith("#EXTM3U")) {
-          out.push(line);
-          if (subLines.length) out.push(...subLines);
-        } else if (line.startsWith("#EXT-X-STREAM-INF") && subLines.length) {
-          out.push(`${line},SUBTITLES="subs"`);
-        } else {
-          out.push(line);
-        }
-      }
-      return out.join("\n");
+      return rewriteMaster(orig, subLines);
     });
     set.headers["content-type"] = HLS_MIME;
     return playlist;
