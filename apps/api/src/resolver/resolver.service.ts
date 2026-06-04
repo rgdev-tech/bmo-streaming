@@ -88,7 +88,7 @@ async function tryProvider(
     console.error(`[${provider.name}] scrape error:`, e)
     result = null
   } finally {
-    await context.close()
+    try { await context.close() } catch {}
   }
 
   return result

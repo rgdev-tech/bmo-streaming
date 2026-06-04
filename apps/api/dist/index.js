@@ -22332,7 +22332,10 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
     console.error(`[${provider.name}] scrape error:`, e);
     result = null;
   } finally {
-    await context.close();
+    try {
+      await context.close();
+    } catch {
+    }
   }
   return result;
 }
