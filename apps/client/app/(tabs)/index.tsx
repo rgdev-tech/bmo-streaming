@@ -13,6 +13,9 @@ import { SymbolView } from 'expo-symbols'
 import { tmdb } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from '@/components/PosterRow'
+import { BackdropRow } from '@/components/BackdropRow'
+import { RankedRow } from '@/components/RankedRow'
+import { FeaturedCard } from '@/components/FeaturedCard'
 import { HeroCarousel } from '@/components/HeroCarousel'
 import { ContinueRow } from '@/components/ContinueRow'
 import { getContinueWatching, type Progress } from '@/lib/library'
@@ -32,27 +35,23 @@ export default function HomeScreen() {
   useFocusEffect(loadWatching)
 
   if (loading) {
-    return (
-      <View style={styles.fill}>
-        <ActivityIndicator color="#fff" size="large" />
-      </View>
-    )
+    return <View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>
   }
-
   if (error || !data) {
-    return (
-      <View style={styles.fill}>
-        <Text style={styles.error}>No pude cargar el catálogo.</Text>
-      </View>
-    )
+    return <View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>
   }
 
-  // El header "Inicio" + avatar se desvanece al hacer scroll
   const headerOpacity = scrollY.interpolate({
     inputRange: [0, 180],
     outputRange: [1, 0],
     extrapolate: 'clamp',
   })
+
+  // Item destacado: primer trending con backdrop + overview
+  const spotlight = data.trending.results.find((i) => i.backdrop_path && i.overview)
+  const trendingRest = spotlight
+    ? data.trending.results.filter((i) => i.id !== spotlight.id)
+    : data.trending.results
 
   return (
     <View style={styles.container}>
@@ -68,28 +67,58 @@ export default function HomeScreen() {
         <HeroCarousel items={data.trending.results} scrollY={scrollY} />
 
         <View style={styles.rows}>
+          {/* Continuar viendo */}
           <ContinueRow
             items={watching}
             onChange={loadWatching}
             onSeeAll={() => router.navigate('/library')}
           />
-          <PosterRow title="Tendencias" items={data.trending.results} />
+
+          {/* Tendencias: fila de posters */}
+          <PosterRow title="Tendencias" items={trendingRest} />
+
+          {/* Spotlight: tarjeta grande con descripción */}
+          {spotlight && (
+            <View style={styles.featuredWrap}>
+              <Text style={styles.rowTitle}>Destacado hoy</Text>
+              <FeaturedCard item={spotlight} />
+            </View>
+          )}
+
+          {/* Top 10: fila rankeada */}
+          <RankedRow title="Top 10 películas" items={data.topMovies.results} />
+
           {collections && (
             <>
+              {/* Netflix: posters */}
               <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} />
+
+              {/* HBO: landscape backdrops */}
+              <BackdropRow title="Lo mejor de HBO Max" items={collections.hbo.results} />
+
+              {/* Apple TV+: posters */}
               <PosterRow title="Lo mejor de Apple TV+" items={collections.appletv.results} />
-              <PosterRow title="Lo mejor de HBO Max" items={collections.hbo.results} />
-              <PosterRow title="Lo mejor de Disney+" items={collections.disney.results} />
+
+              {/* Disney+: landscape backdrops */}
+              <BackdropRow title="Lo mejor de Disney+" items={collections.disney.results} />
+
+              {/* Prime: posters */}
               <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} />
             </>
           )}
+
+          {/* Películas populares: posters */}
           <PosterRow title="Películas populares" items={data.popularMovies.results} />
-          <PosterRow title="Series populares" items={data.popularSeries.results} />
-          <PosterRow title="Mejor valoradas" items={data.topMovies.results} />
+
+          {/* Series del momento: rankeadas */}
+          <RankedRow title="Series del momento" items={data.popularSeries.results} />
+
+          {/* Mejor valoradas: landscape backdrops */}
+          <BackdropRow title="Mejor valoradas" items={data.topMovies.results} />
         </View>
       </Animated.ScrollView>
 
-      {/* Header overlay */}
+      {/* Header overlay que se desvanece al hacer scroll */}
       <Animated.View
         style={[styles.header, { top: insets.top + 4, opacity: headerOpacity }]}
         pointerEvents="box-none"
@@ -106,8 +135,17 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  rows: { paddingTop: 16, paddingBottom: 20 },
+  rows: { paddingTop: 16, paddingBottom: 90 },
   error: { color: '#FF6B6B', fontSize: 15 },
+  featuredWrap: { marginBottom: 24 },
+  rowTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
   header: {
     position: 'absolute',
     left: 20,

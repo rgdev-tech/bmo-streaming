@@ -14,12 +14,14 @@ import { BlurView } from 'expo-blur'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from './PosterRow'
+import { BackdropRow } from './BackdropRow'
+import { RankedRow } from './RankedRow'
+import { FeaturedCard } from './FeaturedCard'
 import { PosterCard } from './PosterCard'
 import type { CatalogData, MediaItem } from '@/lib/tmdb'
 
 const GRID_GAP = 12
 const GRID_PAD = 20
-// Math.floor para dejar holgura: si da exacto, el subpíxel desborda la 3ª columna
 const GRID_CARD = Math.floor(
   (Dimensions.get('window').width - GRID_PAD * 2 - GRID_GAP * 2) / 3
 )
@@ -44,21 +46,8 @@ export function CatalogScreen({
     </View>
   )
 
-  if (loading) {
-    return shell(
-      <View style={styles.fill}>
-        <ActivityIndicator color="#fff" size="large" />
-      </View>
-    )
-  }
-
-  if (error || !data) {
-    return shell(
-      <View style={styles.fill}>
-        <Text style={styles.error}>No pude cargar el catálogo.</Text>
-      </View>
-    )
-  }
+  if (loading) return shell(<View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>)
+  if (error || !data) return shell(<View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>)
 
   const chips = [
     { key: 'all', label: 'Destacados' },
@@ -68,20 +57,27 @@ export function CatalogScreen({
     ? data.genres.find((g) => g.name === genre)?.results ?? []
     : null
 
+  // Item destacado: primer trending con backdrop + overview
+  const featured = data.trending.results.find((i) => i.backdrop_path && i.overview)
+  const taggedTrending = data.trending.results
+    .filter((i) => i.id !== featured?.id)
+    .map((i) => ({ ...i, media_type: kind } as MediaItem))
+  const taggedTopRated = data.topRated.results.map((i) => ({ ...i, media_type: kind } as MediaItem))
+
   return shell(
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
       stickyHeaderIndices={[1]}
     >
-      {/* índice 0: título grande, se va con el scroll */}
+      {/* Índice 0: título grande */}
       <View style={styles.titleWrap}>
         <Text style={styles.bigTitle}>{brand}</Text>
       </View>
 
-      {/* índice 1: pill flotante de vidrio, se queda pineada (bajo el notch) */}
+      {/* Índice 1: chip bar sticky con blur */}
       <View style={styles.chipsBar}>
-        <BlurView intensity={80} tint="systemChromeMaterialDark" style={styles.pill}>
+        <BlurView intensity={80} tint="systemChromeMaterialDark" style={styles.chipsPill}>
           <FlatList
             horizontal
             data={chips}
@@ -105,8 +101,9 @@ export function CatalogScreen({
         </BlurView>
       </View>
 
-      {/* índice 2: contenido */}
+      {/* Índice 2: contenido */}
       {selected ? (
+        /* Vista filtrada por género: grid de posters */
         <View style={styles.grid}>
           {selected.map((item) => (
             <PosterCard
@@ -117,12 +114,34 @@ export function CatalogScreen({
           ))}
         </View>
       ) : (
+        /* Vista general: patrones visuales variados */
         <View style={styles.rows}>
-          <PosterRow title="Tendencias" items={data.trending.results} />
-          {data.genres.map((g) => (
-            <PosterRow key={g.name} title={g.name} items={g.results} />
-          ))}
-          <PosterRow title="Mejor valoradas" items={data.topRated.results} />
+
+          {/* Destacado: tarjeta grande con descripción */}
+          {featured && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Destacado</Text>
+              <FeaturedCard item={{ ...featured, media_type: kind }} />
+            </View>
+          )}
+
+          {/* Tendencias: fila de posters */}
+          <PosterRow title="Tendencias" items={taggedTrending} />
+
+          {/* Top 10: fila rankeada */}
+          <RankedRow title="Top 10" items={taggedTopRated} />
+
+          {/* Géneros: alternar BackdropRow y PosterRow */}
+          {data.genres.map((g, i) => {
+            const tagged = g.results.map((item) => ({ ...item, media_type: kind } as MediaItem))
+            return i % 2 === 0
+              ? <BackdropRow key={g.name} title={g.name} items={tagged} />
+              : <PosterRow key={g.name} title={g.name} items={tagged} />
+          })}
+
+          {/* Mejor valoradas: otra fila rankeada al final */}
+          <RankedRow title="Mejor valoradas" items={taggedTopRated.slice(10)} />
+
         </View>
       )}
     </ScrollView>
@@ -134,25 +153,34 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   fill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   error: { color: '#FF6B6B', fontSize: 15 },
+
   titleWrap: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
   bigTitle: { color: '#fff', fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
+
   chipsBar: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
-  pill: {
+  chipsPill: {
     borderRadius: 26,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
   },
   chipsRow: { paddingHorizontal: 6, paddingVertical: 6, gap: 4 },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
+  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   chipActive: { backgroundColor: '#fff' },
   chipText: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
   chipTextActive: { color: '#000' },
+
   rows: { paddingTop: 12, paddingBottom: 120 },
+  section: { marginBottom: 24 },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
