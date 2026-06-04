@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { tmdb, type MediaItem } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterCard } from '@/components/PosterCard'
@@ -19,7 +18,6 @@ const CAT_W = Math.floor((width - 32 - 24) / 3)
 const RES_W = CAT_W
 
 export default function SearchScreen() {
-  const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -40,9 +38,25 @@ export default function SearchScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ headerShown: false }} />
+      <Stack.Screen
+        options={{
+          title: '',
+          headerTransparent: true,
+          headerStyle: { backgroundColor: 'transparent' },
+          headerSearchBarOptions: {
+            placeholder: 'Películas, series, actores...',
+            onChangeText: (e: any) => runSearch(e.nativeEvent.text),
+            hideWhenScrolling: false,
+            autoCapitalize: 'none',
+            textColor: '#fff',
+            tintColor: '#fff',
+            hintTextColor: 'rgba(255,255,255,0.45)',
+          },
+        }}
+      />
       <FlatList
         style={styles.list}
+        contentInsetAdjustmentBehavior="automatic"
         data={searching ? results : (categories ?? [])}
         keyExtractor={(item: any) =>
           searching
@@ -51,10 +65,7 @@ export default function SearchScreen() {
         }
         numColumns={3}
         columnWrapperStyle={styles.col}
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + 8 },
-        ]}
+        contentContainerStyle={styles.content}
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         renderItem={({ item }: any) =>
@@ -76,7 +87,7 @@ export default function SearchScreen() {
 
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: '#000' },
-  content: { padding: 16, paddingBottom: 120 },
+  content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 120 },
   col: { gap: 12, marginBottom: 12, justifyContent: 'flex-start' },
   spinner: { marginTop: 80 },
   empty: { marginTop: 100, alignItems: 'center' },
