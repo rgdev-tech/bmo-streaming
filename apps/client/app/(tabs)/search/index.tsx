@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { tmdb, type MediaItem } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterCard } from '@/components/PosterCard'
@@ -18,6 +19,7 @@ const CAT_W = Math.floor((width - 32 - 24) / 3)
 const RES_W = CAT_W
 
 export default function SearchScreen() {
+  const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<MediaItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -36,29 +38,21 @@ export default function SearchScreen() {
     finally { setLoading(false) }
   }
 
+  const topPad = insets.top + 8
+
   if (searching) {
     return (
       <>
-        <Stack.Screen
-          options={{
-            title: 'Buscar',
-            headerLargeTitle: true,
-            headerSearchBarOptions: {
-              placeholder: 'Películas, series, actores...',
-              onChangeText: (e) => runSearch(e.nativeEvent.text),
-              hideWhenScrolling: false,
-              autoCapitalize: 'none',
-            },
-          }}
-        />
+        <Stack.Screen options={{ headerShown: false }} />
         <FlatList
-          contentInsetAdjustmentBehavior="automatic"
+          style={styles.list}
           data={results}
           keyExtractor={(item) => `${item.media_type}-${item.id}`}
           numColumns={3}
           columnWrapperStyle={styles.resCol}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingTop: topPad }]}
           keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => <PosterCard item={item} width={RES_W} />}
           ListEmptyComponent={
             loading
@@ -72,26 +66,16 @@ export default function SearchScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          title: 'Buscar',
-          headerLargeTitle: true,
-          headerSearchBarOptions: {
-            placeholder: 'Películas, series, actores...',
-            onChangeText: (e) => runSearch(e.nativeEvent.text),
-            hideWhenScrolling: false,
-            autoCapitalize: 'none',
-          },
-        }}
-      />
+      <Stack.Screen options={{ headerShown: false }} />
       <FlatList
-        contentInsetAdjustmentBehavior="automatic"
+        style={styles.list}
         data={categories ?? []}
         keyExtractor={(c) => `${c.type}-${c.genreId}`}
         numColumns={3}
         columnWrapperStyle={styles.catCol}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: topPad }]}
         keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
         renderItem={({ item }) => <CategoryCard cat={item} width={CAT_W} />}
         ListEmptyComponent={<ActivityIndicator color="#fff" style={styles.spinner} />}
       />
@@ -100,6 +84,7 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
+  list: { flex: 1, backgroundColor: '#000' },
   content: { padding: 16, paddingBottom: 120 },
   catCol: { gap: 12, marginBottom: 12 },
   resCol: { gap: 12, marginBottom: 12, justifyContent: 'flex-start' },

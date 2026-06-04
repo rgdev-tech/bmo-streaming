@@ -7,7 +7,8 @@ export default function SearchLayout() {
         headerStyle: { backgroundColor: '#000' },
         headerTintColor: '#fff',
         headerLargeTitleStyle: { color: '#fff' },
-        contentStyle: { backgroundColor: '#000' },
+        // Sin contentStyle: el FlatList queda como scroll raíz y
+        // contentInsetAdjustmentBehavior="automatic" funciona correctamente
       }}
     />
   )

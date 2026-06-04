@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
+import * as ScreenOrientation from 'expo-screen-orientation'
 import {
   View,
   Text,
@@ -33,6 +34,14 @@ export default function PlayerScreen() {
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
   const [referer, setReferer] = useState('')
+
+  // Forzar horizontal al entrar, restaurar portrait al salir
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false

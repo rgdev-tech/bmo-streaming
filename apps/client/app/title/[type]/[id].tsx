@@ -19,6 +19,7 @@ import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
 import { PosterRow } from '@/components/PosterRow'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
+import { stream } from '@/lib/stream'
 
 export default function TitleScreen() {
   const router = useRouter()
@@ -47,6 +48,16 @@ export default function TitleScreen() {
   const [inList, setInList] = useState(false)
   useEffect(() => {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
+  }, [id, isTv])
+
+  // Pre-calentar el stream en cuanto el usuario abre la pantalla del título.
+  // El resultado queda en cache (4h TTL) → Play arranca casi instantáneo.
+  useEffect(() => {
+    if (isTv) {
+      stream.resolveTv(id, 1, 1).catch(() => {})
+    } else {
+      stream.resolveMovie(id).catch(() => {})
+    }
   }, [id, isTv])
 
   const [logo, setLogo] = useState<string | null>(null)

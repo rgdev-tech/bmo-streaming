@@ -1,7 +1,11 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream, type Caption } from './resolver.service'
+import { TTLCache } from './cache'
 
 const HLS_MIME = 'application/vnd.apple.mpegurl'
+
+// Cachea el playlist procesado (con subs inyectados) para no re-descargar del CDN
+const playlistCache = new TTLCache<string>(60 * 60 * 1000) // 1h
 
 // Mapea el nombre de idioma de vidlink a código ISO para el atributo LANGUAGE
 function langCode(language: string): string {
@@ -65,38 +69,42 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         return 'No stream'
       }
 
-      // Bajamos el master original del CDN (con el Referer requerido)
-      const orig = await fetch(result.url, { headers: result.headers }).then((r) =>
-        r.text()
-      )
-
       const base = baseUrl(request.headers.get('host'))
       const query_string = qs(query)
+      const cacheKey = `playlist:${query_string}`
 
-      // Líneas #EXT-X-MEDIA para cada idioma de subtítulo
-      const subLines = result.captions.map((c: Caption, i: number) => {
-        const code = langCode(c.language)
-        const name = c.language.replace(/"/g, '')
-        const uri = `${base}/stream/sub.m3u8?${query_string}&i=${i}`
-        return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri}"`
+      const playlist = await playlistCache.resolve(cacheKey, async () => {
+        // Descarga el master original del CDN (con el Referer requerido)
+        const orig = await fetch(result.url, {
+          headers: result.headers,
+          signal: AbortSignal.timeout(10000),
+        }).then((r) => r.text())
+
+        // Líneas #EXT-X-MEDIA para cada idioma de subtítulo
+        const subLines = result.captions.map((c: Caption, i: number) => {
+          const code = langCode(c.language)
+          const name = c.language.replace(/"/g, '')
+          const uri = `${base}/stream/sub.m3u8?${query_string}&i=${i}`
+          return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri}"`
+        })
+
+        // Reescribimos el master: inyectamos subs y añadimos SUBTITLES="subs"
+        const out: string[] = []
+        for (const line of orig.split('\n')) {
+          if (line.startsWith('#EXTM3U')) {
+            out.push(line)
+            if (subLines.length) out.push(...subLines)
+          } else if (line.startsWith('#EXT-X-STREAM-INF') && subLines.length) {
+            out.push(`${line},SUBTITLES="subs"`)
+          } else {
+            out.push(line)
+          }
+        }
+        return out.join('\n')
       })
 
-      // Reescribimos el master: inyectamos subs tras #EXTM3U y añadimos
-      // SUBTITLES="subs" a cada variante de video
-      const out: string[] = []
-      for (const line of orig.split('\n')) {
-        if (line.startsWith('#EXTM3U')) {
-          out.push(line)
-          if (subLines.length) out.push(...subLines)
-        } else if (line.startsWith('#EXT-X-STREAM-INF') && subLines.length) {
-          out.push(`${line},SUBTITLES="subs"`)
-        } else {
-          out.push(line)
-        }
-      }
-
       set.headers['content-type'] = HLS_MIME
-      return out.join('\n')
+      return playlist
     },
     {
       query: t.Object({
