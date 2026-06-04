@@ -104,6 +104,18 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
       ['Documentales', 'movie', 99],
       ['Familia', 'movie', 10751],
       ['Suspenso', 'movie', 53],
+      ['Fantasía', 'movie', 14],
+      ['Misterio', 'movie', 9648],
+      ['Historia', 'movie', 36],
+      ['Música', 'movie', 10402],
+      ['Bélico', 'movie', 10752],
+      ['Western', 'movie', 37],
+      ['Reality', 'tv', 10764],
+      ['Series acción', 'tv', 10759],
+      ['Sci-Fi & Fantasy', 'tv', 10765],
+      ['Infantil', 'tv', 10762],
+      ['Guerra y política', 'tv', 10768],
+      ['Telenovelas', 'tv', 10766],
     ]
     const results = await Promise.all(
       CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))
@@ -114,6 +126,30 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
       return { name, type, genreId, backdrop_path: art?.backdrop_path ?? null }
     })
   })
+
+  // Secciones para la pantalla de categoría estilo Apple TV
+  .get(
+    '/genre/:type/:id',
+    async ({ params }) => {
+      const type = params.type === 'tv' ? 'tv' : 'movie'
+      const genreId = Number(params.id)
+      const recentSort = type === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc'
+      const [popular, topRated, recent] = await Promise.all([
+        tmdbService.discoverByGenre(genreId, type),
+        tmdbService.discoverByGenreSorted(genreId, type, 'vote_average.desc'),
+        tmdbService.discoverByGenreSorted(genreId, type, recentSort),
+      ])
+      const pop = (popular as any).results as any[]
+      const hero = pop.find((x: any) => x.backdrop_path)?.backdrop_path ?? null
+      return {
+        hero,
+        popular: pop,
+        topRated: (topRated as any).results,
+        recent: (recent as any).results,
+      }
+    },
+    { params: t.Object({ type: t.String(), id: t.String() }) }
+  )
 
   // Discover por género (cuadrícula de una categoría)
   .get(

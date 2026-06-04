@@ -53,6 +53,14 @@ export const tmdbService = {
       'vote_count.gte': 100,
     }),
 
+  discoverByGenreSorted: (genreId: number, type: 'movie' | 'tv', sortBy: string) =>
+    tmdb(`/discover/${type}`, {
+      with_genres: genreId,
+      sort_by: sortBy,
+      page: 1,
+      'vote_count.gte': 50,
+    }),
+
   // Descubrir por plataforma (watch provider)
   discoverByProvider: (
     providerId: number,

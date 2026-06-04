@@ -10,7 +10,7 @@ export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
 
   return (
     <Pressable
-      style={[styles.card, { width, height: width * 0.66 }]}
+      style={[styles.card, { width, height: width * 1.4 }]}
       onPress={() =>
         router.push({
           pathname: '/browse/[type]/[id]',
@@ -41,11 +41,11 @@ const styles = StyleSheet.create({
   grad: { ...StyleSheet.absoluteFillObject },
   name: {
     position: 'absolute',
-    left: 12,
+    left: 10,
     bottom: 10,
-    right: 12,
+    right: 10,
     color: '#fff',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: -0.2,
   },

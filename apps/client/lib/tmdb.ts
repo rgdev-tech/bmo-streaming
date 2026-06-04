@@ -137,6 +137,13 @@ export type Collections = {
   prime: Paged<MediaItem>
 }
 
+export type GenreDetail = {
+  hero: string | null
+  popular: MediaItem[]
+  topRated: MediaItem[]
+  recent: MediaItem[]
+}
+
 export type GenreRow = { name: string; results: MediaItem[] }
 export type CatalogData = {
   trending: Paged<MediaItem>
@@ -155,6 +162,8 @@ export const tmdb = {
   categories: () => api<Category[]>('/tmdb/categories'),
   discover: (type: 'movie' | 'tv', genreId: string | number) =>
     api<Paged<MediaItem>>(`/tmdb/discover/${type}/${genreId}`),
+  genre: (type: 'movie' | 'tv', id: string | number) =>
+    api<GenreDetail>(`/tmdb/genre/${type}/${id}`),
   movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
   tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
   season: (id: string, season: number) =>
