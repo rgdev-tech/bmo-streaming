@@ -22293,7 +22293,7 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
     console.error(`[${provider.name}] getBrowser failed:`, e);
     return null;
   }
-  const context = await browser2.newContext({
+  const context = await browser.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
     locale: "es-ES",
@@ -22319,11 +22319,11 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
       await page.waitForTimeout(200);
     }
     const captured = getResult();
-    console.log(`[${provider.name}] captured:`, captured?.url ?? "null");
+    console.error(`[${provider.name}] captured:`, captured?.url ?? "null");
     if (captured) {
       const headers = { Referer: provider.referer, "User-Agent": UA };
       const playable = await isPlayable(captured.url, headers);
-      console.log(`[${provider.name}] playable:`, playable);
+      console.error(`[${provider.name}] playable:`, playable);
       if (playable) {
         result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
       }
@@ -22380,9 +22380,9 @@ function summarize(result) {
 var resolverRoutes = new Elysia({ prefix: "/resolve" }).get(
   "/movie/:id",
   async ({ params, set }) => {
-    console.log(`[resolve] movie ${params.id} start`);
+    console.error(`[resolve] movie ${params.id} start`);
     const result = await resolveStream("movie", Number(params.id));
-    console.log(`[resolve] movie ${params.id} result:`, result?.source ?? "null");
+    console.error(`[resolve] movie ${params.id} result:`, result?.source ?? "null");
     const summary = summarize(result);
     if (!summary) {
       set.status = 404;

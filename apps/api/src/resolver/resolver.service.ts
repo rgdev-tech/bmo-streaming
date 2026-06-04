@@ -44,7 +44,7 @@ async function tryProvider(
     console.error(`[${provider.name}] getBrowser failed:`, e)
     return null
   }
-  const context = await browser2.newContext({
+  const context = await browser.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
     locale: 'es-ES',
@@ -75,11 +75,11 @@ async function tryProvider(
     }
 
     const captured = getResult()
-    console.log(`[${provider.name}] captured:`, captured?.url ?? 'null')
+    console.error(`[${provider.name}] captured:`, captured?.url ?? 'null')
     if (captured) {
       const headers = { Referer: provider.referer, 'User-Agent': UA }
       const playable = await isPlayable(captured.url, headers)
-      console.log(`[${provider.name}] playable:`, playable)
+      console.error(`[${provider.name}] playable:`, playable)
       if (playable) {
         result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
       }
