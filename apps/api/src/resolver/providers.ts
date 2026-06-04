@@ -111,7 +111,25 @@ export const PROVIDERS: Provider[] = [
       : `https://player.videasy.net/movie/${id}`
   ),
 
-  // ─── TIER 2: respaldo (solo si todo el Tier 1 falla) ───
+  m3u8Sniffer('vidsrc.to', 'https://vidsrc.to/', 1, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}`
+      : `https://vidsrc.to/embed/movie/${id}`
+  ),
+
+  m3u8Sniffer('superembed', 'https://superembed.stream/', 1, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://superembed.stream/embed?tmdb=1&tv=1&id=${id}&season=${s}&episode=${e}`
+      : `https://superembed.stream/embed?tmdb=1&id=${id}`
+  ),
+
+  // ─── TIER 2: respaldo ───
+
+  m3u8Sniffer('embed.su', 'https://embed.su/', 2, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://embed.su/embed/tv/${id}/${s}/${e}`
+      : `https://embed.su/embed/movie/${id}`
+  ),
 
   m3u8Sniffer('autoembed', 'https://autoembed.cc/', 2, (type, id, s, e) =>
     type === 'tv'

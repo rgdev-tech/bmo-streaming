@@ -22243,7 +22243,25 @@ var PROVIDERS = [
     1,
     (type, id, s, e) => type === "tv" ? `https://player.videasy.net/tv/${id}/${s}/${e}` : `https://player.videasy.net/movie/${id}`
   ),
-  // ─── TIER 2: respaldo (solo si todo el Tier 1 falla) ───
+  m3u8Sniffer(
+    "vidsrc.to",
+    "https://vidsrc.to/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}` : `https://vidsrc.to/embed/movie/${id}`
+  ),
+  m3u8Sniffer(
+    "superembed",
+    "https://superembed.stream/",
+    1,
+    (type, id, s, e) => type === "tv" ? `https://superembed.stream/embed?tmdb=1&tv=1&id=${id}&season=${s}&episode=${e}` : `https://superembed.stream/embed?tmdb=1&id=${id}`
+  ),
+  // ─── TIER 2: respaldo ───
+  m3u8Sniffer(
+    "embed.su",
+    "https://embed.su/",
+    2,
+    (type, id, s, e) => type === "tv" ? `https://embed.su/embed/tv/${id}/${s}/${e}` : `https://embed.su/embed/movie/${id}`
+  ),
   m3u8Sniffer(
     "autoembed",
     "https://autoembed.cc/",
@@ -22340,11 +22358,33 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
   return result;
 }
 async function scrape(type, tmdbId, season, episode) {
-  for (const provider of PROVIDERS) {
-    const result = await tryProvider(provider, type, tmdbId, season, episode);
-    if (result) return result;
-  }
-  return null;
+  const CONCURRENCY = 2;
+  let resolved = false;
+  let active = 0;
+  let index = 0;
+  return new Promise((resolve) => {
+    function next() {
+      if (resolved) return;
+      if (index >= PROVIDERS.length && active === 0) {
+        resolve(null);
+        return;
+      }
+      while (active < CONCURRENCY && index < PROVIDERS.length) {
+        const provider = PROVIDERS[index++];
+        active++;
+        tryProvider(provider, type, tmdbId, season, episode).then((result) => {
+          active--;
+          if (!resolved && result) {
+            resolved = true;
+            resolve(result);
+          } else {
+            next();
+          }
+        });
+      }
+    }
+    next();
+  });
 }
 function resolveStream(type, tmdbId, season, episode) {
   const key = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;

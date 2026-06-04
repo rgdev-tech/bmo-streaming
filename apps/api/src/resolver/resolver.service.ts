@@ -94,18 +94,42 @@ async function tryProvider(
   return result
 }
 
-// Corre proveedores secuencialmente — un solo browser context a la vez para evitar OOM.
+// Corre proveedores con concurrencia limitada (máx 2 simultáneos) para evitar OOM.
+// Devuelve el primero que tenga éxito.
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  for (const provider of PROVIDERS) {
-    const result = await tryProvider(provider, type, tmdbId, season, episode)
-    if (result) return result
-  }
-  return null
+  const CONCURRENCY = 2
+  let resolved = false
+  let active = 0
+  let index = 0
+
+  return new Promise((resolve) => {
+    function next() {
+      if (resolved) return
+      if (index >= PROVIDERS.length && active === 0) {
+        resolve(null)
+        return
+      }
+      while (active < CONCURRENCY && index < PROVIDERS.length) {
+        const provider = PROVIDERS[index++]
+        active++
+        tryProvider(provider, type, tmdbId, season, episode).then((result) => {
+          active--
+          if (!resolved && result) {
+            resolved = true
+            resolve(result)
+          } else {
+            next()
+          }
+        })
+      }
+    }
+    next()
+  })
 }
 
 export function resolveStream(
