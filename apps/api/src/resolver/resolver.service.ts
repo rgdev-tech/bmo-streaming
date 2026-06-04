@@ -37,8 +37,14 @@ async function tryProvider(
   episode?: number
 ): Promise<StreamResult | null> {
   const { getBrowser } = await import('./browser')
-  const browser = await getBrowser()
-  const context = await browser.newContext({
+  let browser: Awaited<ReturnType<typeof getBrowser>>
+  try {
+    browser = await getBrowser()
+  } catch (e) {
+    console.error(`[${provider.name}] getBrowser failed:`, e)
+    return null
+  }
+  const context = await browser2.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
     locale: 'es-ES',
@@ -75,7 +81,8 @@ async function tryProvider(
         result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
       }
     }
-  } catch {
+  } catch (e) {
+    console.error(`[${provider.name}] scrape error:`, e)
     result = null
   } finally {
     await context.close()

@@ -22280,8 +22280,14 @@ async function isPlayable(url, headers) {
 }
 async function tryProvider(provider, type, tmdbId, season, episode) {
   const { getBrowser: getBrowser2 } = await Promise.resolve().then(() => (init_browser(), browser_exports));
-  const browser = await getBrowser2();
-  const context = await browser.newContext({
+  let browser;
+  try {
+    browser = await getBrowser2();
+  } catch (e) {
+    console.error(`[${provider.name}] getBrowser failed:`, e);
+    return null;
+  }
+  const context = await browser2.newContext({
     userAgent: UA,
     viewport: { width: 1280, height: 720 },
     locale: "es-ES",
@@ -22313,7 +22319,8 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
         result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
       }
     }
-  } catch {
+  } catch (e) {
+    console.error(`[${provider.name}] scrape error:`, e);
     result = null;
   } finally {
     await context.close();
