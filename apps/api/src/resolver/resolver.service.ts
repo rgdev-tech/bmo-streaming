@@ -94,48 +94,15 @@ async function tryProvider(
   return result
 }
 
-// Lanza todos los proveedores en paralelo y devuelve el primero que tenga éxito.
-// Lanza un grupo de proveedores en paralelo; devuelve el primero con éxito.
-async function raceTier(
-  providers: Provider[],
-  type: 'movie' | 'tv',
-  tmdbId: number,
-  season?: number,
-  episode?: number
-): Promise<StreamResult | null> {
-  if (providers.length === 0) return null
-  try {
-    return await Promise.any(
-      providers.map(async (provider) => {
-        const result = await tryProvider(provider, type, tmdbId, season, episode)
-        if (!result) throw new Error(`${provider.name}: no stream`)
-        return result
-      })
-    )
-  } catch {
-    return null
-  }
-}
-
-// Fallback por tiers: cada tier corre en paralelo; si todo el tier falla,
-// pasa al siguiente. Evita lanzar todos los browsers a la vez.
+// Corre proveedores secuencialmente — un solo browser context a la vez para evitar OOM.
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  // Agrupar proveedores por su tier (default = 1)
-  const tiers = new Map<number, Provider[]>()
-  for (const p of PROVIDERS) {
-    const t = p.tier ?? 1
-    if (!tiers.has(t)) tiers.set(t, [])
-    tiers.get(t)!.push(p)
-  }
-
-  // Recorrer tiers en orden ascendente
-  for (const tier of [...tiers.keys()].sort((a, b) => a - b)) {
-    const result = await raceTier(tiers.get(tier)!, type, tmdbId, season, episode)
+  for (const provider of PROVIDERS) {
+    const result = await tryProvider(provider, type, tmdbId, season, episode)
     if (result) return result
   }
   return null

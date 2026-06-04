@@ -22339,29 +22339,9 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
   }
   return result;
 }
-async function raceTier(providers, type, tmdbId, season, episode) {
-  if (providers.length === 0) return null;
-  try {
-    return await Promise.any(
-      providers.map(async (provider) => {
-        const result = await tryProvider(provider, type, tmdbId, season, episode);
-        if (!result) throw new Error(`${provider.name}: no stream`);
-        return result;
-      })
-    );
-  } catch {
-    return null;
-  }
-}
 async function scrape(type, tmdbId, season, episode) {
-  const tiers = /* @__PURE__ */ new Map();
-  for (const p of PROVIDERS) {
-    const t2 = p.tier ?? 1;
-    if (!tiers.has(t2)) tiers.set(t2, []);
-    tiers.get(t2).push(p);
-  }
-  for (const tier of [...tiers.keys()].sort((a, b) => a - b)) {
-    const result = await raceTier(tiers.get(tier), type, tmdbId, season, episode);
+  for (const provider of PROVIDERS) {
+    const result = await tryProvider(provider, type, tmdbId, season, episode);
     if (result) return result;
   }
   return null;
