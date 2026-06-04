@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { resolveStream } from './resolver.service'
+import { resolveStream, checkProviders } from './resolver.service'
 
 // Devuelve metadata de resolución (calienta el cache + subtítulos + referer)
 function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
@@ -12,6 +12,17 @@ function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
 }
 
 export const resolverRoutes = new Elysia({ prefix: '/resolve' })
+  // Diagnóstico: estado de cada proveedor (prueba con Fight Club)
+  .get('/health', async () => {
+    const providers = await checkProviders()
+    const upTier1 = providers.some((p) => p.tier === 1 && p.ok)
+    return {
+      healthy: providers.some((p) => p.ok),
+      tier1Up: upTier1,
+      providers,
+    }
+  })
+
   .get(
     '/movie/:id',
     async ({ params, set }) => {

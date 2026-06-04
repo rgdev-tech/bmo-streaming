@@ -13,6 +13,7 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import * as WebBrowser from 'expo-web-browser'
+import * as Haptics from 'expo-haptics'
 import { tmdb, backdropUrl, logoUrl, titleOf, yearOf, isReleased, trailerKey, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
@@ -21,12 +22,15 @@ import { PosterRow } from '@/components/PosterRow'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 import { stream } from '@/lib/stream'
 
+type Availability = 'checking' | 'available' | 'unavailable'
+
 export default function TitleScreen() {
   const router = useRouter()
   const { type, id } = useLocalSearchParams<{ type: string; id: string }>()
   const isTv = type === 'tv'
 
   function play() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     router.push({
       pathname: '/player',
       params: {
@@ -50,14 +54,16 @@ export default function TitleScreen() {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
 
-  // Pre-calentar el stream en cuanto el usuario abre la pantalla del título.
-  // El resultado queda en cache (4h TTL) → Play arranca casi instantáneo.
+  // Pre-chequeo: resolver el stream al abrir el título. Pre-calienta el cache
+  // (Play arranca instantáneo) Y nos dice si hay fuente disponible.
+  const [availability, setAvailability] = useState<Availability>('checking')
   useEffect(() => {
-    if (isTv) {
-      stream.resolveTv(id, 1, 1).catch(() => {})
-    } else {
-      stream.resolveMovie(id).catch(() => {})
-    }
+    let cancelled = false
+    setAvailability('checking')
+    const p = isTv ? stream.resolveTv(id, 1, 1) : stream.resolveMovie(id)
+    p.then(() => !cancelled && setAvailability('available'))
+      .catch(() => !cancelled && setAvailability('unavailable'))
+    return () => { cancelled = true }
   }, [id, isTv])
 
   const [logo, setLogo] = useState<string | null>(null)
@@ -74,6 +80,7 @@ export default function TitleScreen() {
 
   async function onToggleList() {
     if (!data) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const added = await toggleMyList(toLibraryItem({ ...data, media_type: isTv ? 'tv' : 'movie' }))
     setInList(added)
   }
@@ -136,18 +143,32 @@ export default function TitleScreen() {
 
             <View style={styles.body}>
               {!isTv &&
-                (isReleased(data.release_date) ? (
-                  <Pressable style={styles.playButton} onPress={play}>
-                    <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                    <Text style={styles.playText}>Reproducir</Text>
-                  </Pressable>
-                ) : (
+                (!isReleased(data.release_date) ? (
                   <View style={styles.soonButton}>
                     <SymbolView name="clock" tintColor="rgba(255,255,255,0.7)" style={styles.playIcon} />
                     <Text style={styles.soonText}>
                       Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
                     </Text>
                   </View>
+                ) : availability === 'unavailable' ? (
+                  <View style={styles.unavailableButton}>
+                    <SymbolView name="exclamationmark.triangle" tintColor="rgba(255,255,255,0.6)" style={styles.playIcon} />
+                    <Text style={styles.soonText}>No disponible</Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={[styles.playButton, availability === 'checking' && styles.playButtonChecking]}
+                    onPress={play}
+                  >
+                    {availability === 'checking' ? (
+                      <ActivityIndicator color="#000" size="small" />
+                    ) : (
+                      <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+                    )}
+                    <Text style={styles.playText}>
+                      {availability === 'checking' ? 'Comprobando…' : 'Reproducir'}
+                    </Text>
+                  </Pressable>
                 ))}
 
               <View style={styles.secondaryRow}>
@@ -239,11 +260,22 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 8,
   },
+  playButtonChecking: { backgroundColor: 'rgba(255,255,255,0.85)' },
   soonButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 20,
+    gap: 8,
+  },
+  unavailableButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
     paddingVertical: 14,
     marginTop: 20,

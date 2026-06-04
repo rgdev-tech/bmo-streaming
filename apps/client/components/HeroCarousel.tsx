@@ -38,7 +38,7 @@ export function HeroCarousel({
   const dotAnim = useRef(new Animated.Value(0)).current
   const currentIdxRef = useRef(0)
   const isAnimating = useRef(false)
-  const timerRef = useRef<ReturnType<typeof setInterval>>()
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   // Solo para pointerEvents: actualiza DESPUÉS de que termine la animación
   const [activeIdx, setActiveIdx] = useState(0)
 

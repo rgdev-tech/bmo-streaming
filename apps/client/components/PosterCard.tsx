@@ -1,15 +1,27 @@
 import { Pressable, Text, StyleSheet, View } from 'react-native'
 import { Image } from 'expo-image'
+import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf, isUpcoming } from '@/lib/tmdb'
 
 const CARD_WIDTH = 124
 
-export function PosterCard({ item, width }: { item: MediaItem; width?: number }) {
+export function PosterCard({
+  item,
+  width,
+  onRemove,
+}: {
+  item: MediaItem
+  width?: number
+  onRemove?: () => void
+}) {
   const router = useRouter()
   const uri = posterUrl(item.poster_path)
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
-  const upcoming = isUpcoming(item)
+  // Solo marcamos "Próximamente" si HAY una fecha y es futura.
+  // (Items sin fecha — p.ej. los guardados en Mi Lista — no se marcan.)
+  const hasDate = !!(item.release_date ?? item.first_air_date)
+  const upcoming = hasDate && isUpcoming(item)
 
   const cardStyle = width != null ? { width, marginRight: 0 } : null
   const posterStyle = width != null ? { width, height: width * 1.5 } : null
@@ -37,6 +49,13 @@ export function PosterCard({ item, width }: { item: MediaItem; width?: number })
           <View style={styles.soonBadge}>
             <Text style={styles.soonText}>PRÓXIMAMENTE</Text>
           </View>
+        )}
+
+        {/* Botón quitar (Mi Lista) */}
+        {onRemove && (
+          <Pressable style={styles.removeBtn} onPress={onRemove} hitSlop={8}>
+            <SymbolView name="xmark" tintColor="#fff" style={styles.removeIcon} />
+          </Pressable>
         )}
       </View>
 
@@ -85,6 +104,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.4,
   },
+  removeBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeIcon: { width: 11, height: 11 },
   title: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 13,

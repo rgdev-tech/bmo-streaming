@@ -31,11 +31,12 @@ export default function BrowseScreen() {
     name: string
   }>()
   const insets = useSafeAreaInsets()
-  const kind = type === 'tv' ? 'tv' : 'movie'
+  const kind: 'movie' | 'tv' = type === 'tv' ? 'tv' : 'movie'
   const { data, loading, error } = useAsync(() => tmdb.genre(kind, id!), [type, id])
 
   // Tag all items with the correct media_type
-  const tag = (items: MediaItem[]) => items.map((i) => ({ ...i, media_type: kind }))
+  const tag = (items: MediaItem[]): MediaItem[] =>
+    items.map((i) => ({ ...i, media_type: kind }))
   const popular = tag(data?.popular ?? [])
   const topRated = tag(data?.topRated ?? [])
   const recent = tag(data?.recent ?? [])

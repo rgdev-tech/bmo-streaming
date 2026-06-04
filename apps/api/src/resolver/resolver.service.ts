@@ -16,7 +16,11 @@ export type StreamResult = {
   source: string
 }
 
-const cache = new TTLCache<StreamResult | null>(STREAM_TTL)
+// Persiste a disco para sobrevivir reinicios: /tmp en Vercel, .cache en local
+const CACHE_FILE = process.env.VERCEL
+  ? '/tmp/bmo-streams.json'
+  : '.cache/streams.json'
+const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
 
 async function isPlayable(url: string, headers: Record<string, string>) {
   try {
@@ -139,4 +143,29 @@ export function resolveStream(
 ): Promise<StreamResult | null> {
   const key = type === 'tv' ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`
   return cache.resolve(key, () => scrape(type, tmdbId, season, episode))
+}
+
+export type ProviderHealth = {
+  name: string
+  tier: number
+  ok: boolean
+  ms: number
+}
+
+// Prueba cada proveedor individualmente con un título siempre disponible
+// (Fight Club, TMDB 550). Útil para diagnosticar cuáles están caídos.
+export async function checkProviders(): Promise<ProviderHealth[]> {
+  const TEST_ID = 550
+  return Promise.all(
+    PROVIDERS.map(async (p) => {
+      const start = Date.now()
+      let ok = false
+      try {
+        ok = !!(await tryProvider(p, 'movie', TEST_ID))
+      } catch {
+        ok = false
+      }
+      return { name: p.name, tier: p.tier ?? 1, ok, ms: Date.now() - start }
+    })
+  )
 }

@@ -10,9 +10,10 @@ import {
 import { Image } from 'expo-image'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
+import * as Haptics from 'expo-haptics'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
-import { getWatchedEpisodes, toggleEpisodeWatched } from '@/lib/library'
+import { getWatchedEpisodes, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
 
 export function SeasonEpisodes({
   tvId,
@@ -42,7 +43,22 @@ export function SeasonEpisodes({
   useFocusEffect(reloadWatched)
 
   async function toggle(season: number, episode: number) {
+    Haptics.selectionAsync()
     await toggleEpisodeWatched(tvId, season, episode)
+    reloadWatched()
+  }
+
+  // Episodios estrenados de la temporada cargada
+  const releasedEps = (data?.episodes ?? [])
+    .filter((e) => isReleased(e.air_date))
+    .map((e) => e.episode_number)
+  const allWatched =
+    releasedEps.length > 0 &&
+    releasedEps.every((e) => watched.has(`${selected}:${e}`))
+
+  async function toggleSeason() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+    await setSeasonWatched(tvId, selected, releasedEps, !allWatched)
     reloadWatched()
   }
 
@@ -69,6 +85,20 @@ export function SeasonEpisodes({
           )
         })}
       </ScrollView>
+
+      {/* Marcar temporada completa */}
+      {releasedEps.length > 0 && (
+        <Pressable style={styles.markSeasonBtn} onPress={toggleSeason}>
+          <SymbolView
+            name={allWatched ? 'checkmark.circle.fill' : 'circle'}
+            tintColor={allWatched ? '#34C759' : 'rgba(255,255,255,0.6)'}
+            style={styles.markSeasonIcon}
+          />
+          <Text style={styles.markSeasonText}>
+            {allWatched ? 'Temporada vista' : 'Marcar temporada como vista'}
+          </Text>
+        </Pressable>
+      )}
 
       {loading && <ActivityIndicator color="#fff" style={styles.spinner} />}
 
@@ -200,6 +230,15 @@ const styles = StyleSheet.create({
   seasonChipActive: { backgroundColor: '#fff' },
   seasonText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
   seasonTextActive: { color: '#000' },
+  markSeasonBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  markSeasonIcon: { width: 20, height: 20 },
+  markSeasonText: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
   spinner: { marginVertical: 30 },
   epRow: { flexDirection: 'row', marginBottom: 18, gap: 12, alignItems: 'center' },
   epRowSoon: { opacity: 0.5 },

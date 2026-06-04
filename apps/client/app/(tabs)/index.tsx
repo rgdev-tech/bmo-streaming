@@ -18,6 +18,7 @@ import { RankedRow } from '@/components/RankedRow'
 import { FeaturedCard } from '@/components/FeaturedCard'
 import { HeroCarousel } from '@/components/HeroCarousel'
 import { ContinueRow } from '@/components/ContinueRow'
+import { HomeSkeleton } from '@/components/Skeleton'
 import { getContinueWatching, type Progress } from '@/lib/library'
 
 export default function HomeScreen() {
@@ -35,7 +36,7 @@ export default function HomeScreen() {
   useFocusEffect(loadWatching)
 
   if (loading) {
-    return <View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>
+    return <HomeSkeleton />
   }
   if (error || !data) {
     return <View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>

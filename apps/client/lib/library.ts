@@ -95,6 +95,21 @@ export async function saveProgress(p: Omit<Progress, 'updatedAt'>) {
   await write(PROGRESS_KEY, [{ ...p, updatedAt: Date.now() }, ...filtered])
 }
 
+// Registra un episodio como "próximo a ver" en Seguir viendo (position 0).
+// Se usa al terminar un episodio para encolar el siguiente.
+export async function setUpNext(
+  item: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
+) {
+  const all = await read<Progress>(PROGRESS_KEY)
+  const filtered = all.filter(
+    (i) => !(i.id === item.id && i.media_type === item.media_type)
+  )
+  await write(PROGRESS_KEY, [
+    { ...item, position: 0, duration: 0, updatedAt: Date.now() },
+    ...filtered,
+  ])
+}
+
 export async function getProgress(
   id: number,
   type: 'movie' | 'tv',
@@ -171,4 +186,24 @@ export async function toggleEpisodeWatched(
   const watched = await isEpisodeWatched(tvId, season, episode)
   await markEpisodeWatched(tvId, season, episode, !watched)
   return !watched
+}
+
+// Marca/desmarca varios episodios de una temporada de una sola vez
+export async function setSeasonWatched(
+  tvId: number | string,
+  season: number,
+  episodes: number[],
+  watched: boolean
+) {
+  const all = await read<string>(WATCHED_KEY)
+  const keys = episodes.map((e) => epKey(tvId, season, e))
+  let next: string[]
+  if (watched) {
+    const set = new Set([...all, ...keys])
+    next = [...set]
+  } else {
+    const remove = new Set(keys)
+    next = all.filter((k) => !remove.has(k))
+  }
+  await write(WATCHED_KEY, next)
 }

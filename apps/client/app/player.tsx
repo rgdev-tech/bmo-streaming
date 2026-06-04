@@ -5,13 +5,14 @@ import {
   Pressable, Animated,
 } from 'react-native'
 import { Image } from 'expo-image'
-import { useVideoPlayer, VideoView, type VideoViewRef } from 'expo-video'
+import { useVideoPlayer, VideoView } from 'expo-video'
 import { SymbolView } from 'expo-symbols'
 import { stream } from '@/lib/stream'
-import { saveProgress, getProgress, type Progress } from '@/lib/library'
-import { backdropUrl } from '@/lib/tmdb'
+import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
+import { backdropUrl, tmdb } from '@/lib/tmdb'
 
 const COUNTDOWN_S = 8
+const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
 
 export default function PlayerScreen() {
   const router = useRouter()
@@ -31,6 +32,23 @@ export default function PlayerScreen() {
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+
+  // Episodios de la temporada actual (para saber si hay siguiente)
+  const [seasonEps, setSeasonEps] = useState<number[]>([])
+  useEffect(() => {
+    if (!isTv) return
+    let cancelled = false
+    tmdb.season(id, seasonN ?? 1)
+      .then((s) => {
+        if (!cancelled) setSeasonEps(s.episodes.map((e) => e.episode_number))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [isTv, id, seasonN])
+
+  // ¿Existe el siguiente episodio en esta temporada?
+  const nextEpisodeN = (episodeN ?? 1) + 1
+  const hasNextEpisode = isTv && seasonEps.includes(nextEpisodeN)
 
   function retry() {
     setError(null)
@@ -72,8 +90,18 @@ export default function PlayerScreen() {
   }
 
   function handlePlayerClose(watchedFraction: number) {
-    // Si es serie y vio más del 70% → ofrecer siguiente episodio
-    if (isTv && watchedFraction > 0.7) {
+    // Si terminó un episodio y existe el siguiente → encolarlo y ofrecerlo
+    if (isTv && watchedFraction >= FINISHED_RATIO && hasNextEpisode) {
+      // Encola el siguiente episodio en "Seguir viendo" (listo para empezar)
+      setUpNext({
+        id: Number(id),
+        media_type: 'tv',
+        title: title ?? '',
+        poster_path: params.poster ?? null,
+        backdrop_path: params.backdrop ?? null,
+        season: seasonN ?? 1,
+        episode: nextEpisodeN,
+      }).catch(() => {})
       setShowNext(true)
       setInFullscreen(false)
     } else {
@@ -82,14 +110,13 @@ export default function PlayerScreen() {
   }
 
   function playNextEpisode() {
-    const nextEp = (episodeN ?? 1) + 1
     router.replace({
       pathname: '/player',
       params: {
         type: 'tv',
         id,
         season: String(seasonN ?? 1),
-        episode: String(nextEp),
+        episode: String(nextEpisodeN),
         title,
         poster: params.poster ?? '',
         backdrop: params.backdrop ?? '',
@@ -103,7 +130,7 @@ export default function PlayerScreen() {
       <NextEpisodeScreen
         title={title ?? ''}
         season={seasonN ?? 1}
-        episode={(episodeN ?? 1) + 1}
+        episode={nextEpisodeN}
         backdrop={params.backdrop ?? null}
         onPlay={playNextEpisode}
         onBack={() => router.back()}
@@ -173,7 +200,7 @@ function NativePlayer({
   onFullscreenEnter: () => void
   onClose: (watchedFraction: number) => void
 }) {
-  const viewRef = useRef<VideoViewRef>(null)
+  const viewRef = useRef<VideoView>(null)
   const seeked = useRef(false)
   const enteredFS = useRef(false)
   const progressRef = useRef({ time: 0, duration: 0 })

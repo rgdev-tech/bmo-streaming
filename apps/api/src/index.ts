@@ -3,9 +3,11 @@ import { cors } from '@elysiajs/cors'
 import { tmdbRoutes } from './tmdb/tmdb.routes'
 import { resolverRoutes } from './resolver/resolver.routes'
 import { streamRoutes } from './resolver/stream.routes'
+import { rateLimit } from './rate-limit'
 
 export const app = new Elysia()
   .use(cors())
+  .use(rateLimit({ windowMs: 60_000, max: 120 }))
   .get('/health', () => ({ status: 'ok', service: 'bmo-api' }))
   .use(tmdbRoutes)
   .use(resolverRoutes)

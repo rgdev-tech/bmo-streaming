@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react'
 import { ScrollView, View, Text, StyleSheet, Dimensions } from 'react-native'
 import { useFocusEffect } from 'expo-router'
+import * as Haptics from 'expo-haptics'
 import {
   getMyList,
   getContinueWatching,
+  toggleMyList,
   type LibraryItem,
   type Progress,
 } from '@/lib/library'
@@ -26,6 +28,14 @@ export default function LibraryScreen() {
     getContinueWatching().then(setWatching)
   }, [])
   useFocusEffect(reload)
+
+  async function removeFromList(item: LibraryItem) {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    await toggleMyList(item) // ya existe → lo quita
+    setList((prev) =>
+      prev.filter((i) => !(i.id === item.id && i.media_type === item.media_type))
+    )
+  }
 
   const empty = list.length === 0 && watching.length === 0
 
@@ -52,6 +62,7 @@ export default function LibraryScreen() {
                 key={`${item.media_type}-${item.id}`}
                 item={item as MediaItem}
                 width={GRID_CARD}
+                onRemove={() => removeFromList(item)}
               />
             ))}
           </View>

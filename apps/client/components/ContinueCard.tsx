@@ -9,10 +9,15 @@ import { removeProgress, type Progress } from '@/lib/library'
 const CARD_WIDTH = 300
 
 function remainingLabel(p: Progress) {
+  const isTv = p.media_type === 'tv' && p.season
+  // "Próximo a ver" (encolado): duration 0 → aún no empezado
+  if (p.duration <= 0) {
+    return isTv ? `T${p.season}, E${p.episode} · Empezar` : 'Empezar'
+  }
   const rem = Math.max(0, p.duration - p.position)
   const mins = Math.round(rem / 60)
   const time = mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`
-  if (p.media_type === 'tv' && p.season) {
+  if (isTv) {
     return `T${p.season}, E${p.episode} · ${time}`
   }
   return time

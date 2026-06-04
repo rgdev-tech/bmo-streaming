@@ -4,6 +4,7 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
+import * as Haptics from 'expo-haptics'
 import {
   tmdb,
   type MediaItem,
@@ -47,6 +48,7 @@ export function Hero({ item, scrollY }: { item: MediaItem; scrollY?: Animated.Va
   }
 
   function play() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     router.push({
       pathname: '/player',
       params: {
@@ -61,6 +63,7 @@ export function Hero({ item, scrollY }: { item: MediaItem; scrollY?: Animated.Va
   }
 
   async function toggleList() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const added = await toggleMyList(
       toLibraryItem({ ...item, media_type: isTv ? 'tv' : 'movie' })
     )
