@@ -39,15 +39,15 @@ export function CatalogScreen({
   const { data, loading, error } = useAsync(load)
   const [genre, setGenre] = useState<string | null>(null)
 
-  const shell = (inner: React.ReactNode) => (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+  const shell = (inner: React.ReactNode, pad = false) => (
+    <View style={[styles.root, pad && { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
       {inner}
     </View>
   )
 
-  if (loading) return shell(<View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>)
-  if (error || !data) return shell(<View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>)
+  if (loading) return shell(<View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>, true)
+  if (error || !data) return shell(<View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>, true)
 
   const chips = [
     { key: 'all', label: 'Destacados' },
@@ -65,43 +65,18 @@ export function CatalogScreen({
   const taggedTopRated = data.topRated.results.map((i) => ({ ...i, media_type: kind } as MediaItem))
 
   return shell(
+    <>
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
-      stickyHeaderIndices={[1]}
+      contentContainerStyle={{ paddingTop: insets.top + 64 }}
     >
-      {/* Índice 0: título grande */}
+      {/* Título grande (scrollea por detrás del pill flotante) */}
       <View style={styles.titleWrap}>
         <Text style={styles.bigTitle}>{brand}</Text>
       </View>
 
-      {/* Índice 1: chip bar sticky con blur */}
-      <View style={styles.chipsBar}>
-        <BlurView intensity={80} tint="systemChromeMaterialDark" style={styles.chipsPill}>
-          <FlatList
-            horizontal
-            data={chips}
-            keyExtractor={(c) => c.key}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsRow}
-            renderItem={({ item }) => {
-              const active = (genre ?? 'all') === item.key
-              return (
-                <Pressable
-                  onPress={() => setGenre(item.key === 'all' ? null : item.key)}
-                  style={[styles.chip, active && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              )
-            }}
-          />
-        </BlurView>
-      </View>
-
-      {/* Índice 2: contenido */}
+      {/* contenido */}
       {selected ? (
         /* Vista filtrada por género: grid de posters */
         <View style={styles.grid}>
@@ -145,6 +120,34 @@ export function CatalogScreen({
         </View>
       )}
     </ScrollView>
+
+    {/* Pill de categorías flotante: el contenido pasa edge-to-edge por detrás
+        (sin banda negra arriba) y el pill se mantiene fijo bajo el status bar */}
+    <View style={[styles.chipsBar, { top: insets.top }]} pointerEvents="box-none">
+      <BlurView intensity={80} tint="systemChromeMaterialDark" style={styles.chipsPill}>
+        <FlatList
+          horizontal
+          data={chips}
+          keyExtractor={(c) => c.key}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+          renderItem={({ item }) => {
+            const active = (genre ?? 'all') === item.key
+            return (
+              <Pressable
+                onPress={() => setGenre(item.key === 'all' ? null : item.key)}
+                style={[styles.chip, active && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {item.label}
+                </Text>
+              </Pressable>
+            )
+          }}
+        />
+      </BlurView>
+    </View>
+    </>
   )
 }
 
@@ -157,7 +160,12 @@ const styles = StyleSheet.create({
   titleWrap: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
   bigTitle: { color: '#fff', fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
 
-  chipsBar: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+  chipsBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 10,
+  },
   chipsPill: {
     borderRadius: 26,
     overflow: 'hidden',

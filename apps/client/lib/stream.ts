@@ -17,4 +17,13 @@ export const stream = {
     `${API_URL}/stream/master.m3u8?type=movie&id=${id}`,
   masterTv: (id: string | number, season: number, episode: number) =>
     `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}`,
+
+  // Pre-resuelve un stream en segundo plano (calienta el cache del API).
+  // No bloquea ni lanza: al darle play luego, arranca instantáneo.
+  prewarm: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number) => {
+    const p = type === 'tv'
+      ? api(`/resolve/tv/${id}/${season ?? 1}/${episode ?? 1}`)
+      : api(`/resolve/movie/${id}`)
+    p.catch(() => {})
+  },
 }

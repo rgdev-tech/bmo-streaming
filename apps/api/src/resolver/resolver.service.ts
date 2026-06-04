@@ -22,6 +22,25 @@ const CACHE_FILE = process.env.VERCEL
   : '.cache/streams.json'
 const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
 
+// Verifica que el m3u8 capturado realmente sirva: debe responder 200 y empezar
+// con #EXTM3U. Así descartamos streams rotos/de ads que dejan la pantalla negra
+// y dejamos que scrape() siga con otro proveedor.
+async function isPlayable(url: string, headers: Record<string, string>): Promise<boolean> {
+  try {
+    // Solo pedimos los primeros KB: el manifiesto HLS es pequeño y así validamos
+    // en milisegundos en vez de descargar todo el playlist.
+    const res = await fetch(url, {
+      headers: { ...headers, Range: 'bytes=0-2047' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(3500),
+    })
+    if (!res.ok && res.status !== 206) return false
+    const text = await res.text()
+    return text.trimStart().startsWith('#EXTM3U')
+  } catch {
+    return false
+  }
+}
 
 async function tryProvider(
   provider: Provider,
@@ -59,20 +78,26 @@ async function tryProvider(
     })
 
     // Clic para activar el player (algunos requieren interacción del usuario)
-    await page.waitForTimeout(500)
+    await page.waitForTimeout(250)
     try { await page.mouse.click(640, 360) } catch {}
 
-    // Espera hasta que el proveedor capture el m3u8 (máx 12s)
+    // Espera hasta que el proveedor capture el m3u8 (máx 10s).
+    // Polling rápido (100ms) para salir en cuanto aparezca → menor latencia.
     const start = Date.now()
-    while (!getResult() && Date.now() - start < 12000) {
-      await page.waitForTimeout(200)
+    while (!getResult() && Date.now() - start < 10000) {
+      await page.waitForTimeout(100)
     }
 
     const captured = getResult()
     console.error(`[${provider.name}] captured:`, captured?.url ?? 'null')
     if (captured) {
       const headers = { Referer: provider.referer, 'User-Agent': UA }
-      result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
+      // Solo aceptamos el stream si realmente es reproducible (evita pantalla negra)
+      if (await isPlayable(captured.url, headers)) {
+        result = { url: captured.url, captions: captured.captions, headers, source: provider.name }
+      } else {
+        console.error(`[${provider.name}] m3u8 no reproducible → descartado`)
+      }
     }
   } catch (e) {
     console.error(`[${provider.name}] scrape error:`, e)
@@ -84,15 +109,19 @@ async function tryProvider(
   return result
 }
 
-// Corre proveedores con concurrencia limitada (máx 2 simultáneos) para evitar OOM.
-// Devuelve el primero que tenga éxito.
-async function scrape(
+// Concurrencia: en local lanzamos varios proveedores a la vez (el más rápido
+// gana → menor latencia). En Vercel somos conservadores para no agotar RAM.
+const CONCURRENCY = process.env.VERCEL ? 2 : 4
+
+// Corre un grupo de proveedores en paralelo (limitado por CONCURRENCY).
+// Devuelve el primero que dé un stream reproducible.
+async function raceGroup(
+  providers: Provider[],
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
-  const CONCURRENCY = 2
   let resolved = false
   let active = 0
   let index = 0
@@ -100,12 +129,12 @@ async function scrape(
   return new Promise((resolve) => {
     function next() {
       if (resolved) return
-      if (index >= PROVIDERS.length && active === 0) {
+      if (index >= providers.length && active === 0) {
         resolve(null)
         return
       }
-      while (active < CONCURRENCY && index < PROVIDERS.length) {
-        const provider = PROVIDERS[index++]
+      while (active < CONCURRENCY && index < providers.length) {
+        const provider = providers[index++]
         active++
         tryProvider(provider, type, tmdbId, season, episode).then((result) => {
           active--
@@ -120,6 +149,24 @@ async function scrape(
     }
     next()
   })
+}
+
+// Prueba los proveedores tier por tier: solo pasa al siguiente tier si todo
+// el anterior falló. Así los rápidos/confiables (tier 1) responden primero
+// y los de respaldo solo se usan cuando hacen falta.
+async function scrape(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<StreamResult | null> {
+  const tiers = [...new Set(PROVIDERS.map((p) => p.tier ?? 1))].sort((a, b) => a - b)
+  for (const tier of tiers) {
+    const group = PROVIDERS.filter((p) => (p.tier ?? 1) === tier)
+    const result = await raceGroup(group, type, tmdbId, season, episode)
+    if (result) return result
+  }
+  return null
 }
 
 export function resolveStream(

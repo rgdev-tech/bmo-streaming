@@ -37,7 +37,17 @@ function blockAds(page: Page, extra?: (url: string, route: any) => boolean | Pro
   })
 }
 
-// Captura genérica: toma el primer .m3u8 que aparezca en la red.
+// Descarta .m3u8 que NO son el stream principal (publicidad, miniaturas, etc.)
+const M3U8_JUNK = /thumbnail|sprite|storyboard|preview|\/ads?[\/_-]|advert|trailer|promo/i
+// Pistas de que es el playlist principal (mayor prioridad)
+const M3U8_MAIN = /master|index|playlist|stream|manifest/i
+
+function isM3u8(u: string): boolean {
+  return /\.m3u8(\?|$)/i.test(u) && !M3U8_JUNK.test(u)
+}
+
+// Captura genérica de HLS. Recoge TODOS los .m3u8 válidos que pasen por la red
+// y prioriza el que parece el playlist principal (master/index/playlist).
 // Sirve para la mayoría de embeds que cargan HLS directamente.
 function m3u8Sniffer(name: string, referer: string, tier: number, embedFn: Provider['embed']): Provider {
   return {
@@ -46,13 +56,21 @@ function m3u8Sniffer(name: string, referer: string, tier: number, embedFn: Provi
     tier,
     embed: embedFn,
     attach: async (page) => {
-      let m3u8 = ''
-      page.on('request', (req) => {
-        const u = req.url()
-        if (!m3u8 && /\.m3u8(\?|$)/i.test(u)) m3u8 = u
-      })
+      const found: string[] = []
+      const capture = (u: string) => {
+        if (isM3u8(u) && !found.includes(u)) found.push(u)
+      }
+      // Escucha tanto peticiones como respuestas (algunos embeds piden el m3u8
+      // por fetch/xhr y solo aparece como response).
+      page.on('request', (req) => capture(req.url()))
+      page.on('response', (res) => capture(res.url()))
       await blockAds(page)
-      return () => (m3u8 ? { url: m3u8, captions: [] } : null)
+      return () => {
+        if (!found.length) return null
+        // Prefiere un master/index/playlist sobre cualquier otro .m3u8
+        const main = found.find((u) => M3U8_MAIN.test(u)) ?? found[0]
+        return { url: main, captions: [] }
+      }
     },
   }
 }
@@ -72,10 +90,9 @@ export const PROVIDERS: Provider[] = [
     attach: async (page) => {
       let apiJson: any = null
       let fallback = ''
-      page.on('request', (req) => {
-        const u = req.url()
-        if (!fallback && /\.m3u8(\?|$)/i.test(u)) fallback = u
-      })
+      const grab = (u: string) => { if (!fallback && isM3u8(u)) fallback = u }
+      page.on('request', (req) => grab(req.url()))
+      page.on('response', (res) => grab(res.url()))
       await blockAds(page, async (url, route) => {
         if (url.includes('/api/b/')) {
           try {
@@ -153,5 +170,37 @@ export const PROVIDERS: Provider[] = [
     type === 'tv'
       ? `https://moviesapi.club/tv/${id}-${s}-${e}`
       : `https://moviesapi.club/movie/${id}`
+  ),
+
+  // ─── TIER 3: respaldo extendido (solo si tiers 1 y 2 fallan) ───
+
+  m3u8Sniffer('vidsrc.xyz', 'https://vidsrc.xyz/', 3, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=${s}&episode=${e}`
+      : `https://vidsrc.xyz/embed/movie?tmdb=${id}`
+  ),
+
+  m3u8Sniffer('vidsrc.net', 'https://vidsrc.net/', 3, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidsrc.net/embed/tv/${id}/${s}/${e}`
+      : `https://vidsrc.net/embed/movie/${id}`
+  ),
+
+  m3u8Sniffer('smashystream', 'https://embed.smashystream.com/', 3, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://embed.smashystream.com/playere.php?tmdb=${id}&season=${s}&episode=${e}`
+      : `https://embed.smashystream.com/playere.php?tmdb=${id}`
+  ),
+
+  m3u8Sniffer('vidfast', 'https://vidfast.pro/', 3, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidfast.pro/tv/${id}/${s}/${e}`
+      : `https://vidfast.pro/movie/${id}`
+  ),
+
+  m3u8Sniffer('vidjoy', 'https://vidjoy.pro/', 3, (type, id, s, e) =>
+    type === 'tv'
+      ? `https://vidjoy.pro/embed/tv/${id}/${s}/${e}`
+      : `https://vidjoy.pro/embed/movie/${id}`
   ),
 ]
