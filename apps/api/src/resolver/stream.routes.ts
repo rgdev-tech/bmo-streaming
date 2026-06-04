@@ -44,12 +44,27 @@ function bandwidthOf(streamInf: string): number {
  *     el reproductor arranque en la MÁXIMA calidad (en vez de la más baja).
  *  3. Añade SUBTITLES="subs" a cada variante si hay subtítulos.
  */
-function rewriteMaster(orig: string, subLines: string[]): string {
-  const lines = orig.split('\n')
+// Convierte URLs relativas del playlist a absolutas usando la URL del CDN
+function absolutifyUrls(content: string, cdnUrl: string): string {
+  const base = new URL(cdnUrl)
+  const origin = base.origin // e.g. https://lunarleopardlife.net
+  const dir = cdnUrl.substring(0, cdnUrl.lastIndexOf('/') + 1) // directory of the m3u8
+
+  return content.split('\n').map((line) => {
+    if (line.startsWith('#') || line.trim() === '') return line
+    if (line.startsWith('http://') || line.startsWith('https://')) return line
+    if (line.startsWith('/')) return `${origin}${line}`
+    return `${dir}${line}`
+  }).join('\n')
+}
+
+function rewriteMaster(orig: string, subLines: string[], cdnUrl?: string): string {
+  const content = cdnUrl ? absolutifyUrls(orig, cdnUrl) : orig
+  const lines = content.split('\n')
 
   // Si no es un master con variantes, se sirve casi tal cual (solo subs)
-  if (!orig.includes('#EXT-X-STREAM-INF')) {
-    if (!subLines.length) return orig
+  if (!content.includes('#EXT-X-STREAM-INF')) {
+    if (!subLines.length) return content
     const out: string[] = []
     for (const line of lines) {
       out.push(line)
@@ -156,7 +171,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
           return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri}"`
         })
 
-        return rewriteMaster(orig, subLines)
+        return rewriteMaster(orig, subLines, result.url)
       })
 
       set.headers['content-type'] = HLS_MIME

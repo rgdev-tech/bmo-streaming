@@ -22427,10 +22427,22 @@ function bandwidthOf(streamInf) {
   const m = streamInf.match(/BANDWIDTH=(\d+)/);
   return m ? Number(m[1]) : 0;
 }
-function rewriteMaster(orig, subLines) {
-  const lines = orig.split("\n");
-  if (!orig.includes("#EXT-X-STREAM-INF")) {
-    if (!subLines.length) return orig;
+function absolutifyUrls(content, cdnUrl) {
+  const base = new URL(cdnUrl);
+  const origin = base.origin;
+  const dir = cdnUrl.substring(0, cdnUrl.lastIndexOf("/") + 1);
+  return content.split("\n").map((line) => {
+    if (line.startsWith("#") || line.trim() === "") return line;
+    if (line.startsWith("http://") || line.startsWith("https://")) return line;
+    if (line.startsWith("/")) return `${origin}${line}`;
+    return `${dir}${line}`;
+  }).join("\n");
+}
+function rewriteMaster(orig, subLines, cdnUrl) {
+  const content = cdnUrl ? absolutifyUrls(orig, cdnUrl) : orig;
+  const lines = content.split("\n");
+  if (!content.includes("#EXT-X-STREAM-INF")) {
+    if (!subLines.length) return content;
     const out2 = [];
     for (const line of lines) {
       out2.push(line);
@@ -22509,7 +22521,7 @@ var streamRoutes = new Elysia({ prefix: "/stream" }).get(
         const uri2 = `${base}/stream/sub.m3u8?${query_string}&i=${i}`;
         return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri2}"`;
       });
-      return rewriteMaster(orig, subLines);
+      return rewriteMaster(orig, subLines, result.url);
     });
     set.headers["content-type"] = HLS_MIME;
     return playlist;
