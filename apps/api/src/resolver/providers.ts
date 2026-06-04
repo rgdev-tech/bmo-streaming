@@ -20,7 +20,7 @@ const AD_HOSTS = [
 
 const BLOCKED_TYPES = new Set(['image', 'font', 'stylesheet', 'media', 'ping', 'beacon'])
 
-function blockAds(page: Page, extra?: (url: string, route: any) => Promise<boolean>) {
+function blockAds(page: Page, extra?: (url: string, route: any) => boolean | Promise<boolean>) {
   return page.route('**/*', async (route) => {
     const req = route.request()
     const url = req.url()
