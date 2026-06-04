@@ -22313,9 +22313,12 @@ async function tryProvider(provider, type, tmdbId, season, episode) {
       await page.waitForTimeout(200);
     }
     const captured = getResult();
+    console.log(`[${provider.name}] captured:`, captured?.url ?? "null");
     if (captured) {
       const headers = { Referer: provider.referer, "User-Agent": UA };
-      if (await isPlayable(captured.url, headers)) {
+      const playable = await isPlayable(captured.url, headers);
+      console.log(`[${provider.name}] playable:`, playable);
+      if (playable) {
         result = { url: captured.url, captions: captured.captions, headers, source: provider.name };
       }
     }
