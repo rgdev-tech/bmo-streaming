@@ -1,5 +1,4 @@
-import { chromium, type Browser } from 'playwright-core'
-import sparticuzChromium from '@sparticuz/chromium-min'
+import type { Browser } from 'playwright-core'
 
 let browserPromise: Promise<Browser> | null = null
 
@@ -27,20 +26,22 @@ const LOCAL_ARGS = [
 export function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
     browserPromise = (async () => {
+      const { chromium } = await import('playwright-core')
       const isVercel = !!process.env.VERCEL
-      const executablePath = isVercel
-        ? await sparticuzChromium.executablePath(
-            'https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.tar'
-          )
-        : undefined
 
-      return chromium.launch({
-        headless: true,
-        executablePath,
-        args: isVercel
-          ? [...sparticuzChromium.args, '--disable-blink-features=AutomationControlled']
-          : LOCAL_ARGS,
-      })
+      if (isVercel) {
+        const sparticuzChromium = (await import('@sparticuz/chromium-min')).default
+        const executablePath = await sparticuzChromium.executablePath(
+          'https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.tar'
+        )
+        return chromium.launch({
+          headless: true,
+          executablePath,
+          args: [...sparticuzChromium.args, '--disable-blink-features=AutomationControlled'],
+        })
+      }
+
+      return chromium.launch({ headless: true, args: LOCAL_ARGS })
     })()
   }
   return browserPromise
