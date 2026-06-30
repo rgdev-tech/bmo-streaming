@@ -42,6 +42,25 @@ function baseUrl(request: Request): string {
   return `${proto}://${host}`
 }
 
+// Referer que el CDN espera (movie-web lo entrega en headers/preferredHeaders)
+function refererOf(headers: Record<string, string>): string {
+  return headers.Referer ?? headers.referer ?? ''
+}
+
+// Descarga un m3u8 desde el CDN con los headers correctos (Referer/Origin/etc.)
+async function fetchM3u8(url: string, headers: Record<string, string>): Promise<string | null> {
+  try {
+    const raw = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout?.(12000),
+    }).then((r) => r.text())
+    return raw.trimStart().startsWith('#EXTM3U') ? raw : null
+  } catch (e) {
+    console.error(`[m3u8] fetch error ${url.slice(-50)}: ${(e as Error).message}`)
+    return null
+  }
+}
+
 // Reescribe todas las URLs de un m3u8 (segmentos) para pasar por nuestro servidor.
 // referer se pasa directo en la URL — no necesita lookup por segmento.
 function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string, referer: string): string {
@@ -122,6 +141,9 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       const query_string = qs(query as Query)
       const cacheKey = `master2:${query_string}`
 
+      const headers = result.headers as Record<string, string>
+      const referer = refererOf(headers)
+
       const playlist = await playlistCache.resolve(cacheKey, async () => {
         const subLines = result.captions.map((c: Caption, i: number) => {
           const code = langCode(c.language)
@@ -129,13 +151,11 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
           const uri = `${base}/stream/sub.m3u8?${query_string}&i=${i}`
           return `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="${name}",LANGUAGE="${code}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${uri}"`
         })
+        const hasSubs = subLines.length > 0
 
-        const masterRaw = result.masterContent
-        if (!masterRaw?.trimStart().startsWith('#EXTM3U')) {
-          // No hay master capturado → fallback sin variantes (solo un stream directo)
-          const cdnReferer = (result.headers as Record<string, string>).Referer ?? ''
-          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(cdnReferer)}`
-          const hasSubs = subLines.length > 0
+        // Stream tipo file (mp4): no hay playlist → un solo "variant" que apunta al mp4
+        if (result.type === 'file') {
+          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
           const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
           let fb = '#EXTM3U\n'
           if (hasSubs) fb += subLines.join('\n') + '\n'
@@ -143,9 +163,31 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
           return fb
         }
 
-        // Resolver URLs relativas → absolutas en el master capturado
+        // HLS: descargar el playlist desde el CDN con los headers correctos
+        const masterRaw = await fetchM3u8(result.url, headers)
+        if (!masterRaw) {
+          // No se pudo bajar el m3u8 → fallback a un único variant proxeado
+          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
+          const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
+          let fb = '#EXTM3U\n'
+          if (hasSubs) fb += subLines.join('\n') + '\n'
+          fb += `#EXT-X-STREAM-INF:BANDWIDTH=4000000${subsAttr}\n${varUrl}\n`
+          return fb
+        }
+
         const resolved = resolveRelativeUrls(masterRaw, result.url)
-        return rewriteMasterVariants(resolved, result.url, base, subLines, query_string)
+
+        // ¿Es un master (con variantes) o un media playlist (segmentos directos)?
+        if (resolved.includes('#EXT-X-STREAM-INF')) {
+          return rewriteMasterVariants(resolved, result.url, base, subLines, query_string)
+        }
+        // Media playlist: segmentos directos → un solo variant que envuelve este playlist
+        const varUrl = `${base}/stream/variant.m3u8?${query_string}&url=${encodeURIComponent(result.url)}`
+        const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
+        let fb = '#EXTM3U\n'
+        if (hasSubs) fb += subLines.join('\n') + '\n'
+        fb += `#EXT-X-STREAM-INF:BANDWIDTH=4000000${subsAttr}\n${varUrl}\n`
+        return fb
       })
 
       set.headers['content-type'] = HLS_MIME
@@ -171,28 +213,17 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
 
       const variantUrl = decodeURIComponent(q.url)
       const base = baseUrl(request)
+      const headers = streamResult.headers as Record<string, string>
+      const referer = refererOf(headers)
 
-      // Buscar en las variantes capturadas
-      const referer = (streamResult.headers as Record<string, string>).Referer ?? ''
-      const content = streamResult.variantContents?.[variantUrl]
-      if (content) {
-        const rewritten = rewriteAllUrls(content, variantUrl, base, referer)
+      // Descargar el variant playlist desde el CDN con los headers correctos
+      const raw = await fetchM3u8(variantUrl, headers)
+      if (raw) {
+        const resolved = resolveRelativeUrls(raw, variantUrl)
+        const rewritten = rewriteAllUrls(resolved, variantUrl, base, referer)
         set.headers['content-type'] = HLS_MIME
         return rewritten
       }
-
-      // Fallback: fetch directo desde el servidor con el Referer del CDN
-      try {
-        const raw = await fetch(variantUrl, {
-          headers: referer ? { Referer: referer } : {},
-          signal: AbortSignal.timeout?.(10000),
-        }).then(r => r.text())
-        if (raw.trimStart().startsWith('#EXTM3U')) {
-          const rewritten = rewriteAllUrls(raw, variantUrl, base, referer)
-          set.headers['content-type'] = HLS_MIME
-          return rewritten
-        }
-      } catch {}
 
       set.status = 502
       return 'Variant not available'
