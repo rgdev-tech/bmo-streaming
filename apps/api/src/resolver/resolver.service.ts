@@ -5,9 +5,10 @@ import { TTLCache } from './cache'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — CDN tokens suelen expirar antes de 90 min
 
-// Tiempo máximo de carga de la página y de espera para capturar el m3u8
-const PAGE_TIMEOUT = 20_000
-const STREAM_WAIT  = 7_000
+// Tiempo máximo de carga de la página y de espera para capturar el m3u8.
+// En Vercel podemos esperar más; local acortamos para fallar rápido si hay DNS bloqueado.
+const PAGE_TIMEOUT = process.env.VERCEL ? 20_000 : 12_000
+const STREAM_WAIT  = process.env.VERCEL ? 8_000 : 5_000
 
 const CACHE_FILE = process.env.VERCEL
   ? '/tmp/bmo-streams.json'
@@ -53,9 +54,17 @@ async function tryProvider(
     const getResult = await provider.attach(page)
 
     await page.goto(embedUrl, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT })
-    await page.waitForTimeout(STREAM_WAIT)
 
-    const result = getResult()
+    // Polling: salir en cuanto tengamos el m3u8 (no esperar 7s siempre)
+    const result = await new Promise<ReturnType<typeof getResult>>((resolve) => {
+      const end = Date.now() + STREAM_WAIT
+      const check = () => {
+        const r = getResult()
+        if (r?.url || Date.now() >= end) { resolve(r); return }
+        setTimeout(check, 200)
+      }
+      check()
+    })
     if (!result?.url) return null
 
     // Extraer el referer que el CDN realmente espera (puede estar en ?headers= del URL)

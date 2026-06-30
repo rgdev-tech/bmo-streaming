@@ -41,8 +41,29 @@ export function getBrowser(): Promise<Browser> {
           args: [...sparticuzChromium.args, '--disable-blink-features=AutomationControlled'],
         })
       } else {
-        // headless: false → Chrome real, no detectable por CF bot protection como headless
-        browser = await chromium.launch({ headless: false, args: LOCAL_ARGS })
+        // Intentar Chrome del sistema primero (fingerprints reales → bypasea CF bot protection).
+        // Si no está instalado, usar Chromium bundled con Playwright.
+        const { execSync } = await import('child_process')
+        let chromePath: string | null = null
+        try {
+          chromePath = execSync(
+            'ls "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" 2>/dev/null || ' +
+            'ls "/Applications/Chromium.app/Contents/MacOS/Chromium" 2>/dev/null || echo ""',
+            { encoding: 'utf8' }
+          ).trim() || null
+        } catch {}
+
+        if (chromePath) {
+          console.error(`[browser] usando Chrome del sistema: ${chromePath}`)
+          browser = await chromium.launch({
+            headless: true,
+            executablePath: chromePath,
+            args: LOCAL_ARGS,
+          })
+        } else {
+          console.error('[browser] Chrome no encontrado, usando Chromium bundled')
+          browser = await chromium.launch({ headless: true, args: LOCAL_ARGS })
+        }
       }
 
       browser.on('disconnected', () => { browserPromise = null })

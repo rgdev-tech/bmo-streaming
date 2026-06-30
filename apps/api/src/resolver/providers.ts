@@ -126,19 +126,25 @@ export const PROVIDERS: Provider[] = [
           fallback = u
           fallbackReferer = req.headers()['referer'] ?? ''
         }
+        if (isM3u8(u)) console.error(`[vidlink] m3u8 REQUEST type:${req.resourceType()} url:${u.slice(-60)}`)
       })
       page.on('response', async (res) => {
         const u = res.url()
         if (!fallback && isM3u8(u)) fallback = u
-        // Capturar contenido m3u8 del browser — este es el que puede bypassear CF bot protection
-        if (isM3u8(u) && !capturedVariants.has(u)) {
-          try {
-            const body = await res.text()
-            if (body.trimStart().startsWith('#EXTM3U')) {
-              if (!capturedMaster) capturedMaster = body
-              capturedVariants.set(u, body)
+        if (isM3u8(u)) {
+          console.error(`[vidlink] m3u8 RESPONSE: ${u.slice(-60)} status:${res.status()}`)
+          if (!capturedVariants.has(u)) {
+            try {
+              const body = await res.text()
+              console.error(`[vidlink] m3u8 body start: "${body.slice(0,40)}"`)
+              if (body.trimStart().startsWith('#EXTM3U')) {
+                if (!capturedMaster) capturedMaster = body
+                capturedVariants.set(u, body)
+              }
+            } catch (e: any) {
+              console.error(`[vidlink] m3u8 body error: ${e?.message}`)
             }
-          } catch {}
+          }
         }
       })
       await blockAds(page, async (url, route) => {
@@ -183,37 +189,19 @@ export const PROVIDERS: Provider[] = [
       : `https://player.videasy.net/movie/${id}`
   ),
 
-  m3u8Sniffer('vidsrc.to', 'https://vidsrc.to/', 1, (type, id, s, e) =>
-    type === 'tv'
-      ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}`
-      : `https://vidsrc.to/embed/movie/${id}`
-  ),
-
-  m3u8Sniffer('superembed', 'https://superembed.stream/', 1, (type, id, s, e) =>
-    type === 'tv'
-      ? `https://superembed.stream/embed?tmdb=1&tv=1&id=${id}&season=${s}&episode=${e}`
-      : `https://superembed.stream/embed?tmdb=1&id=${id}`
-  ),
-
-  // ─── TIER 2: respaldo ───
-
-  m3u8Sniffer('embed.su', 'https://embed.su/', 2, (type, id, s, e) =>
+  m3u8Sniffer('embed.su', 'https://embed.su/', 1, (type, id, s, e) =>
     type === 'tv'
       ? `https://embed.su/embed/tv/${id}/${s}/${e}`
       : `https://embed.su/embed/movie/${id}`
   ),
 
-  m3u8Sniffer('autoembed', 'https://autoembed.cc/', 2, (type, id, s, e) =>
-    type === 'tv'
-      ? `https://autoembed.cc/tv/tmdb/${id}/${s}/${e}`
-      : `https://autoembed.cc/movie/tmdb/${id}`
-  ),
-
-  m3u8Sniffer('vidsrc.cc', 'https://vidsrc.cc/', 2, (type, id, s, e) =>
+  m3u8Sniffer('vidsrc.cc', 'https://vidsrc.cc/', 1, (type, id, s, e) =>
     type === 'tv'
       ? `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}`
       : `https://vidsrc.cc/v2/embed/movie/${id}`
   ),
+
+  // ─── TIER 2: respaldo ───
 
   m3u8Sniffer('2embed', 'https://www.2embed.cc/', 2, (type, id, s, e) =>
     type === 'tv'
@@ -221,10 +209,11 @@ export const PROVIDERS: Provider[] = [
       : `https://www.2embed.cc/embed/${id}`
   ),
 
-  m3u8Sniffer('moviesapi', 'https://moviesapi.club/', 2, (type, id, s, e) =>
+  // vidsrc.to: CF-bloqueado frecuentemente, como fallback solamente
+  m3u8Sniffer('vidsrc.to', 'https://vidsrc.to/', 2, (type, id, s, e) =>
     type === 'tv'
-      ? `https://moviesapi.club/tv/${id}-${s}-${e}`
-      : `https://moviesapi.club/movie/${id}`
+      ? `https://vidsrc.to/embed/tv/${id}/${s}/${e}`
+      : `https://vidsrc.to/embed/movie/${id}`
   ),
 
   // ─── TIER 3: respaldo extendido (solo si tiers 1 y 2 fallan) ───

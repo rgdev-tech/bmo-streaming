@@ -42,9 +42,9 @@ function baseUrl(request: Request): string {
   return `${proto}://${host}`
 }
 
-// Reescribe todas las URLs de un m3u8 (variantes o segmentos) para pasar por nuestro servidor.
-// El servidor puede acceder al CDN via browser (Playwright) o relay directo.
-function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string): string {
+// Reescribe todas las URLs de un m3u8 (segmentos) para pasar por nuestro servidor.
+// referer se pasa directo en la URL — no necesita lookup por segmento.
+function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string, referer: string): string {
   const base = baseM3u8Url.slice(0, baseM3u8Url.lastIndexOf('/') + 1)
   const origin = new URL(baseM3u8Url).origin
   const lines = m3u8.split('\n')
@@ -53,28 +53,25 @@ function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string): s
   for (const line of lines) {
     const t = line.trim()
     if (!t || t.startsWith('#')) { out.push(line); continue }
-    // Es una URL (variante o segmento)
     let abs = t
     if (!t.startsWith('http')) {
       abs = t.startsWith('/') ? `${origin}${t}` : `${base}${t}`
     }
-    // Proxy: /stream/seg?url=<encoded>
-    out.push(`${proxyBase}/stream/seg?url=${encodeURIComponent(abs)}`)
+    out.push(`${proxyBase}/stream/seg?url=${encodeURIComponent(abs)}&referer=${encodeURIComponent(referer)}`)
   }
   return out.join('\n')
 }
 
-// Reescribe solo las líneas de variante en un master (líneas después de #EXT-X-STREAM-INF)
-function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: string, subLines: string[]): string {
+// Reescribe solo las líneas de variante en un master (líneas después de #EXT-X-STREAM-INF).
+// queryStr = "type=tv&id=123&season=1&episode=2" — se propaga a las rutas hijas.
+function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: string, subLines: string[], queryStr: string): string {
   const base = baseUrl2.slice(0, baseUrl2.lastIndexOf('/') + 1)
   const origin = new URL(baseUrl2).origin
   const lines = master.split('\n')
   const out: string[] = ['#EXTM3U']
 
-  // Insertar subtítulos después del #EXTM3U
   for (const s of subLines) out.push(s)
 
-  // Añadir atributo SUBTITLES a los EXT-X-STREAM-INF si hay subs
   const hasSubs = subLines.length > 0
   let nextIsVariant = false
 
@@ -98,8 +95,7 @@ function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: stri
       if (!t.startsWith('http')) {
         abs = t.startsWith('/') ? `${origin}${t}` : `${base}${t}`
       }
-      // Las variantes se sirven desde nuestro servidor
-      out.push(`${proxyBase}/stream/variant.m3u8?url=${encodeURIComponent(abs)}`)
+      out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}`)
       continue
     }
 
@@ -137,8 +133,8 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         const masterRaw = result.masterContent
         if (!masterRaw?.trimStart().startsWith('#EXTM3U')) {
           // No hay master capturado → fallback sin variantes (solo un stream directo)
-          // Reescribimos para que el player acceda via /stream/seg
-          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}`
+          const cdnReferer = (result.headers as Record<string, string>).Referer ?? ''
+          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(cdnReferer)}`
           const hasSubs = subLines.length > 0
           const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
           let fb = '#EXTM3U\n'
@@ -149,7 +145,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
 
         // Resolver URLs relativas → absolutas en el master capturado
         const resolved = resolveRelativeUrls(masterRaw, result.url)
-        return rewriteMasterVariants(resolved, result.url, base, subLines)
+        return rewriteMasterVariants(resolved, result.url, base, subLines, query_string)
       })
 
       set.headers['content-type'] = HLS_MIME
@@ -177,19 +173,22 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       const base = baseUrl(request)
 
       // Buscar en las variantes capturadas
+      const referer = (streamResult.headers as Record<string, string>).Referer ?? ''
       const content = streamResult.variantContents?.[variantUrl]
       if (content) {
-        const rewritten = rewriteAllUrls(content, variantUrl, base)
+        const rewritten = rewriteAllUrls(content, variantUrl, base, referer)
         set.headers['content-type'] = HLS_MIME
         return rewritten
       }
 
-      // Fallback: intentar fetch directo desde el servidor
+      // Fallback: fetch directo desde el servidor con el Referer del CDN
       try {
-        const headers = streamResult.headers as Record<string, string>
-        const raw = await fetch(variantUrl, { headers, signal: AbortSignal.timeout?.(10000) }).then(r => r.text())
+        const raw = await fetch(variantUrl, {
+          headers: referer ? { Referer: referer } : {},
+          signal: AbortSignal.timeout?.(10000),
+        }).then(r => r.text())
         if (raw.trimStart().startsWith('#EXTM3U')) {
-          const rewritten = rewriteAllUrls(raw, variantUrl, base)
+          const rewritten = rewriteAllUrls(raw, variantUrl, base, referer)
           set.headers['content-type'] = HLS_MIME
           return rewritten
         }
@@ -207,29 +206,16 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
     }
   )
 
-  // Proxy de segmentos (TS binario) — fetched desde el servidor con los headers del CDN
+  // Proxy de segmentos (TS binario) — usa referer del query param, sin lookup de stream.
   .get(
     '/seg',
     async ({ query, set }) => {
-      const q = query as Query & { url: string }
+      const q = query as { url: string; referer?: string }
       if (!q.url) { set.status = 400; return 'No url' }
 
-      const streamResult = await resolveFromQuery(q)
-      if (!streamResult) { set.status = 404; return 'No stream' }
-
       const segUrl = decodeURIComponent(q.url)
-      const headers = streamResult.headers as Record<string, string>
-
-      // Si es un m3u8 (variante) sirvirlo con reescritura
-      if (segUrl.includes('.m3u8')) {
-        const content = streamResult.variantContents?.[segUrl]
-        if (content) {
-          const base = segUrl.slice(0, segUrl.indexOf('/stream/') + 8)
-          const rewritten = rewriteAllUrls(content, segUrl, base)
-          set.headers['content-type'] = HLS_MIME
-          return rewritten
-        }
-      }
+      const referer = q.referer ? decodeURIComponent(q.referer) : ''
+      const headers: Record<string, string> = referer ? { Referer: referer } : {}
 
       try {
         const resp = await fetch(segUrl, {
@@ -253,9 +239,8 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
     },
     {
       query: t.Object({
-        type: t.String(), id: t.String(),
-        season: t.Optional(t.String()), episode: t.Optional(t.String()),
         url: t.String(),
+        referer: t.Optional(t.String()),
       }),
     }
   )
