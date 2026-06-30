@@ -65,7 +65,10 @@ async function tryProvider(
       }
       check()
     })
-    if (!result?.url) return null
+    if (!result?.url) {
+      console.error(`[${provider.name}] no m3u8 captured after ${STREAM_WAIT}ms`)
+      return null
+    }
 
     // Extraer el referer que el CDN realmente espera (puede estar en ?headers= del URL)
     let cdnReferer = provider.referer
@@ -166,8 +169,11 @@ async function tryProvider(
   }
 }
 
-// Corre providers en paralelo, devuelve el primero que tenga éxito (no null).
-function raceProviders(
+// Corre providers con concurrencia limitada para no agotar memoria en Vercel.
+// MAX_CONCURRENT = 2 evita que múltiples contextos de Chromium crasheen el proceso.
+const MAX_CONCURRENT = process.env.VERCEL ? 2 : 4
+
+async function raceProviders(
   providers: Provider[],
   type: 'movie' | 'tv',
   tmdbId: number,
@@ -175,26 +181,39 @@ function raceProviders(
   episode?: number
 ): Promise<StreamResult | null> {
   if (providers.length === 0) return Promise.resolve(null)
+
+  // Slot semaphore: solo MAX_CONCURRENT corriendo a la vez
+  let slots = MAX_CONCURRENT
+  let resolved = false
+  let remaining = providers.length
+  const queue = [...providers]
+
   return new Promise((resolve) => {
-    let remaining = providers.length
-    let resolved = false
-    for (const provider of providers) {
-      tryProvider(provider, type, tmdbId, season, episode)
-        .then((result) => {
-          if (result && !resolved) {
-            resolved = true
-            console.error(`[scrape] ${provider.name} OK → ${result.url.slice(0, 80)}`)
-            resolve(result)
-          } else if (!result) {
+    function tryNext() {
+      while (slots > 0 && queue.length > 0 && !resolved) {
+        const provider = queue.shift()!
+        slots--
+        tryProvider(provider, type, tmdbId, season, episode)
+          .then((result) => {
+            slots++
+            if (result && !resolved) {
+              resolved = true
+              console.error(`[scrape] ${provider.name} OK → ${result.url.slice(0, 80)}`)
+              resolve(result)
+              return
+            }
+            if (!result) console.error(`[scrape] ${provider.name} → null`)
             if (--remaining === 0 && !resolved) { resolved = true; resolve(null) }
-          } else {
-            remaining--
-          }
-        })
-        .catch(() => {
-          if (--remaining === 0 && !resolved) { resolved = true; resolve(null) }
-        })
+            tryNext()
+          })
+          .catch(() => {
+            slots++
+            if (--remaining === 0 && !resolved) { resolved = true; resolve(null) }
+            tryNext()
+          })
+      }
     }
+    tryNext()
   })
 }
 
