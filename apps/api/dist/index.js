@@ -66464,6 +66464,8 @@ var providers2 = makeProviders({
   target: targets.NATIVE,
   consistentIpForRequests: true
 });
+var DEPRIORITIZED = /* @__PURE__ */ new Set(["vidlink"]);
+var SOURCE_ORDER = providers2.listSources().filter((s) => !DEPRIORITIZED.has(s.id)).sort((a, b) => b.rank - a.rank).map((s) => s.id);
 async function buildMedia(type, tmdbId, season, episode) {
   try {
     if (type === "movie") {
@@ -66526,7 +66528,7 @@ async function scrape2(type, tmdbId, season, episode) {
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`);
   const t0 = Date.now();
   try {
-    const output = await providers2.runAll({ media });
+    const output = await providers2.runAll({ media, sourceOrder: SOURCE_ORDER });
     if (!output) {
       console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`);
       return null;
@@ -66555,6 +66557,7 @@ async function debugScrape(type, tmdbId, season, episode) {
   try {
     const output = await providers2.runAll({
       media,
+      sourceOrder: SOURCE_ORDER,
       events: {
         init: (e) => {
           sourceIds = e.sourceIds;
@@ -66563,7 +66566,11 @@ async function debugScrape(type, tmdbId, season, episode) {
         update: (e) => events.push({ id: e.id, status: e.status, reason: e.reason, error: e.error ? String(e.error?.message ?? e.error).slice(0, 200) : void 0 })
       }
     });
-    if (output) found = { sourceId: output.sourceId, streamType: output.stream.type };
+    if (output) found = {
+      sourceId: output.sourceId,
+      streamType: output.stream.type,
+      url: (output.stream.type === "hls" ? output.stream.playlist : Object.values(output.stream.qualities)[0]?.url ?? "").slice(0, 120)
+    };
   } catch (e) {
     return { error: String(e.message), media, sourceIds, events };
   }

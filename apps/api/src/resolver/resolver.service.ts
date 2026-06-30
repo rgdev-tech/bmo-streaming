@@ -55,6 +55,17 @@ const providers = makeProviders({
   consistentIpForRequests: true,
 })
 
+// Fuentes que devuelven mp4 H.265 con tag `hev1` — iOS/AVPlayer reproduce el audio
+// pero NO el video. Las mandamos al final para preferir HLS/H.264 (compatible).
+const DEPRIORITIZED = new Set(['vidlink'])
+
+// Orden de fuentes: todas por rank desc, pero las deprioritizadas al final.
+const SOURCE_ORDER: string[] = providers
+  .listSources()
+  .filter((s) => !DEPRIORITIZED.has(s.id))
+  .sort((a, b) => b.rank - a.rank)
+  .map((s) => s.id)
+
 // Construye el objeto ScrapeMedia que la librería necesita (título + año + tmdbIds).
 async function buildMedia(
   type: 'movie' | 'tv',
@@ -137,7 +148,7 @@ async function scrape(
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`)
   const t0 = Date.now()
   try {
-    const output = await providers.runAll({ media })
+    const output = await providers.runAll({ media, sourceOrder: SOURCE_ORDER })
     if (!output) {
       console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`)
       return null
@@ -181,13 +192,18 @@ export async function debugScrape(
   try {
     const output = await providers.runAll({
       media,
+      sourceOrder: SOURCE_ORDER,
       events: {
         init: (e) => { sourceIds = e.sourceIds },
         start: (id) => events.push({ id, phase: 'start' }),
         update: (e) => events.push({ id: e.id, status: e.status, reason: e.reason, error: e.error ? String((e.error as any)?.message ?? e.error).slice(0, 200) : undefined }),
       },
     })
-    if (output) found = { sourceId: output.sourceId, streamType: output.stream.type }
+    if (output) found = {
+      sourceId: output.sourceId,
+      streamType: output.stream.type,
+      url: (output.stream.type === 'hls' ? output.stream.playlist : Object.values(output.stream.qualities)[0]?.url ?? '').slice(0, 120),
+    }
   } catch (e) {
     return { error: String((e as Error).message), media, sourceIds, events }
   }
