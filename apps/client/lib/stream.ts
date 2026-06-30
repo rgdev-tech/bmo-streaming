@@ -1,25 +1,26 @@
 import { api, API_URL } from './api'
 
 export type ResolveInfo = {
+  streamUrl: string   // URL directa del CDN — el player la usa sin pasar por el servidor
+  referer: string
   source: string
   captions: string[]
-  referer: string
 }
 
-export const stream = {
-  // Calienta el cache y devuelve los idiomas de subtítulo disponibles
-  resolveMovie: (id: string | number) => api<ResolveInfo>(`/resolve/movie/${id}`),
-  resolveTv: (id: string | number, season: number, episode: number) =>
-    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}`),
+const RESOLVE_TIMEOUT = 55_000  // 55s — el scraper puede tardar pero no más que esto
 
-  // URL del master HLS con subtítulos inyectados (lo que reproduce el player)
+export const stream = {
+  resolveMovie: (id: string | number) => api<ResolveInfo>(`/resolve/movie/${id}`, RESOLVE_TIMEOUT),
+  resolveTv: (id: string | number, season: number, episode: number) =>
+    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}`, RESOLVE_TIMEOUT),
+
+  // Master HLS proxeado por nuestro servidor (variantes + segmentos + subs)
   masterMovie: (id: string | number) =>
     `${API_URL}/stream/master.m3u8?type=movie&id=${id}`,
   masterTv: (id: string | number, season: number, episode: number) =>
     `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}`,
 
   // Pre-resuelve un stream en segundo plano (calienta el cache del API).
-  // No bloquea ni lanza: al darle play luego, arranca instantáneo.
   prewarm: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number) => {
     const p = type === 'tv'
       ? api(`/resolve/tv/${id}/${season ?? 1}/${episode ?? 1}`)

@@ -14,6 +14,7 @@ import * as Haptics from 'expo-haptics'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { getWatchedEpisodes, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
+import { DownloadButton } from './DownloadButton'
 
 export function SeasonEpisodes({
   tvId,
@@ -200,19 +201,33 @@ function EpisodeRow({
         ) : null}
       </View>
 
-      {/* Botón marcar visto/no visto */}
+      {/* Descarga + marcar visto */}
       {released && (
-        <Pressable
-          style={styles.markBtn}
-          onPress={onToggleWatched}
-          hitSlop={10}
-        >
-          <SymbolView
-            name={watched ? 'checkmark.circle.fill' : 'circle'}
-            tintColor={watched ? '#34C759' : 'rgba(255,255,255,0.5)'}
-            style={styles.markIcon}
+        <View style={styles.rowActions}>
+          <DownloadButton
+            id={Number(tvId)}
+            media_type="tv"
+            title={title}
+            poster_path={poster}
+            backdrop_path={backdrop}
+            season={season}
+            episode={ep.episode_number}
+            episodeTitle={ep.name}
+            size={22}
+            tintColor="rgba(255,255,255,0.6)"
           />
-        </Pressable>
+          <Pressable
+            style={styles.markBtn}
+            onPress={onToggleWatched}
+            hitSlop={10}
+          >
+            <SymbolView
+              name={watched ? 'checkmark.circle.fill' : 'circle'}
+              tintColor={watched ? '#34C759' : 'rgba(255,255,255,0.5)'}
+              style={styles.markIcon}
+            />
+          </Pressable>
+        </View>
       )}
     </Pressable>
   )
@@ -280,8 +295,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   markBtn: {
-    paddingLeft: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },

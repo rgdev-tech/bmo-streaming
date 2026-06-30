@@ -41,7 +41,8 @@ export function getBrowser(): Promise<Browser> {
           args: [...sparticuzChromium.args, '--disable-blink-features=AutomationControlled'],
         })
       } else {
-        browser = await chromium.launch({ headless: true, args: LOCAL_ARGS })
+        // headless: false → Chrome real, no detectable por CF bot protection como headless
+        browser = await chromium.launch({ headless: false, args: LOCAL_ARGS })
       }
 
       browser.on('disconnected', () => { browserPromise = null })

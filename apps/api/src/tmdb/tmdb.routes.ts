@@ -1,72 +1,97 @@
 import { Elysia, t } from 'elysia'
 import { tmdbService } from './tmdb.service'
+import { TTLCache } from '../resolver/cache'
+
+const CATALOG_TTL = 30 * 60_000   // 30 min
+const cache = new TTLCache<unknown>(CATALOG_TTL)
+
+async function safeGenres(
+  genres: [string, number][],
+  type: 'movie' | 'tv'
+): Promise<{ name: string; results: any[] }[]> {
+  const results = await Promise.allSettled(
+    genres.map(([, id]) => tmdbService.discoverByGenre(id, type))
+  )
+  return genres
+    .map(([name], i) => ({
+      name,
+      results: results[i].status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<any>).value.results ?? [] : [],
+    }))
+    .filter((g) => g.results.length > 0)
+}
 
 export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
   // Inicio: varias filas en una sola llamada
-  .get('/home', async () => {
-    const [trending, popularMovies, popularSeries, topMovies] =
-      await Promise.all([
-        tmdbService.trending(),
-        tmdbService.popularMovies(),
-        tmdbService.popularSeries(),
-        tmdbService.topRatedMovies(),
-      ])
-    return { trending, popularMovies, popularSeries, topMovies }
-  })
+  .get('/home', () =>
+    cache.resolve('home', async () => {
+      const [trending, popularMovies, popularSeries, topMovies] =
+        await Promise.all([
+          tmdbService.trending(),
+          tmdbService.popularMovies(),
+          tmdbService.popularSeries(),
+          tmdbService.topRatedMovies(),
+        ])
+      return { trending, popularMovies, popularSeries, topMovies }
+    })
+  )
 
   // Películas: tendencias + populares + mejor valoradas + filas por género
-  .get('/movies', async () => {
-    const GENRES: [string, number][] = [
-      ['Acción', 28],
-      ['Comedia', 35],
-      ['Terror', 27],
-      ['Ciencia ficción', 878],
-      ['Animación', 16],
-      ['Drama', 18],
-      ['Romance', 10749],
-    ]
-    const [trending, popular, topRated, ...genreResults] = await Promise.all([
-      tmdbService.trendingMovies(),
-      tmdbService.popularMovies(),
-      tmdbService.topRatedMovies(),
-      ...GENRES.map(([, id]) => tmdbService.discoverByGenre(id, 'movie')),
-    ])
-    const genres = GENRES.map(([name], i) => ({ name, results: (genreResults[i] as any).results }))
-    return { trending, popular, topRated, genres }
-  })
+  .get('/movies', () =>
+    cache.resolve('movies', async () => {
+      const GENRES: [string, number][] = [
+        ['Acción', 28],
+        ['Comedia', 35],
+        ['Terror', 27],
+        ['Ciencia ficción', 878],
+        ['Animación', 16],
+        ['Drama', 18],
+        ['Romance', 10749],
+      ]
+      const [trending, popular, topRated, genres] = await Promise.all([
+        tmdbService.trendingMovies(),
+        tmdbService.popularMovies(),
+        tmdbService.topRatedMovies(),
+        safeGenres(GENRES, 'movie'),
+      ])
+      return { trending, popular, topRated, genres }
+    })
+  )
 
   // Series: tendencias + populares + mejor valoradas + filas por género
-  .get('/series', async () => {
-    const GENRES: [string, number][] = [
-      ['Drama', 18],
-      ['Comedia', 35],
-      ['Crimen', 80],
-      ['Sci-Fi y Fantasía', 10765],
-      ['Acción y Aventura', 10759],
-      ['Animación', 16],
-      ['Misterio', 9648],
-    ]
-    const [trending, popular, topRated, ...genreResults] = await Promise.all([
-      tmdbService.trendingSeries(),
-      tmdbService.popularSeries(),
-      tmdbService.topRatedSeries(),
-      ...GENRES.map(([, id]) => tmdbService.discoverByGenre(id, 'tv')),
-    ])
-    const genres = GENRES.map(([name], i) => ({ name, results: (genreResults[i] as any).results }))
-    return { trending, popular, topRated, genres }
-  })
+  .get('/series', () =>
+    cache.resolve('series', async () => {
+      const GENRES: [string, number][] = [
+        ['Drama', 18],
+        ['Comedia', 35],
+        ['Crimen', 80],
+        ['Sci-Fi y Fantasía', 10765],
+        ['Acción y Aventura', 10759],
+        ['Animación', 16],
+        ['Misterio', 9648],
+      ]
+      const [trending, popular, topRated, genres] = await Promise.all([
+        tmdbService.trendingSeries(),
+        tmdbService.popularSeries(),
+        tmdbService.topRatedSeries(),
+        safeGenres(GENRES, 'tv'),
+      ])
+      return { trending, popular, topRated, genres }
+    })
+  )
 
   // Colecciones por plataforma (Netflix, Apple TV+, HBO Max, Disney+, Prime)
-  .get('/collections', async () => {
-    const [netflix, appletv, hbo, disney, prime] = await Promise.all([
-      tmdbService.discoverByProvider(8), // Netflix
-      tmdbService.discoverByProvider(350, 'tv'), // Apple TV+ (más series)
-      tmdbService.discoverByProvider(1899), // HBO Max / Max
-      tmdbService.discoverByProvider(337), // Disney+
-      tmdbService.discoverByProvider(9), // Amazon Prime Video
-    ])
-    return { netflix, appletv, hbo, disney, prime }
-  })
+  .get('/collections', () =>
+    cache.resolve('collections', async () => {
+      const [netflix, appletv, hbo, disney, prime] = await Promise.all([
+        tmdbService.discoverByProvider(8),
+        tmdbService.discoverByProvider(350, 'tv'),
+        tmdbService.discoverByProvider(1899),
+        tmdbService.discoverByProvider(337),
+        tmdbService.discoverByProvider(9),
+      ])
+      return { netflix, appletv, hbo, disney, prime }
+    })
+  )
 
   // Detalle de persona (actor) con filmografía
   .get('/person/:id', ({ params }) => tmdbService.personDetails(Number(params.id)), {
@@ -90,42 +115,47 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
   )
 
   // Categorías para la pantalla de Buscar (género + arte representativo)
-  .get('/categories', async () => {
-    const CATS: [string, 'movie' | 'tv', number][] = [
-      ['Acción', 'movie', 28],
-      ['Comedia', 'movie', 35],
-      ['Terror', 'movie', 27],
-      ['Ciencia ficción', 'movie', 878],
-      ['Animación', 'movie', 16],
-      ['Drama', 'movie', 18],
-      ['Crimen', 'tv', 80],
-      ['Romance', 'movie', 10749],
-      ['Aventura', 'movie', 12],
-      ['Documentales', 'movie', 99],
-      ['Familia', 'movie', 10751],
-      ['Suspenso', 'movie', 53],
-      ['Fantasía', 'movie', 14],
-      ['Misterio', 'movie', 9648],
-      ['Historia', 'movie', 36],
-      ['Música', 'movie', 10402],
-      ['Bélico', 'movie', 10752],
-      ['Western', 'movie', 37],
-      ['Reality', 'tv', 10764],
-      ['Series acción', 'tv', 10759],
-      ['Sci-Fi & Fantasy', 'tv', 10765],
-      ['Infantil', 'tv', 10762],
-      ['Guerra y política', 'tv', 10768],
-      ['Telenovelas', 'tv', 10766],
-    ]
-    const results = await Promise.all(
-      CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))
-    )
-    return CATS.map(([name, type, genreId], i) => {
-      const list = (results[i] as any).results as any[]
-      const art = list.find((x) => x.backdrop_path) ?? list[0]
-      return { name, type, genreId, backdrop_path: art?.backdrop_path ?? null }
+  .get('/categories', () =>
+    cache.resolve('categories', async () => {
+      const CATS: [string, 'movie' | 'tv', number][] = [
+        ['Acción', 'movie', 28],
+        ['Comedia', 'movie', 35],
+        ['Terror', 'movie', 27],
+        ['Ciencia ficción', 'movie', 878],
+        ['Animación', 'movie', 16],
+        ['Drama', 'movie', 18],
+        ['Crimen', 'tv', 80],
+        ['Romance', 'movie', 10749],
+        ['Aventura', 'movie', 12],
+        ['Documentales', 'movie', 99],
+        ['Familia', 'movie', 10751],
+        ['Suspenso', 'movie', 53],
+        ['Fantasía', 'movie', 14],
+        ['Misterio', 'movie', 9648],
+        ['Historia', 'movie', 36],
+        ['Música', 'movie', 10402],
+        ['Bélico', 'movie', 10752],
+        ['Western', 'movie', 37],
+        ['Reality', 'tv', 10764],
+        ['Series acción', 'tv', 10759],
+        ['Sci-Fi & Fantasy', 'tv', 10765],
+        ['Infantil', 'tv', 10762],
+        ['Guerra y política', 'tv', 10768],
+        ['Telenovelas', 'tv', 10766],
+      ]
+      const results = await Promise.allSettled(
+        CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))
+      )
+      return CATS.map(([name, type, genreId], i) => {
+        const list: any[] =
+          results[i].status === 'fulfilled'
+            ? ((results[i] as PromiseFulfilledResult<any>).value.results ?? [])
+            : []
+        const art = list.find((x: any) => x.backdrop_path) ?? list[0]
+        return { name, type, genreId, backdrop_path: art?.backdrop_path ?? null }
+      }).filter((c) => c.backdrop_path)
     })
-  })
+  )
 
   // Secciones para la pantalla de categoría estilo Apple TV
   .get(

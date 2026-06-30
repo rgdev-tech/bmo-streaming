@@ -21,6 +21,7 @@ import { CastRow } from '@/components/CastRow'
 import { PosterRow } from '@/components/PosterRow'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 import { stream } from '@/lib/stream'
+import { DownloadButton } from '@/components/DownloadButton'
 
 type Availability = 'checking' | 'available' | 'unavailable'
 
@@ -180,6 +181,19 @@ export default function TitleScreen() {
                   />
                   <Text style={styles.listText}>Mi Lista</Text>
                 </Pressable>
+                {!isTv && data && isReleased(data.release_date) && availability === 'available' && (
+                  <View style={[styles.secondaryBtn, { gap: 8 }]}>
+                    <DownloadButton
+                      id={Number(id)}
+                      media_type="movie"
+                      title={titleOf(data)}
+                      poster_path={data.poster_path}
+                      backdrop_path={data.backdrop_path}
+                      size={20}
+                    />
+                    <Text style={styles.listText}>Descargar</Text>
+                  </View>
+                )}
                 {trailer && (
                   <Pressable style={styles.secondaryBtn} onPress={openTrailer}>
                     <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />

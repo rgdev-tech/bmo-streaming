@@ -22,10 +22,22 @@ function resolveApiUrl(): string {
 
 export const API_URL = resolveApiUrl()
 
-export async function api<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`)
-  if (!res.ok) {
-    throw new Error(`API ${res.status} en ${path}`)
+export async function api<T>(path: string, timeoutMs = 0): Promise<T> {
+  let opts: RequestInit = {}
+  let timerId: ReturnType<typeof setTimeout> | undefined
+  let controller: AbortController | undefined
+
+  if (timeoutMs > 0) {
+    controller = new AbortController()
+    timerId = setTimeout(() => controller!.abort(), timeoutMs)
+    opts = { signal: controller.signal }
   }
-  return res.json() as Promise<T>
+
+  try {
+    const res = await fetch(`${API_URL}${path}`, opts)
+    if (!res.ok) throw new Error(`API ${res.status} en ${path}`)
+    return res.json() as Promise<T>
+  } finally {
+    if (timerId !== undefined) clearTimeout(timerId)
+  }
 }

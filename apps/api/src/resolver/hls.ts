@@ -1,6 +1,22 @@
 // Utilidades puras para manipular playlists HLS y subtítulos.
 // Sin dependencias del servidor → fácilmente testeable.
 
+// Convierte URLs relativas en un m3u8 a absolutas usando la URL base del master.
+// Necesario cuando capturamos el m3u8 en el browser y lo servimos desde nuestro API.
+export function resolveRelativeUrls(m3u8: string, baseUrl: string): string {
+  const base = baseUrl.slice(0, baseUrl.lastIndexOf('/') + 1)
+  const origin = new URL(baseUrl).origin
+  return m3u8.split('\n').map((line) => {
+    const trimmed = line.trim()
+    // Saltar líneas vacías, comentarios y URIs de atributos (#EXT-X-MEDIA,URI="...")
+    if (!trimmed || trimmed.startsWith('#')) return line
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return line
+    if (trimmed.startsWith('//')) return `https:${trimmed}`
+    if (trimmed.startsWith('/')) return `${origin}${trimmed}`
+    return `${base}${trimmed}`
+  }).join('\n')
+}
+
 // Mapea el nombre de idioma de vidlink a código ISO para el atributo LANGUAGE
 export function langCode(language: string): string {
   const l = language.toLowerCase()

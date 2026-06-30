@@ -1,13 +1,30 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream, checkProviders } from './resolver.service'
 
+// Algunos CDNs (vidlink → storm.vodvidl.site) incluyen en el query param ?headers=
+// el Referer que esperan recibir del cliente. Lo extraemos para dárselo al player.
+function extractCdnReferer(streamUrl: string): string {
+  try {
+    const url = new URL(streamUrl)
+    const raw = url.searchParams.get('headers')
+    if (raw) {
+      const hdrs = JSON.parse(decodeURIComponent(raw))
+      if (typeof hdrs?.referer === 'string' && hdrs.referer) return hdrs.referer
+    }
+  } catch {}
+  return ''
+}
+
 // Devuelve metadata de resolución (calienta el cache + subtítulos + referer)
 function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
   if (!result) return null
+  // Prefiere el referer embebido en el CDN URL (más preciso) sobre el del embed page
+  const cdnReferer = extractCdnReferer(result.url)
   return {
+    streamUrl: result.url,
+    referer: cdnReferer || result.headers.Referer || '',
     source: result.source,
     captions: result.captions.map((c) => c.language),
-    referer: result.headers.Referer,
   }
 }
 

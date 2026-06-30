@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream } from '@/lib/stream'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
+import { getLocalPath, smartDownloadNext } from '@/lib/download'
 
 const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
@@ -24,6 +25,7 @@ export default function PlayerScreen() {
   const params = useLocalSearchParams<{
     type: string; id: string; season?: string; episode?: string
     title?: string; poster?: string; backdrop?: string; episodeTitle?: string
+    localPath?: string   // si viene con ruta local, reproducir sin resolver
   }>()
   const { type, id, season, episode, title } = params
   const isTv = type === 'tv'
@@ -34,6 +36,7 @@ export default function PlayerScreen() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
@@ -64,34 +67,60 @@ export default function PlayerScreen() {
   function retry() {
     setError(null)
     setReady(false)
+    setStreamUrl(null)
     setRetryCount((c) => c + 1)
   }
 
   useEffect(() => {
     let cancelled = false
-    const resolveP = isTv
-      ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1)
-      : stream.resolveMovie(id)
-    Promise.all([
-      resolveP,
-      getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN),
-    ])
-      .then(([info, pos]) => {
-        if (cancelled) return
-        setReferer(info.referer)
+
+    async function resolve() {
+      // 1. Chequear si hay descarga local para este contenido
+      const local = params.localPath
+        || await getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN)
+
+      const pos = await getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN)
+      if (cancelled) return
+
+      if (local) {
+        // Reproducción offline: la URI ya es el m3u8 local
+        setReferer('')
         setStartAt(pos)
         setReady(true)
-        // Pre-resuelve el siguiente episodio en segundo plano → al pasar a él,
-        // arranca instantáneo (sin "Preparando stream…")
-        if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1)
-      })
-      .catch((e) => !cancelled && setError(String(e)))
+        return
+      }
+
+      // 2. Resolución normal via API
+      const resolveP = isTv
+        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1)
+        : stream.resolveMovie(id)
+
+      const info = await resolveP
+      if (cancelled) return
+      setStreamUrl(info.streamUrl)
+      setReferer(info.referer)
+      setStartAt(pos)
+      setReady(true)
+
+      // Pre-resuelve el siguiente episodio en segundo plano
+      if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1)
+    }
+
+    resolve().catch((e) => !cancelled && setError(String(e)))
     return () => { cancelled = true }
   }, [type, id, seasonN, episodeN, retryCount])
 
-  const masterUrl = isTv
-    ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
-    : stream.masterMovie(id)
+  // Si existe descarga local, el player la usará directamente (sin pasar por API)
+  const [localUri, setLocalUri] = useState<string | null>(params.localPath ?? null)
+  useEffect(() => {
+    getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
+  }, [id, isTv, seasonN, episodeN])
+
+  // URI final: local > master HLS proxeado por nuestro servidor
+  const masterUrl = localUri
+    ?? (isTv
+      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
+      : stream.masterMovie(id))
 
   // Título base: quita el sufijo "· T_:E_" si vino en el param
   const baseTitle = (title ?? '').replace(/\s*·\s*T\d+:E\d+\s*$/, '')
@@ -132,6 +161,16 @@ export default function PlayerScreen() {
   // El video llegó al final
   function handleEnded() {
     if (isTv && hasNextEpisode) {
+      // Smart download: pre-descarga el episodio siguiente al siguiente
+      smartDownloadNext({
+        id: Number(id),
+        title: (title ?? '').replace(/\s*·\s*T\d+:E\d+\s*$/, ''),
+        poster_path: params.poster ?? null,
+        backdrop_path: params.backdrop ?? null,
+        season: seasonN ?? 1,
+        currentEpisode: episodeN ?? 1,
+        seasonEpisodeNumbers: seasonEps,
+      })
       setShowNext(true)
     } else {
       exitToBack()
@@ -142,6 +181,7 @@ export default function PlayerScreen() {
   function playNextEpisode() {
     setShowNext(false)
     setReady(false)
+    setStreamUrl(null)
     setStartAt(0)
     setEpisodeN(nextEpisodeN)
   }
@@ -166,10 +206,7 @@ export default function PlayerScreen() {
         <View style={styles.center}>
           <SymbolView name="film.stack" tintColor="rgba(255,255,255,0.4)" style={styles.errIcon} />
           <Text style={styles.errText}>No se pudo cargar</Text>
-          <Text style={styles.errSub}>
-            No encontramos una fuente disponible. Puede ser contenido muy
-            reciente o un fallo temporal — intenta de nuevo.
-          </Text>
+          <Text style={styles.errSub}>{error}</Text>
           <View style={styles.errButtons}>
             <Pressable style={styles.retry} onPress={retry}>
               <SymbolView name="arrow.clockwise" tintColor="#000" style={styles.retryIcon} />
@@ -180,7 +217,7 @@ export default function PlayerScreen() {
             </Pressable>
           </View>
         </View>
-      ) : ready ? (
+      ) : ready && masterUrl ? (
         <NativePlayer
           key={`${seasonN ?? 0}-${episodeN ?? 0}`}
           uri={masterUrl}
@@ -193,6 +230,7 @@ export default function PlayerScreen() {
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
+          onError={(msg) => setError(msg || 'Player error')}
         />
       ) : (
         <View style={styles.center}>
@@ -212,7 +250,7 @@ export default function PlayerScreen() {
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext,
+  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
@@ -222,6 +260,7 @@ function NativePlayer({
   onClose: (watchedFraction: number) => void
   onEnded: () => void
   onPlayNext: () => void
+  onError: (msg: string) => void
 }) {
   const insets = useSafeAreaInsets()
   const videoRef = useRef<VideoView>(null)
@@ -242,13 +281,16 @@ function NativePlayer({
   // Arrancar cuando el stream esté listo + entrar al fullscreen nativo de Apple
   // (AVPlayerViewController) — el que tiene Liquid Glass, velocidad, audio y subtítulos
   const started = useRef(false)
-  useEventListener(player, 'statusChange', ({ status }) => {
+  useEventListener(player, 'statusChange', ({ status, error: playerError }) => {
     if (status === 'readyToPlay' && !started.current) {
       started.current = true
       if (startAt > 5) player.currentTime = startAt
       player.play()
       // pequeño delay para que la vista esté montada antes de expandir
       setTimeout(() => videoRef.current?.enterFullscreen(), 60)
+    } else if (status === 'error') {
+      console.warn('[player] error:', playerError?.message)
+      onError(playerError?.message ?? 'Player error desconocido')
     }
   })
 

@@ -1,7 +1,13 @@
 import type { Page } from 'playwright-core'
 
 export type Caption = { language: string; url: string; type: string }
-export type ProviderResult = { url: string; captions: Caption[] }
+export type ProviderResult = {
+  url: string
+  captions: Caption[]
+  masterContent?: string | null
+  variantContents?: Record<string, string>
+  streamReferer?: string
+}
 
 export type Provider = {
   name: string
@@ -47,8 +53,7 @@ function isM3u8(u: string): boolean {
 }
 
 // Captura genérica de HLS. Recoge TODOS los .m3u8 válidos que pasen por la red
-// y prioriza el que parece el playlist principal (master/index/playlist).
-// Sirve para la mayoría de embeds que cargan HLS directamente.
+// y captura el contenido del master desde la respuesta del browser (evita fetch server-side bloqueado).
 function m3u8Sniffer(name: string, referer: string, tier: number, embedFn: Provider['embed']): Provider {
   return {
     name,
@@ -57,19 +62,40 @@ function m3u8Sniffer(name: string, referer: string, tier: number, embedFn: Provi
     embed: embedFn,
     attach: async (page) => {
       const found: string[] = []
-      const capture = (u: string) => {
+      const contents = new Map<string, string>()
+      const requestReferers = new Map<string, string>()
+
+      const captureUrl = (u: string) => {
         if (isM3u8(u) && !found.includes(u)) found.push(u)
       }
-      // Escucha tanto peticiones como respuestas (algunos embeds piden el m3u8
-      // por fetch/xhr y solo aparece como response).
-      page.on('request', (req) => capture(req.url()))
-      page.on('response', (res) => capture(res.url()))
+      page.on('request', (req) => {
+        const u = req.url()
+        captureUrl(u)
+        if (isM3u8(u)) {
+          const ref = req.headers()['referer']
+          if (ref) requestReferers.set(u, ref)
+        }
+      })
+      page.on('response', async (res) => {
+        const u = res.url()
+        captureUrl(u)
+        if (isM3u8(u) && !contents.has(u)) {
+          try {
+            const body = await res.text()
+            if (body.trimStart().startsWith('#EXTM3U')) contents.set(u, body)
+          } catch {}
+        }
+      })
       await blockAds(page)
       return () => {
         if (!found.length) return null
-        // Prefiere un master/index/playlist sobre cualquier otro .m3u8
         const main = found.find((u) => M3U8_MAIN.test(u)) ?? found[0]
-        return { url: main, captions: [] }
+        return {
+          url: main,
+          captions: [],
+          masterContent: contents.get(main) ?? null,
+          streamReferer: requestReferers.get(main),
+        }
       }
     },
   }
@@ -90,9 +116,31 @@ export const PROVIDERS: Provider[] = [
     attach: async (page) => {
       let apiJson: any = null
       let fallback = ''
-      const grab = (u: string) => { if (!fallback && isM3u8(u)) fallback = u }
-      page.on('request', (req) => grab(req.url()))
-      page.on('response', (res) => grab(res.url()))
+      let fallbackReferer = ''
+      let capturedMaster: string | null = null
+      const capturedVariants = new Map<string, string>()
+
+      page.on('request', (req) => {
+        const u = req.url()
+        if (!fallback && isM3u8(u)) {
+          fallback = u
+          fallbackReferer = req.headers()['referer'] ?? ''
+        }
+      })
+      page.on('response', async (res) => {
+        const u = res.url()
+        if (!fallback && isM3u8(u)) fallback = u
+        // Capturar contenido m3u8 del browser — este es el que puede bypassear CF bot protection
+        if (isM3u8(u) && !capturedVariants.has(u)) {
+          try {
+            const body = await res.text()
+            if (body.trimStart().startsWith('#EXTM3U')) {
+              if (!capturedMaster) capturedMaster = body
+              capturedVariants.set(u, body)
+            }
+          } catch {}
+        }
+      })
       await blockAds(page, async (url, route) => {
         if (url.includes('/api/b/')) {
           try {
@@ -116,7 +164,14 @@ export const PROVIDERS: Provider[] = [
         const captions: Caption[] = raw
           .filter((c) => c?.url && c?.language)
           .map((c) => ({ language: c.language, url: c.url, type: c.type ?? 'vtt' }))
-        return { url, captions }
+        // streamReferer: el que el browser usó al pedir el CDN
+        const streamReferer = fallbackReferer || undefined
+        // masterContent: capturado directo de la respuesta del browser (bypasea CF)
+        const masterContent = capturedMaster
+        // variantContents: todas las variantes capturadas
+        const variantContents: Record<string, string> = Object.fromEntries(capturedVariants)
+        console.error(`[vidlink] capturedMaster: ${masterContent ? masterContent.length + 'b' : 'null'}, variants: ${capturedVariants.size}`)
+        return { url, captions, streamReferer, masterContent, variantContents }
       }
     },
   },
