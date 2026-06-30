@@ -93039,9 +93039,14 @@ var STREAM_TTL = 30 * 60 * 1e3;
 var PROXY_URL = process.env.STREAM_PROXY_URL;
 var CACHE_FILE = process.env.VERCEL ? "/tmp/bmo-streams.json" : ".cache/streams.json";
 var cache2 = new TTLCache(STREAM_TTL, CACHE_FILE);
+var FETCH_TIMEOUT = 8e3;
+var safeFetch = ((url, init = {}) => {
+  const { signal: _foreign, ...rest } = init ?? {};
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+});
 var providers2 = makeProviders({
-  fetcher: makeStandardFetcher(fetch),
-  proxiedFetcher: PROXY_URL ? makeSimpleProxyFetcher(PROXY_URL, fetch) : void 0,
+  fetcher: makeStandardFetcher(safeFetch),
+  proxiedFetcher: PROXY_URL ? makeSimpleProxyFetcher(PROXY_URL, safeFetch) : void 0,
   target: targets.NATIVE,
   consistentIpForRequests: true
 });

@@ -37,11 +37,20 @@ export type ProviderHealth = {
   ms: number
 }
 
+// La librería (bundleada por esbuild) crea AbortSignals de una clase distinta a la
+// del fetch nativo de Node (undici) → "Expected signal to be an instance of AbortSignal".
+// Envolvemos fetch para descartar ese signal foráneo y usar un timeout nativo propio.
+const FETCH_TIMEOUT = 8_000
+const safeFetch: typeof fetch = ((url: any, init: any = {}) => {
+  const { signal: _foreign, ...rest } = init ?? {}
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(FETCH_TIMEOUT) })
+}) as typeof fetch
+
 // Cliente de @movie-web/providers — scraping por HTTP puro (sin navegador).
 // target NATIVE: devuelve URLs de stream directas, ideal para apps nativas.
 const providers = makeProviders({
-  fetcher: makeStandardFetcher(fetch),
-  proxiedFetcher: PROXY_URL ? makeSimpleProxyFetcher(PROXY_URL, fetch) : undefined,
+  fetcher: makeStandardFetcher(safeFetch),
+  proxiedFetcher: PROXY_URL ? makeSimpleProxyFetcher(PROXY_URL, safeFetch) : undefined,
   target: targets.NATIVE,
   consistentIpForRequests: true,
 })
