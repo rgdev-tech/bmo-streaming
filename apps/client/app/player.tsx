@@ -10,7 +10,7 @@ import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { stream } from '@/lib/stream'
+import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang } from '@/lib/stream'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
@@ -41,6 +41,10 @@ export default function PlayerScreen() {
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+
+  // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
+  const [audioLang, setAudioLangState] = useState<AudioLang>('original')
+  useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
   // No forzamos orientación: el fullscreen nativo de Apple (AVPlayerViewController)
   // rota a horizontal por su cuenta y vuelve a vertical al salir, sin saltos.
@@ -91,10 +95,10 @@ export default function PlayerScreen() {
         return
       }
 
-      // 2. Resolución normal via API
+      // 2. Resolución normal via API (con el idioma de audio preferido)
       const resolveP = isTv
-        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1)
-        : stream.resolveMovie(id)
+        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+        : stream.resolveMovie(id, audioLang)
 
       const info = await resolveP
       if (cancelled) return
@@ -105,12 +109,12 @@ export default function PlayerScreen() {
       setReady(true)
 
       // Pre-resuelve el siguiente episodio en segundo plano
-      if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1)
+      if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, audioLang)
     }
 
     resolve().catch((e) => !cancelled && setError(String(e)))
     return () => { cancelled = true }
-  }, [type, id, seasonN, episodeN, retryCount])
+  }, [type, id, seasonN, episodeN, retryCount, audioLang])
 
   // Si existe descarga local, el player la usará directamente (sin pasar por API)
   const [localUri, setLocalUri] = useState<string | null>(params.localPath ?? null)
@@ -126,11 +130,21 @@ export default function PlayerScreen() {
     ?? (streamType === 'file' && streamUrl
       ? streamUrl
       : (isTv
-        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
-        : stream.masterMovie(id)))
+        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+        : stream.masterMovie(id, audioLang)))
 
   // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
   const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
+
+  // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
+  function changeAudioLang(lang: AudioLang) {
+    if (lang === audioLang) return
+    persistAudioLang(lang)
+    setReady(false)
+    setStreamUrl(null)
+    setError(null)
+    setAudioLangState(lang)
+  }
 
   // Título base: quita el sufijo "· T_:E_" si vino en el param
   const baseTitle = (title ?? '').replace(/\s*·\s*T\d+:E\d+\s*$/, '')
@@ -251,6 +265,26 @@ export default function PlayerScreen() {
             <Text style={styles.loadingSub}>
               {title}{season ? `  ·  T${season}:E${episode}` : ''}
             </Text>
+          )}
+
+          {/* Selector de idioma de audio / versión */}
+          {!localUri && (
+            <View style={styles.langSwitch}>
+              <Text style={styles.langSwitchLabel}>Audio</Text>
+              <View style={styles.langSegmented}>
+                {(['original', 'latino'] as const).map((opt) => (
+                  <Pressable
+                    key={opt}
+                    style={[styles.langOption, audioLang === opt && styles.langOptionActive]}
+                    onPress={() => changeAudioLang(opt)}
+                  >
+                    <Text style={[styles.langOptionText, audioLang === opt && styles.langOptionTextActive]}>
+                      {opt === 'original' ? 'Original' : 'Español Latino'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           )}
         </View>
       )}
@@ -442,6 +476,21 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   loadingText: { color: '#fff', fontSize: 17, fontWeight: '600', marginTop: 20, textAlign: 'center' },
   loadingSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, marginTop: 6, textAlign: 'center' },
+
+  // Selector de idioma de audio (pantalla de carga)
+  langSwitch: { alignItems: 'center', marginTop: 32 },
+  langSwitchLabel: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10,
+  },
+  langSegmented: {
+    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12, padding: 4, gap: 4,
+  },
+  langOption: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 9 },
+  langOptionActive: { backgroundColor: '#fff' },
+  langOptionText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+  langOptionTextActive: { color: '#000', fontWeight: '700' },
 
   // Pill siguiente episodio
   nextPill: {
