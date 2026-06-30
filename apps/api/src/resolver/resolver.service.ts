@@ -133,6 +133,46 @@ function toStreamResult(output: RunOutput): StreamResult | null {
   return null
 }
 
+// Las fuentes casi no traen subtítulos → los buscamos en Wyzie Subs (gratis,
+// por TMDB id). Key gratuita en https://store.wyzie.io/redeem → WYZIE_API_KEY.
+const WYZIE_KEY = process.env.WYZIE_API_KEY
+
+async function fetchSubtitles(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<Caption[]> {
+  if (!WYZIE_KEY) return []
+  try {
+    const u = new URL('https://sub.wyzie.io/search')
+    u.searchParams.set('id', String(tmdbId))
+    u.searchParams.set('language', 'es,en')
+    u.searchParams.set('format', 'srt')
+    u.searchParams.set('key', WYZIE_KEY)
+    if (type === 'tv') {
+      u.searchParams.set('season', String(season ?? 1))
+      u.searchParams.set('episode', String(episode ?? 1))
+    }
+    const arr = await fetch(u.toString(), { signal: AbortSignal.timeout(6000) }).then((r) => r.json())
+    if (!Array.isArray(arr)) return []
+    // Un subtítulo por idioma (el primero, que Wyzie ordena por relevancia)
+    const seen = new Set<string>()
+    const out: Caption[] = []
+    for (const s of arr) {
+      const lang = (s?.language ?? '').toLowerCase()
+      if (!s?.url || !lang || seen.has(lang)) continue
+      seen.add(lang)
+      out.push({ language: s.display || s.language, url: s.url, type: s.format === 'vtt' ? 'vtt' : 'srt' })
+    }
+    console.error(`[subs] wyzie: ${out.map((c) => c.language).join(', ') || 'ninguno'}`)
+    return out
+  } catch (e) {
+    console.error(`[subs] wyzie error: ${(e as Error).message}`)
+    return []
+  }
+}
+
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
@@ -148,14 +188,22 @@ async function scrape(
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`)
   const t0 = Date.now()
   try {
-    const output = await providers.runAll({ media, sourceOrder: SOURCE_ORDER })
+    // Stream + subtítulos en paralelo (los subs no dependen del scrape)
+    const [output, wyzieSubs] = await Promise.all([
+      providers.runAll({ media, sourceOrder: SOURCE_ORDER }),
+      fetchSubtitles(type, tmdbId, season, episode),
+    ])
     if (!output) {
       console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`)
       return null
     }
     const result = toStreamResult(output)
+    if (result) {
+      // Wyzie (es/en) primero, luego lo que haya traído la fuente
+      result.captions = [...wyzieSubs, ...result.captions]
+    }
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
     )
     return result
   } catch (e) {

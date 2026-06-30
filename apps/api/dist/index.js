@@ -66519,6 +66519,36 @@ function toStreamResult(output) {
   }
   return null;
 }
+var WYZIE_KEY = process.env.WYZIE_API_KEY;
+async function fetchSubtitles(type, tmdbId, season, episode) {
+  if (!WYZIE_KEY) return [];
+  try {
+    const u = new URL("https://sub.wyzie.io/search");
+    u.searchParams.set("id", String(tmdbId));
+    u.searchParams.set("language", "es,en");
+    u.searchParams.set("format", "srt");
+    u.searchParams.set("key", WYZIE_KEY);
+    if (type === "tv") {
+      u.searchParams.set("season", String(season ?? 1));
+      u.searchParams.set("episode", String(episode ?? 1));
+    }
+    const arr = await fetch(u.toString(), { signal: AbortSignal.timeout(6e3) }).then((r) => r.json());
+    if (!Array.isArray(arr)) return [];
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const s of arr) {
+      const lang = (s?.language ?? "").toLowerCase();
+      if (!s?.url || !lang || seen.has(lang)) continue;
+      seen.add(lang);
+      out.push({ language: s.display || s.language, url: s.url, type: s.format === "vtt" ? "vtt" : "srt" });
+    }
+    console.error(`[subs] wyzie: ${out.map((c) => c.language).join(", ") || "ninguno"}`);
+    return out;
+  } catch (e) {
+    console.error(`[subs] wyzie error: ${e.message}`);
+    return [];
+  }
+}
 async function scrape2(type, tmdbId, season, episode) {
   const media = await buildMedia(type, tmdbId, season, episode);
   if (!media) {
@@ -66528,14 +66558,20 @@ async function scrape2(type, tmdbId, season, episode) {
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`);
   const t0 = Date.now();
   try {
-    const output = await providers2.runAll({ media, sourceOrder: SOURCE_ORDER });
+    const [output, wyzieSubs] = await Promise.all([
+      providers2.runAll({ media, sourceOrder: SOURCE_ORDER }),
+      fetchSubtitles(type, tmdbId, season, episode)
+    ]);
     if (!output) {
       console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`);
       return null;
     }
     const result = toStreamResult(output);
+    if (result) {
+      result.captions = [...wyzieSubs, ...result.captions];
+    }
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
     );
     return result;
   } catch (e) {
