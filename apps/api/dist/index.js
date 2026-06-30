@@ -66872,25 +66872,6 @@ async function fetchM3u8(url, headers2) {
     return null;
   }
 }
-function rewriteAllUrls(m3u8, baseM3u8Url, proxyBase, referer2) {
-  const base = baseM3u8Url.slice(0, baseM3u8Url.lastIndexOf("/") + 1);
-  const origin2 = new URL(baseM3u8Url).origin;
-  const lines = m3u8.split("\n");
-  const out = [];
-  for (const line of lines) {
-    const t2 = line.trim();
-    if (!t2 || t2.startsWith("#")) {
-      out.push(line);
-      continue;
-    }
-    let abs = t2;
-    if (!t2.startsWith("http")) {
-      abs = t2.startsWith("/") ? `${origin2}${t2}` : `${base}${t2}`;
-    }
-    out.push(`${proxyBase}/stream/seg?url=${encodeURIComponent(abs)}&referer=${encodeURIComponent(referer2)}`);
-  }
-  return out.join("\n");
-}
 function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr) {
   const base = baseUrl22.slice(0, baseUrl22.lastIndexOf("/") + 1);
   const origin2 = new URL(baseUrl22).origin;
@@ -67008,35 +66989,20 @@ ${varUrl}
   }
 ).get(
   "/variant.m3u8",
-  async ({ query, request, set }) => {
+  ({ query, set }) => {
     const q = query;
     if (!q.url) {
       set.status = 400;
       return "No url";
     }
-    const streamResult = await resolveFromQuery(q);
-    if (!streamResult) {
-      set.status = 404;
-      return "No stream";
-    }
-    const variantUrl = decodeURIComponent(q.url);
-    const base = baseUrl2(request);
-    const headers2 = streamResult.headers;
-    const referer2 = refererOf(headers2);
-    const raw = await fetchM3u8(variantUrl, headers2);
-    if (raw) {
-      const resolved = resolveRelativeUrls(raw, variantUrl);
-      const rewritten = rewriteAllUrls(resolved, variantUrl, base, referer2);
-      set.headers["content-type"] = HLS_MIME;
-      return rewritten;
-    }
-    set.status = 502;
-    return "Variant not available";
+    set.status = 302;
+    set.headers["Location"] = decodeURIComponent(q.url);
+    return null;
   },
   {
     query: t.Object({
-      type: t.String(),
-      id: t.String(),
+      type: t.Optional(t.String()),
+      id: t.Optional(t.String()),
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
       lang: t.Optional(t.String()),

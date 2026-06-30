@@ -331,6 +331,7 @@ function NativePlayer({
   const [inFullscreen, setInFullscreen] = useState(false)
   const inFullscreenRef = useRef(false)
   const seeked = useRef(false)
+  const hasError = useRef(false)
   // Error capturado durante fullscreen — se propaga al cerrar, no inmediatamente,
   // para evitar que el desmontaje del componente y el dismiss nativo colisionen.
   const pendingError = useRef<string | null>(null)
@@ -376,7 +377,7 @@ function NativePlayer({
             saveProgress({ ...meta, position: currentTime, duration: seekableDuration })
           }
         }}
-        onEnd={() => onEnded()}
+        onEnd={() => { if (!hasError.current) onEnded() }}
         onFullscreenPlayerDidPresent={() => {
           setInFullscreen(true)
           inFullscreenRef.current = true
@@ -400,6 +401,7 @@ function NativePlayer({
             ?? e.error?.errorString
             ?? 'Player error'
           console.warn('[player] onError:', JSON.stringify(e))
+          hasError.current = true
           if (inFullscreenRef.current) {
             // En fullscreen: guardar el error y pedir cierre para que el dismiss
             // lo propague de forma segura (evita colisión JS/nativo al desmontar)

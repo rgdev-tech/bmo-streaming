@@ -219,36 +219,22 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
     }
   )
 
-  // Variante HLS: sirve el contenido capturado en el browser, con segmentos proxeados
+  // Variante HLS: redirige directamente al CDN.
+  // AVPlayer aplica source.headers (Referer) a TODOS los requests del asset via
+  // AVURLAssetHTTPHeaderFieldsKey — incluyendo variantes y segmentos post-redirect.
+  // Esto evita que los CDNs bloqueen los IPs de Vercel al fetchear playlists/segmentos.
   .get(
     '/variant.m3u8',
-    async ({ query, request, set }) => {
-      const q = query as Query & { url: string }
+    ({ query, set }) => {
+      const q = query as { url?: string }
       if (!q.url) { set.status = 400; return 'No url' }
-
-      const streamResult = await resolveFromQuery(q)
-      if (!streamResult) { set.status = 404; return 'No stream' }
-
-      const variantUrl = decodeURIComponent(q.url)
-      const base = baseUrl(request)
-      const headers = streamResult.headers as Record<string, string>
-      const referer = refererOf(headers)
-
-      // Descargar el variant playlist desde el CDN con los headers correctos
-      const raw = await fetchM3u8(variantUrl, headers)
-      if (raw) {
-        const resolved = resolveRelativeUrls(raw, variantUrl)
-        const rewritten = rewriteAllUrls(resolved, variantUrl, base, referer)
-        set.headers['content-type'] = HLS_MIME
-        return rewritten
-      }
-
-      set.status = 502
-      return 'Variant not available'
+      set.status = 302
+      set.headers['Location'] = decodeURIComponent(q.url)
+      return null
     },
     {
       query: t.Object({
-        type: t.String(), id: t.String(),
+        type: t.Optional(t.String()), id: t.Optional(t.String()),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
         lang: t.Optional(t.String()),
         url: t.String(),
