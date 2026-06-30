@@ -66683,6 +66683,41 @@ async function checkProviders() {
   return [{ name: "movie-web", tier: 1, ok, ms: Date.now() - start }];
 }
 
+// src/resolver/hls.ts
+function resolveRelativeUrls(m3u8, baseUrl3) {
+  const base = baseUrl3.slice(0, baseUrl3.lastIndexOf("/") + 1);
+  const origin2 = new URL(baseUrl3).origin;
+  return m3u8.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return line;
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${origin2}${trimmed}`;
+    return `${base}${trimmed}`;
+  }).join("\n");
+}
+function langCode(language) {
+  const l = language.toLowerCase();
+  if (l.includes("spanish") || l.includes("espa\xF1ol") || l.includes("castellano")) return "es";
+  if (l.includes("english")) return "en";
+  if (l.includes("portuguese") || l.includes("portugu\xEAs")) return "pt";
+  if (l.includes("french") || l.includes("fran\xE7ais")) return "fr";
+  if (l.includes("german") || l.includes("deutsch")) return "de";
+  if (l.includes("italian")) return "it";
+  if (l.includes("japanese")) return "ja";
+  if (l.includes("korean")) return "ko";
+  if (l.includes("chinese") || l.includes("mandarin")) return "zh";
+  if (l.includes("russian")) return "ru";
+  if (l.includes("arabic")) return "ar";
+  return "und";
+}
+function srtToVtt(srt) {
+  const body = srt.replace(/\r+/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return `WEBVTT
+
+${body}`;
+}
+
 // src/resolver/resolver.routes.ts
 function parseLang(v) {
   return v === "latino" ? "latino" : "original";
@@ -66702,6 +66737,7 @@ function extractCdnReferer(streamUrl) {
 function summarize(result) {
   if (!result) return null;
   const cdnReferer = extractCdnReferer(result.url);
+  const subtitles = result.captions.map((c, i) => ({ i, label: c.language, lang: langCode(c.language) })).filter((s) => s.lang !== "und");
   return {
     streamUrl: result.url,
     type: result.type,
@@ -66710,7 +66746,7 @@ function summarize(result) {
     source: result.source,
     language: result.language,
     // etiqueta de idioma de audio ("Español Latino" / "Original")
-    captions: result.captions.map((c) => c.language)
+    subtitles
   };
 }
 var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () => {
@@ -66781,41 +66817,6 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
     query: t.Object({ lang: t.Optional(t.String()) })
   }
 );
-
-// src/resolver/hls.ts
-function resolveRelativeUrls(m3u8, baseUrl3) {
-  const base = baseUrl3.slice(0, baseUrl3.lastIndexOf("/") + 1);
-  const origin2 = new URL(baseUrl3).origin;
-  return m3u8.split("\n").map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) return line;
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return line;
-    if (trimmed.startsWith("//")) return `https:${trimmed}`;
-    if (trimmed.startsWith("/")) return `${origin2}${trimmed}`;
-    return `${base}${trimmed}`;
-  }).join("\n");
-}
-function langCode(language) {
-  const l = language.toLowerCase();
-  if (l.includes("spanish") || l.includes("espa\xF1ol") || l.includes("castellano")) return "es";
-  if (l.includes("english")) return "en";
-  if (l.includes("portuguese") || l.includes("portugu\xEAs")) return "pt";
-  if (l.includes("french") || l.includes("fran\xE7ais")) return "fr";
-  if (l.includes("german") || l.includes("deutsch")) return "de";
-  if (l.includes("italian")) return "it";
-  if (l.includes("japanese")) return "ja";
-  if (l.includes("korean")) return "ko";
-  if (l.includes("chinese") || l.includes("mandarin")) return "zh";
-  if (l.includes("russian")) return "ru";
-  if (l.includes("arabic")) return "ar";
-  return "und";
-}
-function srtToVtt(srt) {
-  const body = srt.replace(/\r+/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-  return `WEBVTT
-
-${body}`;
-}
 
 // src/resolver/stream.routes.ts
 var HLS_MIME = "application/vnd.apple.mpegurl";

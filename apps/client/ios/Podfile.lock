@@ -1518,6 +1518,74 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - react-native-video (6.19.2):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - react-native-video/Video (= 6.19.2)
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - react-native-video/Fabric (6.19.2):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - react-native-video/Video (6.19.2):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - react-native-video/Fabric
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - React-NativeModulesApple (0.81.5):
     - hermes-engine
     - React-callinvoker
@@ -2073,6 +2141,7 @@ DEPENDENCIES:
   - "React-microtasksnativemodule (from `../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)"
   - "react-native-safe-area-context (from `../../../node_modules/.bun/react-native-safe-area-context@5.6.2+567f77425daa0e2e/node_modules/react-native-safe-area-context`)"
   - "react-native-slider (from `../../../node_modules/.bun/@react-native-community+slider@5.0.1/node_modules/@react-native-community/slider`)"
+  - "react-native-video (from `../../../node_modules/.bun/react-native-video@6.19.2+567f77425daa0e2e/node_modules/react-native-video`)"
   - "React-NativeModulesApple (from `../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)"
   - "React-oscompat (from `../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/oscompat`)"
   - "React-perflogger (from `../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/reactperflogger`)"
@@ -2230,6 +2299,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.bun/react-native-safe-area-context@5.6.2+567f77425daa0e2e/node_modules/react-native-safe-area-context"
   react-native-slider:
     :path: "../../../node_modules/.bun/@react-native-community+slider@5.0.1/node_modules/@react-native-community/slider"
+  react-native-video:
+    :path: "../../../node_modules/.bun/react-native-video@6.19.2+567f77425daa0e2e/node_modules/react-native-video"
   React-NativeModulesApple:
     :path: "../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-oscompat:
@@ -2361,6 +2432,7 @@ SPEC CHECKSUMS:
   React-microtasksnativemodule: f775db9e991c6f3b8ccbc02bfcde22770f96e23b
   react-native-safe-area-context: 37e680fc4cace3c0030ee46e8987d24f5d3bdab2
   react-native-slider: 8c562583722c396a3682f451f0b6e68e351ec3b9
+  react-native-video: 293a1dfb84d6b79b5bf9dd33925931008e225d5a
   React-NativeModulesApple: 8969913947d5b576de4ed371a939455a8daf28aa
   React-oscompat: ce47230ed20185e91de62d8c6d139ae61763d09c
   React-perflogger: 02b010e665772c7dcb859d85d44c1bfc5ac7c0e4
@@ -2402,6 +2474,6 @@ SPEC CHECKSUMS:
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
 
-PODFILE CHECKSUM: 292e7e38c4fe29086255b192b060cadebb796c9e
+PODFILE CHECKSUM: 5c1517f60946dd13d73864463d9451dad6182073
 
 COCOAPODS: 1.16.2

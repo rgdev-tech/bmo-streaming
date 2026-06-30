@@ -20,13 +20,15 @@ export function setAudioLang(lang: AudioLang): void {
   AsyncStorage.setItem(AUDIO_LANG_KEY, lang).catch(() => {})
 }
 
+export type Subtitle = { i: number; label: string; lang: string }
+
 export type ResolveInfo = {
   streamUrl: string   // URL directa del CDN
   type: 'hls' | 'file'  // hls → master proxeado; file → mp4 directo
   referer: string
   source: string
   language: string    // etiqueta del idioma de audio resuelto ("Español Latino" / "Original")
-  captions: string[]
+  subtitles: Subtitle[]
 }
 
 const RESOLVE_TIMEOUT = 55_000  // 55s — el scraper puede tardar pero no más que esto
@@ -44,6 +46,17 @@ export const stream = {
     `${API_URL}/stream/master.m3u8?type=movie&id=${id}${langQ(lang)}`,
   masterTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original') =>
     `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}${langQ(lang)}`,
+
+  // URL VTT de un subtítulo (servida/convertida por nuestro API) — para textTracks
+  subVtt: (
+    type: 'movie' | 'tv', id: string | number, i: number,
+    season?: number, episode?: number, lang: AudioLang = 'original',
+  ) => {
+    const q = type === 'tv'
+      ? `type=tv&id=${id}&season=${season ?? 1}&episode=${episode ?? 1}`
+      : `type=movie&id=${id}&season=&episode=`
+    return `${API_URL}/stream/sub.vtt?${q}&i=${i}&lang=${lang}`
+  },
 
   // Pre-resuelve un stream en segundo plano (calienta el cache del API).
   prewarm: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number, lang: AudioLang = 'original') => {

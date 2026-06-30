@@ -1,5 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream, checkProviders, debugScrape, debugSubs, type AudioLang } from './resolver.service'
+import { langCode } from './hls'
 
 function parseLang(v?: string): AudioLang {
   return v === 'latino' ? 'latino' : 'original'
@@ -24,13 +25,18 @@ function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
   if (!result) return null
   // Prefiere el referer embebido en el CDN URL (más preciso) sobre el del embed page
   const cdnReferer = extractCdnReferer(result.url)
+  // Subtítulos con su código ISO (para react-native-video textTracks). El cliente
+  // construye la URL /stream/sub.vtt usando el índice (mismo orden que result.captions).
+  const subtitles = result.captions
+    .map((c, i) => ({ i, label: c.language, lang: langCode(c.language) }))
+    .filter((s) => s.lang !== 'und')   // solo idiomas reconocidos
   return {
     streamUrl: result.url,
     type: result.type,                 // 'hls' (proxeado) | 'file' (mp4 directo)
     referer: cdnReferer || result.headers.Referer || '',
     source: result.source,
     language: result.language,         // etiqueta de idioma de audio ("Español Latino" / "Original")
-    captions: result.captions.map((c) => c.language),
+    subtitles,
   }
 }
 

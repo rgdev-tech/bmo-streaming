@@ -5,12 +5,11 @@ import {
   Pressable, Animated,
 } from 'react-native'
 import { Image } from 'expo-image'
-import { useVideoPlayer, VideoView } from 'expo-video'
-import { useEventListener } from 'expo'
+import Video, { type VideoRef, TextTrackType, type TextTracks, type ISO639_1 } from 'react-native-video'
 import { SymbolView } from 'expo-symbols'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang } from '@/lib/stream'
+import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
@@ -41,6 +40,7 @@ export default function PlayerScreen() {
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+  const [subtitles, setSubtitles] = useState<Subtitle[]>([])
 
   // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
   const [audioLang, setAudioLangState] = useState<AudioLang>('original')
@@ -91,6 +91,7 @@ export default function PlayerScreen() {
         // Reproducción offline: la URI ya es el m3u8 local
         setReferer('')
         setStartAt(pos)
+        setSubtitles([])
         setReady(true)
         return
       }
@@ -106,6 +107,7 @@ export default function PlayerScreen() {
       setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setStartAt(pos)
+      setSubtitles(info.subtitles ?? [])
       setReady(true)
 
       // Pre-resuelve el siguiente episodio en segundo plano
@@ -135,6 +137,17 @@ export default function PlayerScreen() {
 
   // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
   const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
+
+  // Para mp4 (file) inyectamos textTracks sideloaded con las pistas Wyzie (VTT).
+  // Para HLS los subtítulos ya vienen en el manifest (#EXT-X-MEDIA:TYPE=SUBTITLES).
+  const textTracksForPlayer: TextTracks = (contentType === 'auto' && subtitles.length > 0)
+    ? subtitles.map((s) => ({
+        title: s.label,
+        language: s.lang as ISO639_1,
+        type: TextTrackType.VTT,
+        uri: stream.subVtt(isTv ? 'tv' : 'movie', id, s.i, seasonN, episodeN, audioLang),
+      }))
+    : []
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
@@ -247,6 +260,7 @@ export default function PlayerScreen() {
           uri={masterUrl}
           contentType={contentType}
           referer={referer}
+          textTracks={textTracksForPlayer}
           startAt={startAt}
           meta={meta}
           title={baseTitle}
@@ -295,7 +309,7 @@ export default function PlayerScreen() {
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError, textTracks,
 }: {
   uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
@@ -306,55 +320,17 @@ function NativePlayer({
   onEnded: () => void
   onPlayNext: () => void
   onError: (msg: string) => void
+  textTracks?: TextTracks
 }) {
   const insets = useSafeAreaInsets()
-  const videoRef = useRef<VideoView>(null)
+  const videoRef = useRef<VideoRef>(null)
   const lastSave = useRef(0)
   const progressRef = useRef({ time: 0, duration: 0 })
   const [duration, setDuration] = useState(0)
   const [position, setPosition] = useState(0)
   const [inFullscreen, setInFullscreen] = useState(false)
+  const seeked = useRef(false)
 
-  const player = useVideoPlayer(
-    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
-    (p) => {
-      p.timeUpdateEventInterval = 0.5
-      p.bufferOptions = { preferredForwardBufferDuration: 30 }
-    }
-  )
-
-  // Arrancar cuando el stream esté listo + entrar al fullscreen nativo de Apple
-  // (AVPlayerViewController) — el que tiene Liquid Glass, velocidad, audio y subtítulos
-  const started = useRef(false)
-  useEventListener(player, 'statusChange', ({ status, error: playerError }) => {
-    if (status === 'readyToPlay' && !started.current) {
-      started.current = true
-      if (startAt > 5) player.currentTime = startAt
-      player.play()
-      // pequeño delay para que la vista esté montada antes de expandir
-      setTimeout(() => videoRef.current?.enterFullscreen(), 60)
-    } else if (status === 'error') {
-      console.warn('[player] error:', playerError?.message)
-      onError(playerError?.message ?? 'Player error desconocido')
-    }
-  })
-
-  // Progreso (throttle 5s) + posición para el pill "Siguiente"
-  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
-    const dur = player.duration
-    progressRef.current = { time: currentTime, duration: dur }
-    setPosition(currentTime)
-    if (dur > 0) setDuration(dur)
-    const now = Date.now()
-    if (dur > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-      lastSave.current = now
-      saveProgress({ ...meta, position: currentTime, duration: dur })
-    }
-  })
-
-  useEventListener(player, 'playToEnd', () => onEnded())
-
-  // Al desmontar → guarda el progreso final (el cierre lo maneja onFullscreenExit)
   useEffect(() => {
     return () => {
       const { time, duration: d } = progressRef.current
@@ -367,28 +343,46 @@ function NativePlayer({
 
   return (
     <View style={styles.fill}>
-      {/* Reproductor nativo de Apple (AVPlayerViewController fullscreen) —
-          Liquid Glass, velocidad, audio y subtítulos integrados */}
-      <VideoView
+      <Video
         ref={videoRef}
-        player={player}
-        style={styles.fill}
-        nativeControls={true}
-        allowsPictureInPicture
-        contentFit="contain"
-        onFullscreenEnter={() => setInFullscreen(true)}
-        onFullscreenExit={() => {
-          // El usuario cerró el reproductor nativo (botón "Listo"/X)
+        source={{
+          uri,
+          headers: referer ? { Referer: referer } : undefined,
+          ...(textTracks && textTracks.length > 0 ? { textTracks } : {}),
+        }}
+        controls
+        fullscreen
+        progressUpdateInterval={500}
+        resizeMode="contain"
+        onLoad={({ duration: dur }) => {
+          if (dur > 0) setDuration(dur)
+          if (startAt > 5 && !seeked.current) {
+            seeked.current = true
+            videoRef.current?.seek(startAt)
+          }
+        }}
+        onProgress={({ currentTime, seekableDuration }) => {
+          progressRef.current = { time: currentTime, duration: seekableDuration }
+          setPosition(currentTime)
+          if (seekableDuration > 0) setDuration(seekableDuration)
+          const now = Date.now()
+          if (seekableDuration > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
+            lastSave.current = now
+            saveProgress({ ...meta, position: currentTime, duration: seekableDuration })
+          }
+        }}
+        onEnd={() => onEnded()}
+        onFullscreenPlayerDidPresent={() => setInFullscreen(true)}
+        onFullscreenPlayerWillDismiss={() => {
+          setInFullscreen(false)
           const { time, duration: d } = progressRef.current
           onClose(d > 0 ? time / d : 0)
         }}
+        onError={(e) => onError(e.error?.errorString ?? 'Player error')}
+        style={styles.fill}
       />
 
-      {/* Tapa negra sobre los controles inline (feos) hasta entrar a fullscreen */}
-      {!inFullscreen && <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} pointerEvents="none" />}
-
-      {/* Pill "Siguiente episodio" — solo visible fuera de fullscreen
-          (en fullscreen Apple controla todo el overlay) */}
+      {/* Pill "Siguiente episodio" — solo visible fuera de fullscreen */}
       {showPill && !inFullscreen && (
         <Pressable
           style={[styles.nextPill, { bottom: insets.bottom + 80, right: insets.right + 24 }]}
