@@ -1,0 +1,23 @@
+{
+  "name": "@p-stream/providers",
+  "version": "3.2.0",
+  "description": "Vendored build of github:xp-technologies-dev/providers#production (commit 0cec625). Live successor to @movie-web/providers with current sources. Rebuild: clone the repo, `vite build`, copy lib/ here.",
+  "type": "module",
+  "main": "./lib/index.umd.cjs",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
+      "require": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.umd.cjs"
+      }
+    }
+  },
+  "files": ["lib"],
+  "license": "MIT"
+}

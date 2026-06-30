@@ -5,7 +5,7 @@ import {
   targets,
   type ScrapeMedia,
   type RunOutput,
-} from '@movie-web/providers'
+} from '@p-stream/providers'
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 
