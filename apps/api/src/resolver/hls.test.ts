@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { langCode, srtToVtt, bandwidthOf, rewriteMaster } from './hls'
+import { langCode, srtToVtt, bandwidthOf, rewriteMaster, ensureBandwidth } from './hls'
 
 describe('langCode', () => {
   test('mapea idiomas comunes a ISO', () => {
@@ -31,6 +31,26 @@ describe('bandwidthOf', () => {
   })
   test('sin BANDWIDTH → 0', () => {
     expect(bandwidthOf('#EXT-X-STREAM-INF:RESOLUTION=1920x1080')).toBe(0)
+  })
+})
+
+describe('ensureBandwidth', () => {
+  test('inyecta BANDWIDTH si falta (estimado desde RESOLUTION)', () => {
+    const out = ensureBandwidth('#EXT-X-STREAM-INF:RESOLUTION=1920x1072')
+    expect(out).toMatch(/^#EXT-X-STREAM-INF:BANDWIDTH=\d+,RESOLUTION=1920x1072$/)
+    expect(bandwidthOf(out)).toBe(6_000_000)
+  })
+  test('respeta el BANDWIDTH existente', () => {
+    const line = '#EXT-X-STREAM-INF:BANDWIDTH=467804,RESOLUTION=852x480'
+    expect(ensureBandwidth(line)).toBe(line)
+  })
+  test('alturas recortadas (1072/714) caen en su tier real', () => {
+    expect(bandwidthOf(ensureBandwidth('#EXT-X-STREAM-INF:RESOLUTION=1920x1072'))).toBe(6_000_000)
+    expect(bandwidthOf(ensureBandwidth('#EXT-X-STREAM-INF:RESOLUTION=1280x714'))).toBe(3_000_000)
+    expect(bandwidthOf(ensureBandwidth('#EXT-X-STREAM-INF:RESOLUTION=854x480'))).toBe(1_400_000)
+  })
+  test('sin RESOLUTION → default razonable', () => {
+    expect(bandwidthOf(ensureBandwidth('#EXT-X-STREAM-INF:CODECS="avc1"'))).toBe(2_000_000)
   })
 })
 

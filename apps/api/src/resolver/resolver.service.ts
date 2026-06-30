@@ -8,6 +8,7 @@ import {
 } from '@p-stream/providers'
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
+import { resolveRelativeUrls } from './hls'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
 
@@ -58,9 +59,12 @@ const providers = makeProviders({
   consistentIpForRequests: true,
 })
 
-// Fuentes que devuelven mp4 H.265 con tag `hev1` — iOS/AVPlayer reproduce el audio
-// pero NO el video. Las mandamos al final para preferir HLS/H.264 (compatible).
-const DEPRIORITIZED = new Set(['vidlink'])
+// Fuentes excluidas del scrape:
+//  - vidlink: mp4 H.265 (hev1) → iOS/AVPlayer reproduce audio pero NO video.
+//  - vidrock: SEÑUELO. Devuelve un HLS válido (storrrrrrm.site) cuyos "segmentos"
+//    son imágenes PNG de tiktokcdn, no video → nunca reproduce. Además su master
+//    no trae BANDWIDTH. Confirmado en 278/155/27205.
+const DEPRIORITIZED = new Set(['vidlink', 'vidrock'])
 
 // Fuentes con audio en español (Latino/castellano). Usadas para el doblaje Latino.
 const LATINO_SOURCES = ['cuevana3', 'pelisplushd', 'cinehdplus']
@@ -199,6 +203,114 @@ async function fetchSubtitles(
   }
 }
 
+// ── Detección de señuelos ───────────────────────────────────────────────────
+// Algunas fuentes devuelven un HLS/mp4 estructuralmente válido cuyos "segmentos"
+// son en realidad imágenes (PNG/JPEG) u otra basura → el player falla siempre.
+// Validamos el primer segmento real antes de aceptar un stream.
+
+// Lee el primer chunk de un segmento (sin Range — algunos CDNs lo rechazan con
+// un JSON de error). Abre el stream, lee el primer trozo y cancela. Directo y,
+// si falla, vía CF Worker.
+async function fetchHead(
+  url: string,
+  referer: string
+): Promise<{ contentType: string; bytes: Uint8Array } | null> {
+  const tryFetch = async (u: string, h: Record<string, string>) => {
+    try {
+      const r = await fetch(u, { headers: h, signal: AbortSignal.timeout(6000) })
+      if (!r.ok) return null
+      const ct = r.headers.get('content-type') ?? ''
+      const reader = r.body?.getReader()
+      if (!reader) {
+        const buf = new Uint8Array((await r.arrayBuffer()).slice(0, 64))
+        return { contentType: ct, bytes: buf }
+      }
+      const { value } = await reader.read()
+      reader.cancel().catch(() => {})
+      return { contentType: ct, bytes: (value ?? new Uint8Array()).slice(0, 64) }
+    } catch { return null }
+  }
+  const direct = await tryFetch(url, referer ? { Referer: referer } : {})
+  if (direct) return direct
+  if (!PROXY_URL) return null
+  const proxyH: Record<string, string> = referer ? { 'x-referer': referer } : {}
+  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH)
+}
+
+// Descarga texto (playlist) directo o vía proxy.
+async function fetchText(url: string, referer: string): Promise<string | null> {
+  const tryFetch = async (u: string, h: Record<string, string>) => {
+    try {
+      const r = await fetch(u, { headers: h, signal: AbortSignal.timeout(6000) })
+      return r.ok ? await r.text() : null
+    } catch { return null }
+  }
+  const direct = await tryFetch(url, referer ? { Referer: referer } : {})
+  if (direct) return direct
+  if (!PROXY_URL) return null
+  const proxyH: Record<string, string> = referer ? { 'x-referer': referer } : {}
+  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH)
+}
+
+function firstUri(playlist: string): string | null {
+  for (const line of playlist.split('\n')) {
+    const t = line.trim()
+    if (t && !t.startsWith('#')) return t
+  }
+  return null
+}
+
+// Resuelve master → variante → URL del primer segmento real.
+async function firstSegmentUrl(playlistUrl: string, referer: string): Promise<string | null> {
+  const master = await fetchText(playlistUrl, referer)
+  if (!master) return null
+  let mediaUrl = playlistUrl
+  let media = resolveRelativeUrls(master, playlistUrl)
+  if (media.includes('#EXT-X-STREAM-INF')) {
+    const variant = firstUri(media)
+    if (!variant) return null
+    const v = await fetchText(variant, referer)
+    if (!v) return null
+    mediaUrl = variant
+    media = resolveRelativeUrls(v, variant)
+  }
+  return firstUri(media)
+}
+
+// ¿Los bytes/content-type corresponden a una imagen (señuelo) en vez de video?
+function looksLikeImage(contentType: string, b: Uint8Array): boolean {
+  if (contentType.startsWith('image/')) return true
+  if (b.length < 4) return false
+  const [a, c, d, e] = b
+  if (a === 0x89 && c === 0x50 && d === 0x4e && e === 0x47) return true        // PNG
+  if (a === 0xff && c === 0xd8 && d === 0xff) return true                       // JPEG
+  if (a === 0x47 && c === 0x49 && d === 0x46 && e === 0x38) return true         // GIF8
+  if (a === 0x42 && c === 0x4d) return true                                     // BMP
+  if (a === 0x52 && c === 0x49 && d === 0x46 && e === 0x46                       // RIFF (WEBP)
+    && b.length >= 12 && b[8] === 0x57 && b[9] === 0x45) return true
+  return false
+}
+
+const DECOY_BUDGET_MS = 5_000
+
+// True solo ante evidencia POSITIVA de señuelo. Si no se puede verificar
+// (bloqueo de IP, timeout), devuelve false → no rechazamos por dudas de red.
+// Acotado a DECOY_BUDGET_MS para no penalizar la velocidad del happy path.
+async function isDecoy(result: StreamResult): Promise<boolean> {
+  const check = async (): Promise<boolean> => {
+    const referer = result.headers.Referer ?? result.headers.referer ?? ''
+    const segUrl = result.type === 'hls'
+      ? await firstSegmentUrl(result.url, referer)
+      : result.url
+    if (!segUrl) return false
+    const head = await fetchHead(segUrl, referer)
+    if (!head) return false
+    return looksLikeImage(head.contentType, head.bytes)
+  }
+  const budget = new Promise<boolean>((res) => setTimeout(() => res(false), DECOY_BUDGET_MS))
+  return Promise.race([check(), budget])
+}
+
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
@@ -215,22 +327,43 @@ async function scrape(
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}`)
   const t0 = Date.now()
   try {
-    // Stream + subtítulos en paralelo (los subs no dependen del scrape)
-    const [output, wyzieSubs] = await Promise.all([
-      providers.runAll({ media, sourceOrder: buildSourceOrder(lang) }),
-      fetchSubtitles(type, tmdbId, season, episode),
-    ])
-    if (!output) {
-      console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`)
+    // Subtítulos en paralelo (no dependen del scrape de video)
+    const subsP = fetchSubtitles(type, tmdbId, season, episode)
+
+    // Iteramos fuentes: si la ganadora resulta ser un señuelo (segmentos = imágenes),
+    // la descartamos y reintentamos con el resto. Máx 3 intentos para acotar latencia.
+    const blocked = new Set<string>()
+    let result: StreamResult | null = null
+    let winner = ''
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const order = buildSourceOrder(lang).filter((id) => !blocked.has(id))
+      if (!order.length) break
+
+      const output = await providers.runAll({ media, sourceOrder: order })
+      if (!output) break
+
+      const candidate = toStreamResult(output)
+      if (!candidate) { blocked.add(output.sourceId); continue }
+
+      if (await isDecoy(candidate)) {
+        console.error(`[resolve] señuelo descartado: ${output.sourceId}`)
+        blocked.add(output.sourceId)
+        continue
+      }
+      result = candidate
+      winner = output.sourceId
+      break
+    }
+
+    if (!result) {
+      console.error(`[resolve] sin stream válido para "${media.title}" (${Date.now() - t0}ms)`)
       return null
     }
-    const result = toStreamResult(output)
-    if (result) {
-      // Wyzie (es/en/pt) primero, luego lo que haya traído la fuente
-      result.captions = [...wyzieSubs, ...result.captions]
-    }
+
+    // Wyzie (es/en/pt) primero, luego lo que haya traído la fuente
+    result.captions = [...(await subsP), ...result.captions]
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.language}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${winner} (${result.type}, ${result.language}, ${result.captions.length} subs) en ${Date.now() - t0}ms`
     )
     return result
   } catch (e) {

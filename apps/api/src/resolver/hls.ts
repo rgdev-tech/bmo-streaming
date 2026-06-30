@@ -47,6 +47,32 @@ export function bandwidthOf(streamInf: string): number {
   return m ? Number(m[1]) : 0
 }
 
+// Estima un BANDWIDTH (bits/s) a partir de la RESOLUTION de la variante.
+// Necesario para fuentes (p.ej. vidrock) cuyo #EXT-X-STREAM-INF solo trae
+// RESOLUTION: BANDWIDTH es un atributo OBLIGATORIO en HLS y AVPlayer rechaza
+// el master entero sin él → "CoreMediaErrorDomain -12642" (playlist parse error).
+export function estimateBandwidth(streamInf: string): number {
+  const m = streamInf.match(/RESOLUTION=\d+x(\d+)/)
+  // Umbrales algo por debajo de los estándar: muchos CDNs recortan la altura
+  // (p.ej. vidrock usa 1072 ≈ 1080, 714 ≈ 720).
+  const height = m ? Number(m[1]) : 0
+  if (height >= 2000) return 16_000_000
+  if (height >= 1300) return 10_000_000
+  if (height >= 1000) return 6_000_000
+  if (height >= 700) return 3_000_000
+  if (height >= 460) return 1_400_000
+  if (height > 0) return 800_000
+  return 2_000_000
+}
+
+// Garantiza que una línea #EXT-X-STREAM-INF lleve BANDWIDTH. Si la fuente lo
+// omite, lo sintetiza desde la resolución e inserta justo tras el prefijo.
+export function ensureBandwidth(streamInf: string): string {
+  if (/\bBANDWIDTH=\d+/.test(streamInf)) return streamInf
+  const bw = estimateBandwidth(streamInf)
+  return streamInf.replace(/^(#EXT-X-STREAM-INF:)/, `$1BANDWIDTH=${bw},`)
+}
+
 /**
  * Reescribe el master playlist:
  *  1. Inyecta las pistas de subtítulos tras #EXTM3U.

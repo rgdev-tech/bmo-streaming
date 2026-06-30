@@ -1,7 +1,7 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream, checkProviders, type Caption } from './resolver.service'
 import { TTLCache } from './cache'
-import { langCode, srtToVtt, resolveRelativeUrls } from './hls'
+import { langCode, srtToVtt, resolveRelativeUrls, ensureBandwidth } from './hls'
 
 const HLS_MIME = 'application/vnd.apple.mpegurl'
 
@@ -133,9 +133,12 @@ function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: stri
     if (!t || t === '#EXTM3U') continue
 
     if (t.startsWith('#EXT-X-STREAM-INF:')) {
-      const withSubs = hasSubs && !t.includes('SUBTITLES=')
-        ? t + ',SUBTITLES="subs"'
-        : t
+      // BANDWIDTH es obligatorio en HLS; si la fuente lo omite, sintetizarlo,
+      // o AVPlayer rechaza el master con parse error (-12642).
+      const withBw = ensureBandwidth(t)
+      const withSubs = hasSubs && !withBw.includes('SUBTITLES=')
+        ? withBw + ',SUBTITLES="subs"'
+        : withBw
       out.push(withSubs)
       nextIsVariant = true
       continue
@@ -393,7 +396,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       const vttUrl = `${base}/stream/sub.vtt?${qs_str}&i=${idx}`
 
       set.headers['content-type'] = HLS_MIME
-      return `#EXTM3U\n#EXT-X-TARGETDURATION:99999\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:99999.0,\n${vttUrl}\n#EXT-X-ENDLIST`
+      return `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-TARGETDURATION:99999\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:99999.0,\n${vttUrl}\n#EXT-X-ENDLIST`
     },
     {
       query: t.Object({
