@@ -20,19 +20,20 @@ function normalizeVtt(raw: string): string {
 
 const playlistCache = new TTLCache<string>(60 * 60 * 1000) // 1h
 
-type Query = { type: string; id: string; season?: string; episode?: string }
+type Query = { type: string; id: string; season?: string; episode?: string; lang?: string }
 
 function resolveFromQuery(q: Query) {
   return resolveStream(
     q.type === 'tv' ? 'tv' : 'movie',
     Number(q.id),
     q.season ? Number(q.season) : undefined,
-    q.episode ? Number(q.episode) : undefined
+    q.episode ? Number(q.episode) : undefined,
+    q.lang === 'latino' ? 'latino' : 'original'
   )
 }
 
 function qs(q: Query) {
-  return `type=${q.type}&id=${q.id}&season=${q.season ?? ''}&episode=${q.episode ?? ''}`
+  return `type=${q.type}&id=${q.id}&season=${q.season ?? ''}&episode=${q.episode ?? ''}&lang=${q.lang ?? ''}`
 }
 
 function baseUrl(request: Request): string {
@@ -118,6 +119,22 @@ function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: stri
       continue
     }
 
+    // Pistas alternativas (audio Latino/Original, subtítulos embebidos): reescribir su URI
+    // para que pasen por el proxy → el selector nativo de audio/subtítulos funciona.
+    if (t.startsWith('#EXT-X-MEDIA:') && t.includes('URI="')) {
+      nextIsVariant = false
+      out.push(
+        t.replace(/URI="([^"]+)"/, (_m, uri) => {
+          let abs = uri
+          if (!uri.startsWith('http')) {
+            abs = uri.startsWith('/') ? `${origin}${uri}` : `${base}${uri}`
+          }
+          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}"`
+        })
+      )
+      continue
+    }
+
     nextIsVariant = false
     out.push(line)
   }
@@ -197,6 +214,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       query: t.Object({
         type: t.String(), id: t.String(),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
+        lang: t.Optional(t.String()),
       }),
     }
   )
@@ -232,6 +250,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       query: t.Object({
         type: t.String(), id: t.String(),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
+        lang: t.Optional(t.String()),
         url: t.String(),
       }),
     }
@@ -299,6 +318,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       query: t.Object({
         type: t.String(), id: t.String(),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
+        lang: t.Optional(t.String()),
         i: t.String(),
       }),
     }
@@ -329,6 +349,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       query: t.Object({
         type: t.String(), id: t.String(),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
+        lang: t.Optional(t.String()),
         i: t.String(),
       }),
     }

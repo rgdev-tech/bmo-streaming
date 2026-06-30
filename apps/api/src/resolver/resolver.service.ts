@@ -22,12 +22,15 @@ const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
 
 export type Caption = { language: string; url: string; type: string }
 
+export type AudioLang = 'original' | 'latino'
+
 export type StreamResult = {
   url: string                          // m3u8 (hls) o mp4 (file) — URL directa del CDN
   type: 'hls' | 'file'
   captions: Caption[]
   headers: Record<string, string>      // headers que el CDN espera (Referer/Origin/etc.)
   source: string
+  language: string                     // etiqueta de idioma de audio inferida ("Español Latino" / "Original")
 }
 
 export type ProviderHealth = {
@@ -59,12 +62,28 @@ const providers = makeProviders({
 // pero NO el video. Las mandamos al final para preferir HLS/H.264 (compatible).
 const DEPRIORITIZED = new Set(['vidlink'])
 
-// Orden de fuentes: todas por rank desc, pero las deprioritizadas al final.
-const SOURCE_ORDER: string[] = providers
+// Fuentes con audio en español (Latino/castellano). Usadas para el doblaje Latino.
+const LATINO_SOURCES = ['cuevana3', 'pelisplushd', 'cinehdplus']
+
+// Orden base: todas por rank desc, las deprioritizadas al final.
+const BASE_ORDER: string[] = providers
   .listSources()
   .filter((s) => !DEPRIORITIZED.has(s.id))
   .sort((a, b) => b.rank - a.rank)
   .map((s) => s.id)
+
+// Orden de fuentes según el idioma de audio preferido.
+function buildSourceOrder(lang: AudioLang): string[] {
+  if (lang !== 'latino') return BASE_ORDER
+  const latino = LATINO_SOURCES.filter((id) => BASE_ORDER.includes(id))
+  const rest = BASE_ORDER.filter((id) => !latino.includes(id))
+  return [...latino, ...rest]
+}
+
+// Etiqueta de idioma de audio inferida a partir de la fuente ganadora.
+function languageLabel(sourceId: string): string {
+  return LATINO_SOURCES.includes(sourceId) ? 'Español Latino' : 'Original'
+}
 
 // Construye el objeto ScrapeMedia que la librería necesita (título + año + tmdbIds).
 async function buildMedia(
@@ -99,7 +118,12 @@ async function buildMedia(
       title: d.name,
       releaseYear: year ?? 0,
       tmdbId: String(tmdbId),
-      season: { number: season ?? 1, tmdbId: String(seasonData.id) },
+      season: {
+        number: season ?? 1,
+        tmdbId: String(seasonData.id),
+        title: seasonData.name ?? `Season ${season ?? 1}`,
+        episodeCount: (seasonData.episodes ?? []).length || undefined,
+      },
       episode: { number: episode ?? 1, tmdbId: String(ep.id) },
     }
   } catch (e) {
@@ -118,8 +142,10 @@ function toStreamResult(output: RunOutput): StreamResult | null {
     type: c.type,
   }))
 
+  const language = languageLabel(sourceId)
+
   if (stream.type === 'hls') {
-    return { url: stream.playlist, type: 'hls', captions, headers, source: sourceId }
+    return { url: stream.playlist, type: 'hls', captions, headers, source: sourceId, language }
   }
 
   // file-based (mp4): elegir la mejor calidad disponible
@@ -127,7 +153,7 @@ function toStreamResult(output: RunOutput): StreamResult | null {
   for (const q of order) {
     const file = stream.qualities[q]
     if (file?.url) {
-      return { url: file.url, type: 'file', captions, headers, source: sourceId }
+      return { url: file.url, type: 'file', captions, headers, source: sourceId, language }
     }
   }
   return null
@@ -147,7 +173,7 @@ async function fetchSubtitles(
   try {
     const u = new URL('https://sub.wyzie.io/search')
     u.searchParams.set('id', String(tmdbId))
-    u.searchParams.set('language', 'es,en')
+    u.searchParams.set('language', 'es,en,pt')
     u.searchParams.set('format', 'srt')
     u.searchParams.set('key', WYZIE_KEY)
     if (type === 'tv') {
@@ -176,6 +202,7 @@ async function fetchSubtitles(
 async function scrape(
   type: 'movie' | 'tv',
   tmdbId: number,
+  lang: AudioLang,
   season?: number,
   episode?: number
 ): Promise<StreamResult | null> {
@@ -185,12 +212,12 @@ async function scrape(
     return null
   }
 
-  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`)
+  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}`)
   const t0 = Date.now()
   try {
     // Stream + subtítulos en paralelo (los subs no dependen del scrape)
     const [output, wyzieSubs] = await Promise.all([
-      providers.runAll({ media, sourceOrder: SOURCE_ORDER }),
+      providers.runAll({ media, sourceOrder: buildSourceOrder(lang) }),
       fetchSubtitles(type, tmdbId, season, episode),
     ])
     if (!output) {
@@ -199,11 +226,11 @@ async function scrape(
     }
     const result = toStreamResult(output)
     if (result) {
-      // Wyzie (es/en) primero, luego lo que haya traído la fuente
+      // Wyzie (es/en/pt) primero, luego lo que haya traído la fuente
       result.captions = [...wyzieSubs, ...result.captions]
     }
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.language}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
     )
     return result
   } catch (e) {
@@ -216,10 +243,49 @@ export function resolveStream(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
-  episode?: number
+  episode?: number,
+  lang: AudioLang = 'original'
 ): Promise<StreamResult | null> {
-  const key = type === 'tv' ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`
-  return cache.resolve(key, () => scrape(type, tmdbId, season, episode))
+  const base = type === 'tv' ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`
+  const key = `${base}:${lang}`
+  return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode))
+}
+
+// Diagnóstico de subtítulos: hace el fetch crudo a Wyzie y reporta qué pasó.
+export async function debugSubs(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<any> {
+  if (!WYZIE_KEY) return { error: 'WYZIE_API_KEY no está definida en el entorno' }
+  const u = new URL('https://sub.wyzie.io/search')
+  u.searchParams.set('id', String(tmdbId))
+  u.searchParams.set('language', 'es,en,pt')
+  u.searchParams.set('format', 'srt')
+  u.searchParams.set('key', WYZIE_KEY)
+  if (type === 'tv') {
+    u.searchParams.set('season', String(season ?? 1))
+    u.searchParams.set('episode', String(episode ?? 1))
+  }
+  const safeUrl = u.toString().replace(WYZIE_KEY, '***')
+  try {
+    const r = await fetch(u.toString(), { signal: AbortSignal.timeout(8000) })
+    const body = await r.text()
+    let parsed: any = null
+    try { parsed = JSON.parse(body) } catch {}
+    return {
+      url: safeUrl,
+      status: r.status,
+      ok: r.ok,
+      isArray: Array.isArray(parsed),
+      count: Array.isArray(parsed) ? parsed.length : undefined,
+      sample: Array.isArray(parsed) ? parsed.slice(0, 3) : undefined,
+      bodyPreview: parsed ? undefined : body.slice(0, 300),
+    }
+  } catch (e) {
+    return { url: safeUrl, error: String((e as Error).message) }
+  }
 }
 
 // Diagnóstico detallado: corre runAll capturando el resultado de CADA source.
@@ -240,7 +306,7 @@ export async function debugScrape(
   try {
     const output = await providers.runAll({
       media,
-      sourceOrder: SOURCE_ORDER,
+      sourceOrder: BASE_ORDER,
       events: {
         init: (e) => { sourceIds = e.sourceIds },
         start: (id) => events.push({ id, phase: 'start' }),
@@ -273,7 +339,7 @@ export async function checkProviders(): Promise<ProviderHealth[]> {
   const start = Date.now()
   let ok = false
   try {
-    ok = !!(await scrape('movie', TEST_ID))
+    ok = !!(await scrape('movie', TEST_ID, 'original'))
   } catch {
     ok = false
   }

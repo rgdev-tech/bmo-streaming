@@ -66465,7 +66465,17 @@ var providers2 = makeProviders({
   consistentIpForRequests: true
 });
 var DEPRIORITIZED = /* @__PURE__ */ new Set(["vidlink"]);
-var SOURCE_ORDER = providers2.listSources().filter((s) => !DEPRIORITIZED.has(s.id)).sort((a, b) => b.rank - a.rank).map((s) => s.id);
+var LATINO_SOURCES = ["cuevana3", "pelisplushd", "cinehdplus"];
+var BASE_ORDER = providers2.listSources().filter((s) => !DEPRIORITIZED.has(s.id)).sort((a, b) => b.rank - a.rank).map((s) => s.id);
+function buildSourceOrder(lang) {
+  if (lang !== "latino") return BASE_ORDER;
+  const latino = LATINO_SOURCES.filter((id) => BASE_ORDER.includes(id));
+  const rest = BASE_ORDER.filter((id) => !latino.includes(id));
+  return [...latino, ...rest];
+}
+function languageLabel(sourceId) {
+  return LATINO_SOURCES.includes(sourceId) ? "Espa\xF1ol Latino" : "Original";
+}
 async function buildMedia(type, tmdbId, season, episode) {
   try {
     if (type === "movie") {
@@ -66491,7 +66501,12 @@ async function buildMedia(type, tmdbId, season, episode) {
       title: d.name,
       releaseYear: year ?? 0,
       tmdbId: String(tmdbId),
-      season: { number: season ?? 1, tmdbId: String(seasonData.id) },
+      season: {
+        number: season ?? 1,
+        tmdbId: String(seasonData.id),
+        title: seasonData.name ?? `Season ${season ?? 1}`,
+        episodeCount: (seasonData.episodes ?? []).length || void 0
+      },
       episode: { number: episode ?? 1, tmdbId: String(ep.id) }
     };
   } catch (e) {
@@ -66507,14 +66522,15 @@ function toStreamResult(output) {
     url: c.url,
     type: c.type
   }));
+  const language = languageLabel(sourceId);
   if (stream.type === "hls") {
-    return { url: stream.playlist, type: "hls", captions, headers: headers2, source: sourceId };
+    return { url: stream.playlist, type: "hls", captions, headers: headers2, source: sourceId, language };
   }
   const order = ["4k", "1080", "720", "480", "360", "unknown"];
   for (const q of order) {
     const file2 = stream.qualities[q];
     if (file2?.url) {
-      return { url: file2.url, type: "file", captions, headers: headers2, source: sourceId };
+      return { url: file2.url, type: "file", captions, headers: headers2, source: sourceId, language };
     }
   }
   return null;
@@ -66525,7 +66541,7 @@ async function fetchSubtitles(type, tmdbId, season, episode) {
   try {
     const u = new URL("https://sub.wyzie.io/search");
     u.searchParams.set("id", String(tmdbId));
-    u.searchParams.set("language", "es,en");
+    u.searchParams.set("language", "es,en,pt");
     u.searchParams.set("format", "srt");
     u.searchParams.set("key", WYZIE_KEY);
     if (type === "tv") {
@@ -66549,17 +66565,17 @@ async function fetchSubtitles(type, tmdbId, season, episode) {
     return [];
   }
 }
-async function scrape2(type, tmdbId, season, episode) {
+async function scrape2(type, tmdbId, lang, season, episode) {
   const media = await buildMedia(type, tmdbId, season, episode);
   if (!media) {
     console.error(`[resolve] no se pudo construir media para ${type}/${tmdbId}`);
     return null;
   }
-  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear})`);
+  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}`);
   const t0 = Date.now();
   try {
     const [output, wyzieSubs] = await Promise.all([
-      providers2.runAll({ media, sourceOrder: SOURCE_ORDER }),
+      providers2.runAll({ media, sourceOrder: buildSourceOrder(lang) }),
       fetchSubtitles(type, tmdbId, season, episode)
     ]);
     if (!output) {
@@ -66571,7 +66587,7 @@ async function scrape2(type, tmdbId, season, episode) {
       result.captions = [...wyzieSubs, ...result.captions];
     }
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.language}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
     );
     return result;
   } catch (e) {
@@ -66579,9 +66595,43 @@ async function scrape2(type, tmdbId, season, episode) {
     return null;
   }
 }
-function resolveStream(type, tmdbId, season, episode) {
-  const key2 = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
-  return cache3.resolve(key2, () => scrape2(type, tmdbId, season, episode));
+function resolveStream(type, tmdbId, season, episode, lang = "original") {
+  const base = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
+  const key2 = `${base}:${lang}`;
+  return cache3.resolve(key2, () => scrape2(type, tmdbId, lang, season, episode));
+}
+async function debugSubs(type, tmdbId, season, episode) {
+  if (!WYZIE_KEY) return { error: "WYZIE_API_KEY no est\xE1 definida en el entorno" };
+  const u = new URL("https://sub.wyzie.io/search");
+  u.searchParams.set("id", String(tmdbId));
+  u.searchParams.set("language", "es,en,pt");
+  u.searchParams.set("format", "srt");
+  u.searchParams.set("key", WYZIE_KEY);
+  if (type === "tv") {
+    u.searchParams.set("season", String(season ?? 1));
+    u.searchParams.set("episode", String(episode ?? 1));
+  }
+  const safeUrl = u.toString().replace(WYZIE_KEY, "***");
+  try {
+    const r = await fetch(u.toString(), { signal: AbortSignal.timeout(8e3) });
+    const body = await r.text();
+    let parsed = null;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+    }
+    return {
+      url: safeUrl,
+      status: r.status,
+      ok: r.ok,
+      isArray: Array.isArray(parsed),
+      count: Array.isArray(parsed) ? parsed.length : void 0,
+      sample: Array.isArray(parsed) ? parsed.slice(0, 3) : void 0,
+      bodyPreview: parsed ? void 0 : body.slice(0, 300)
+    };
+  } catch (e) {
+    return { url: safeUrl, error: String(e.message) };
+  }
 }
 async function debugScrape(type, tmdbId, season, episode) {
   const media = await buildMedia(type, tmdbId, season, episode);
@@ -66593,7 +66643,7 @@ async function debugScrape(type, tmdbId, season, episode) {
   try {
     const output = await providers2.runAll({
       media,
-      sourceOrder: SOURCE_ORDER,
+      sourceOrder: BASE_ORDER,
       events: {
         init: (e) => {
           sourceIds = e.sourceIds;
@@ -66626,7 +66676,7 @@ async function checkProviders() {
   const start = Date.now();
   let ok = false;
   try {
-    ok = !!await scrape2("movie", TEST_ID);
+    ok = !!await scrape2("movie", TEST_ID, "original");
   } catch {
     ok = false;
   }
@@ -66634,6 +66684,9 @@ async function checkProviders() {
 }
 
 // src/resolver/resolver.routes.ts
+function parseLang(v) {
+  return v === "latino" ? "latino" : "original";
+}
 function extractCdnReferer(streamUrl) {
   try {
     const url = new URL(streamUrl);
@@ -66655,6 +66708,8 @@ function summarize(result) {
     // 'hls' (proxeado) | 'file' (mp4 directo)
     referer: cdnReferer || result.headers.Referer || "",
     source: result.source,
+    language: result.language,
+    // etiqueta de idioma de audio ("Español Latino" / "Original")
     captions: result.captions.map((c) => c.language)
   };
 }
@@ -66675,11 +66730,19 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
   ({ params }) => debugScrape("tv", Number(params.id), Number(params.season), Number(params.episode)),
   { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
 ).get(
+  "/debug/subs/movie/:id",
+  ({ params }) => debugSubs("movie", Number(params.id)),
+  { params: t.Object({ id: t.String() }) }
+).get(
+  "/debug/subs/tv/:id/:season/:episode",
+  ({ params }) => debugSubs("tv", Number(params.id), Number(params.season), Number(params.episode)),
+  { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+).get(
   "/movie/:id",
-  async ({ params, set }) => {
-    console.error(`[resolve] movie ${params.id} start`);
-    const result = await resolveStream("movie", Number(params.id));
-    console.error(`[resolve] movie ${params.id} result:`, result?.source ?? "null");
+  async ({ params, query, set }) => {
+    const lang = parseLang(query.lang);
+    const result = await resolveStream("movie", Number(params.id), void 0, void 0, lang);
+    console.error(`[resolve] movie ${params.id} (${lang}) \u2192`, result?.source ?? "null");
     const summary = summarize(result);
     if (!summary) {
       set.status = 404;
@@ -66687,15 +66750,20 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
     }
     return summary;
   },
-  { params: t.Object({ id: t.String() }) }
+  {
+    params: t.Object({ id: t.String() }),
+    query: t.Object({ lang: t.Optional(t.String()) })
+  }
 ).get(
   "/tv/:id/:season/:episode",
-  async ({ params, set }) => {
+  async ({ params, query, set }) => {
+    const lang = parseLang(query.lang);
     const result = await resolveStream(
       "tv",
       Number(params.id),
       Number(params.season),
-      Number(params.episode)
+      Number(params.episode),
+      lang
     );
     const summary = summarize(result);
     if (!summary) {
@@ -66709,7 +66777,8 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
       id: t.String(),
       season: t.String(),
       episode: t.String()
-    })
+    }),
+    query: t.Object({ lang: t.Optional(t.String()) })
   }
 );
 
@@ -66774,11 +66843,12 @@ function resolveFromQuery(q) {
     q.type === "tv" ? "tv" : "movie",
     Number(q.id),
     q.season ? Number(q.season) : void 0,
-    q.episode ? Number(q.episode) : void 0
+    q.episode ? Number(q.episode) : void 0,
+    q.lang === "latino" ? "latino" : "original"
   );
 }
 function qs(q) {
-  return `type=${q.type}&id=${q.id}&season=${q.season ?? ""}&episode=${q.episode ?? ""}`;
+  return `type=${q.type}&id=${q.id}&season=${q.season ?? ""}&episode=${q.episode ?? ""}&lang=${q.lang ?? ""}`;
 }
 function baseUrl2(request) {
   const host = request.headers.get("host") ?? "localhost:3000";
@@ -66845,6 +66915,19 @@ function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr)
         abs = t2.startsWith("/") ? `${origin2}${t2}` : `${base}${t2}`;
       }
       out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}`);
+      continue;
+    }
+    if (t2.startsWith("#EXT-X-MEDIA:") && t2.includes('URI="')) {
+      nextIsVariant = false;
+      out.push(
+        t2.replace(/URI="([^"]+)"/, (_m, uri2) => {
+          let abs = uri2;
+          if (!uri2.startsWith("http")) {
+            abs = uri2.startsWith("/") ? `${origin2}${uri2}` : `${base}${uri2}`;
+          }
+          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}"`;
+        })
+      );
       continue;
     }
     nextIsVariant = false;
@@ -66918,7 +67001,8 @@ ${varUrl}
       type: t.String(),
       id: t.String(),
       season: t.Optional(t.String()),
-      episode: t.Optional(t.String())
+      episode: t.Optional(t.String()),
+      lang: t.Optional(t.String())
     })
   }
 ).get(
@@ -66954,6 +67038,7 @@ ${varUrl}
       id: t.String(),
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
+      lang: t.Optional(t.String()),
       url: t.String()
     })
   }
@@ -67026,6 +67111,7 @@ ${vttUrl}
       id: t.String(),
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
+      lang: t.Optional(t.String()),
       i: t.String()
     })
   }
@@ -67057,6 +67143,7 @@ ${vttUrl}
       id: t.String(),
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
+      lang: t.Optional(t.String()),
       i: t.String()
     })
   }

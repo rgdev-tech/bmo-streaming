@@ -1,5 +1,9 @@
 import { Elysia, t } from 'elysia'
-import { resolveStream, checkProviders, debugScrape } from './resolver.service'
+import { resolveStream, checkProviders, debugScrape, debugSubs, type AudioLang } from './resolver.service'
+
+function parseLang(v?: string): AudioLang {
+  return v === 'latino' ? 'latino' : 'original'
+}
 
 // Algunos CDNs (vidlink → storm.vodvidl.site) incluyen en el query param ?headers=
 // el Referer que esperan recibir del cliente. Lo extraemos para dárselo al player.
@@ -25,6 +29,7 @@ function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
     type: result.type,                 // 'hls' (proxeado) | 'file' (mp4 directo)
     referer: cdnReferer || result.headers.Referer || '',
     source: result.source,
+    language: result.language,         // etiqueta de idioma de audio ("Español Latino" / "Original")
     captions: result.captions.map((c) => c.language),
   }
 }
@@ -53,12 +58,24 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
   )
 
+  // Diagnóstico de subtítulos: fetch crudo a Wyzie
+  .get(
+    '/debug/subs/movie/:id',
+    ({ params }) => debugSubs('movie', Number(params.id)),
+    { params: t.Object({ id: t.String() }) }
+  )
+  .get(
+    '/debug/subs/tv/:id/:season/:episode',
+    ({ params }) => debugSubs('tv', Number(params.id), Number(params.season), Number(params.episode)),
+    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+  )
+
   .get(
     '/movie/:id',
-    async ({ params, set }) => {
-      console.error(`[resolve] movie ${params.id} start`)
-      const result = await resolveStream('movie', Number(params.id))
-      console.error(`[resolve] movie ${params.id} result:`, result?.source ?? 'null')
+    async ({ params, query, set }) => {
+      const lang = parseLang(query.lang)
+      const result = await resolveStream('movie', Number(params.id), undefined, undefined, lang)
+      console.error(`[resolve] movie ${params.id} (${lang}) →`, result?.source ?? 'null')
       const summary = summarize(result)
       if (!summary) {
         set.status = 404
@@ -66,17 +83,22 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
       }
       return summary
     },
-    { params: t.Object({ id: t.String() }) }
+    {
+      params: t.Object({ id: t.String() }),
+      query: t.Object({ lang: t.Optional(t.String()) }),
+    }
   )
 
   .get(
     '/tv/:id/:season/:episode',
-    async ({ params, set }) => {
+    async ({ params, query, set }) => {
+      const lang = parseLang(query.lang)
       const result = await resolveStream(
         'tv',
         Number(params.id),
         Number(params.season),
-        Number(params.episode)
+        Number(params.episode),
+        lang
       )
       const summary = summarize(result)
       if (!summary) {
@@ -91,5 +113,6 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
         season: t.String(),
         episode: t.String(),
       }),
+      query: t.Object({ lang: t.Optional(t.String()) }),
     }
   )
