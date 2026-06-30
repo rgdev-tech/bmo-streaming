@@ -154,6 +154,46 @@ export function resolveStream(
   return cache.resolve(key, () => scrape(type, tmdbId, season, episode))
 }
 
+// Diagnóstico detallado: corre runAll capturando el resultado de CADA source.
+// Sirve para saber si los sources fallan por bloqueo de IP, CORS, o están muertos.
+export async function debugScrape(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<any> {
+  const media = await buildMedia(type, tmdbId, season, episode)
+  if (!media) return { error: 'buildMedia falló (¿TMDB_API_KEY?)', media: null }
+
+  const events: any[] = []
+  let sourceIds: string[] = []
+  let found: any = null
+  const t0 = Date.now()
+  try {
+    const output = await providers.runAll({
+      media,
+      events: {
+        init: (e) => { sourceIds = e.sourceIds },
+        start: (id) => events.push({ id, phase: 'start' }),
+        update: (e) => events.push({ id: e.id, status: e.status, reason: e.reason, error: e.error ? String((e.error as any)?.message ?? e.error).slice(0, 200) : undefined }),
+      },
+    })
+    if (output) found = { sourceId: output.sourceId, streamType: output.stream.type }
+  } catch (e) {
+    return { error: String((e as Error).message), media, sourceIds, events }
+  }
+  return {
+    ok: !!found,
+    ms: Date.now() - t0,
+    media,
+    proxy: PROXY_URL ? 'configured' : 'none',
+    totalSources: sourceIds.length,
+    sourceIds,
+    found,
+    events,
+  }
+}
+
 // Diagnóstico: prueba el resolver con Fight Club (TMDB 550)
 export async function checkProviders(): Promise<ProviderHealth[]> {
   const TEST_ID = 550

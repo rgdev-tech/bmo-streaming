@@ -93126,6 +93126,39 @@ function resolveStream(type, tmdbId, season, episode) {
   const key2 = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
   return cache2.resolve(key2, () => scrape2(type, tmdbId, season, episode));
 }
+async function debugScrape(type, tmdbId, season, episode) {
+  const media = await buildMedia(type, tmdbId, season, episode);
+  if (!media) return { error: "buildMedia fall\xF3 (\xBFTMDB_API_KEY?)", media: null };
+  const events = [];
+  let sourceIds = [];
+  let found = null;
+  const t0 = Date.now();
+  try {
+    const output = await providers2.runAll({
+      media,
+      events: {
+        init: (e) => {
+          sourceIds = e.sourceIds;
+        },
+        start: (id) => events.push({ id, phase: "start" }),
+        update: (e) => events.push({ id: e.id, status: e.status, reason: e.reason, error: e.error ? String(e.error?.message ?? e.error).slice(0, 200) : void 0 })
+      }
+    });
+    if (output) found = { sourceId: output.sourceId, streamType: output.stream.type };
+  } catch (e) {
+    return { error: String(e.message), media, sourceIds, events };
+  }
+  return {
+    ok: !!found,
+    ms: Date.now() - t0,
+    media,
+    proxy: PROXY_URL ? "configured" : "none",
+    totalSources: sourceIds.length,
+    sourceIds,
+    found,
+    events
+  };
+}
 async function checkProviders() {
   const TEST_ID = 550;
   const start = Date.now();
@@ -93170,6 +93203,14 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
     providers: providers3
   };
 }).get(
+  "/debug/movie/:id",
+  ({ params }) => debugScrape("movie", Number(params.id)),
+  { params: t.Object({ id: t.String() }) }
+).get(
+  "/debug/tv/:id/:season/:episode",
+  ({ params }) => debugScrape("tv", Number(params.id), Number(params.season), Number(params.episode)),
+  { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+).get(
   "/movie/:id",
   async ({ params, set }) => {
     console.error(`[resolve] movie ${params.id} start`);

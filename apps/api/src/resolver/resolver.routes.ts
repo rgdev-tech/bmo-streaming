@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia'
-import { resolveStream, checkProviders } from './resolver.service'
+import { resolveStream, checkProviders, debugScrape } from './resolver.service'
 
 // Algunos CDNs (vidlink → storm.vodvidl.site) incluyen en el query param ?headers=
 // el Referer que esperan recibir del cliente. Lo extraemos para dárselo al player.
@@ -39,6 +39,18 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
       providers,
     }
   })
+
+  // Diagnóstico: corre el scrape y devuelve qué hizo cada source (JSON crudo)
+  .get(
+    '/debug/movie/:id',
+    ({ params }) => debugScrape('movie', Number(params.id)),
+    { params: t.Object({ id: t.String() }) }
+  )
+  .get(
+    '/debug/tv/:id/:season/:episode',
+    ({ params }) => debugScrape('tv', Number(params.id), Number(params.season), Number(params.episode)),
+    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+  )
 
   .get(
     '/movie/:id',
