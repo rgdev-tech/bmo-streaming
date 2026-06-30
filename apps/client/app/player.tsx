@@ -329,7 +329,11 @@ function NativePlayer({
   const [duration, setDuration] = useState(0)
   const [position, setPosition] = useState(0)
   const [inFullscreen, setInFullscreen] = useState(false)
+  const inFullscreenRef = useRef(false)
   const seeked = useRef(false)
+  // Error capturado durante fullscreen — se propaga al cerrar, no inmediatamente,
+  // para evitar que el desmontaje del componente y el dismiss nativo colisionen.
+  const pendingError = useRef<string | null>(null)
 
   useEffect(() => {
     return () => {
@@ -351,7 +355,7 @@ function NativePlayer({
           ...(textTracks && textTracks.length > 0 ? { textTracks } : {}),
         }}
         controls
-        fullscreen
+        paused={false}
         progressUpdateInterval={500}
         resizeMode="contain"
         onLoad={({ duration: dur }) => {
@@ -360,6 +364,7 @@ function NativePlayer({
             seeked.current = true
             videoRef.current?.seek(startAt)
           }
+          setTimeout(() => videoRef.current?.presentFullscreenPlayer(), 100)
         }}
         onProgress={({ currentTime, seekableDuration }) => {
           progressRef.current = { time: currentTime, duration: seekableDuration }
@@ -372,13 +377,38 @@ function NativePlayer({
           }
         }}
         onEnd={() => onEnded()}
-        onFullscreenPlayerDidPresent={() => setInFullscreen(true)}
+        onFullscreenPlayerDidPresent={() => {
+          setInFullscreen(true)
+          inFullscreenRef.current = true
+        }}
         onFullscreenPlayerWillDismiss={() => {
           setInFullscreen(false)
+          inFullscreenRef.current = false
           const { time, duration: d } = progressRef.current
-          onClose(d > 0 ? time / d : 0)
+          if (pendingError.current) {
+            // Había un error pendiente — propagar ahora que el fullscreen ya cerró
+            const msg = pendingError.current
+            pendingError.current = null
+            onError(msg)
+          } else {
+            onClose(d > 0 ? time / d : 0)
+          }
         }}
-        onError={(e) => onError(e.error?.errorString ?? 'Player error')}
+        onError={(e) => {
+          const msg = e.error?.error
+            ?? e.error?.localizedDescription
+            ?? e.error?.errorString
+            ?? 'Player error'
+          console.warn('[player] onError:', JSON.stringify(e))
+          if (inFullscreenRef.current) {
+            // En fullscreen: guardar el error y pedir cierre para que el dismiss
+            // lo propague de forma segura (evita colisión JS/nativo al desmontar)
+            pendingError.current = msg
+            videoRef.current?.dismissFullscreenPlayer()
+          } else {
+            onError(msg)
+          }
+        }}
         style={styles.fill}
       />
 
