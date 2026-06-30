@@ -59,5 +59,21 @@ target 'BMO' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # expo-file-system 18.x calls ExpoAppDelegate which isn't in scope inside the pod.
+    # Replace with nil — background download sessions aren't used in this app.
+    fs_module = Dir.glob("#{Pod::Config.instance.installation_root}/../../node_modules/**/.bun/**/expo-file-system/ios/FileSystemModule.swift").first
+    fs_module ||= Dir.glob("#{Pod::Config.instance.installation_root}/../node_modules/**/expo-file-system/ios/FileSystemModule.swift").first
+    if fs_module && File.exist?(fs_module)
+      content = File.read(fs_module)
+      if content.include?("ExpoAppDelegate.getSubscriberOfType")
+        patched = content.gsub(
+          /EXSessionTaskDispatcher\(sessionHandler: ExpoAppDelegate\.getSubscriberOfType\([^)]+\)\)/,
+          "EXSessionTaskDispatcher(sessionHandler: nil)"
+        )
+        File.write(fs_module, patched)
+        puts "✅ Patched ExpoFileSystem: replaced ExpoAppDelegate with nil"
+      end
+    end
   end
 end

@@ -15,18 +15,14 @@
         "light": "./assets/images/ios/icon-light.png",
         "dark": "./assets/images/ios/icon-dark.png"
       },
-      "appleTeamId": "27F869D4P7",
-      "runtimeVersion": "1.0.0"
+      "appleTeamId": "27F869D4P7"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.rgdev.bmostreaming",
-      "runtimeVersion": {
-        "policy": "appVersion"
-      }
+      "package": "com.rgdev.bmostreaming"
     },
     "web": {
       "favicon": "./assets/images/favicon.png"
@@ -45,8 +41,5 @@
         "projectId": "2e610774-117f-4285-bddc-4313a2696290"
       }
     },
-    "updates": {
-      "url": "https://u.expo.dev/2e610774-117f-4285-bddc-4313a2696290"
-    }
   }
 }
