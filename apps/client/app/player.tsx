@@ -37,6 +37,7 @@ export default function PlayerScreen() {
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
@@ -98,6 +99,7 @@ export default function PlayerScreen() {
       const info = await resolveP
       if (cancelled) return
       setStreamUrl(info.streamUrl)
+      setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setStartAt(pos)
       setReady(true)
@@ -116,11 +118,19 @@ export default function PlayerScreen() {
     getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
   }, [id, isTv, seasonN, episodeN])
 
-  // URI final: local > master HLS proxeado por nuestro servidor
+  // URI final según la fuente:
+  //  - local: m3u8 descargado
+  //  - file (mp4): URL directa del CDN → AVPlayer la reproduce nativo (range/seek)
+  //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
   const masterUrl = localUri
-    ?? (isTv
-      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
-      : stream.masterMovie(id))
+    ?? (streamType === 'file' && streamUrl
+      ? streamUrl
+      : (isTv
+        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1)
+        : stream.masterMovie(id)))
+
+  // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
+  const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
 
   // Título base: quita el sufijo "· T_:E_" si vino en el param
   const baseTitle = (title ?? '').replace(/\s*·\s*T\d+:E\d+\s*$/, '')
@@ -219,8 +229,9 @@ export default function PlayerScreen() {
         </View>
       ) : ready && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
           uri={masterUrl}
+          contentType={contentType}
           referer={referer}
           startAt={startAt}
           meta={meta}
@@ -250,9 +261,9 @@ export default function PlayerScreen() {
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
-  uri: string; referer: string; startAt: number
+  uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -271,7 +282,7 @@ function NativePlayer({
   const [inFullscreen, setInFullscreen] = useState(false)
 
   const player = useVideoPlayer(
-    { uri, headers: { Referer: referer }, contentType: 'hls' },
+    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
     (p) => {
       p.timeUpdateEventInterval = 0.5
       p.bufferOptions = { preferredForwardBufferDuration: 30 }

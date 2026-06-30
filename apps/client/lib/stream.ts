@@ -1,7 +1,8 @@
 import { api, API_URL } from './api'
 
 export type ResolveInfo = {
-  streamUrl: string   // URL directa del CDN — el player la usa sin pasar por el servidor
+  streamUrl: string   // URL directa del CDN
+  type: 'hls' | 'file'  // hls → master proxeado; file → mp4 directo
   referer: string
   source: string
   captions: string[]

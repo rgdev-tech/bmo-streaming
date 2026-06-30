@@ -66608,6 +66608,8 @@ function summarize(result) {
   const cdnReferer = extractCdnReferer(result.url);
   return {
     streamUrl: result.url,
+    type: result.type,
+    // 'hls' (proxeado) | 'file' (mp4 directo)
     referer: cdnReferer || result.headers.Referer || "",
     source: result.source,
     captions: result.captions.map((c) => c.language)
