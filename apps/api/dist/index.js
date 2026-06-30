@@ -66820,6 +66820,7 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
 
 // src/resolver/stream.routes.ts
 var HLS_MIME = "application/vnd.apple.mpegurl";
+var PROXY_URL2 = process.env.STREAM_PROXY_URL;
 function normalizeVtt(raw) {
   const trimmed = raw.trimStart();
   if (!trimmed.startsWith("WEBVTT")) return `WEBVTT
@@ -66861,18 +66862,35 @@ function refererOf(headers2) {
   return headers2.Referer ?? headers2.referer ?? "";
 }
 async function fetchM3u8(url, headers2) {
-  try {
-    const raw = await fetch(url, {
-      headers: headers2,
-      signal: AbortSignal.timeout?.(12e3)
-    }).then((r) => r.text());
-    return raw.trimStart().startsWith("#EXTM3U") ? raw : null;
-  } catch (e) {
-    console.error(`[m3u8] fetch error ${url.slice(-50)}: ${e.message}`);
-    return null;
-  }
+  const tryFetch = async (fetchUrl, h) => {
+    try {
+      const r = await fetch(fetchUrl, { headers: h, signal: AbortSignal.timeout?.(8e3) });
+      if (!r.ok) return null;
+      const text3 = await r.text();
+      return text3.trimStart().startsWith("#EXTM3U") ? text3 : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = await tryFetch(url, headers2);
+  if (direct) return direct;
+  if (!PROXY_URL2) return null;
+  const referer2 = headers2.Referer ?? headers2.referer ?? "";
+  const proxyH = referer2 ? { "x-referer": referer2 } : {};
+  const result = await tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(url)}`, proxyH);
+  if (!result) console.error(`[m3u8] fetch failed (direct+proxy) ${url.slice(-60)}`);
+  return result;
 }
-function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr) {
+function rewriteKeyUris(m3u8, proxyBase, referer2) {
+  return m3u8.replace(
+    /(#EXT-X-KEY:[^"\n]*URI=")([^"]+)(")/g,
+    (_, pre, keyUri, post) => {
+      const proxied = `${proxyBase}/stream/key?url=${encodeURIComponent(keyUri)}${referer2 ? `&referer=${encodeURIComponent(referer2)}` : ""}`;
+      return `${pre}${proxied}${post}`;
+    }
+  );
+}
+function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr, referer2) {
   const base = baseUrl22.slice(0, baseUrl22.lastIndexOf("/") + 1);
   const origin2 = new URL(baseUrl22).origin;
   const lines = master.split("\n");
@@ -66896,7 +66914,8 @@ function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr)
       if (!t2.startsWith("http")) {
         abs = t2.startsWith("/") ? `${origin2}${t2}` : `${base}${t2}`;
       }
-      out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}`);
+      const refQ = referer2 ? `&referer=${encodeURIComponent(referer2)}` : "";
+      out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}${refQ}&url=${encodeURIComponent(abs)}`);
       continue;
     }
     if (t2.startsWith("#EXT-X-MEDIA:") && t2.includes('URI="')) {
@@ -66907,7 +66926,8 @@ function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr)
           if (!uri2.startsWith("http")) {
             abs = uri2.startsWith("/") ? `${origin2}${uri2}` : `${base}${uri2}`;
           }
-          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}"`;
+          const refQ = referer2 ? `&referer=${encodeURIComponent(referer2)}` : "";
+          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}${refQ}&url=${encodeURIComponent(abs)}"`;
         })
       );
       continue;
@@ -66964,7 +66984,7 @@ ${varUrl2}
       }
       const resolved = resolveRelativeUrls(masterRaw, result.url);
       if (resolved.includes("#EXT-X-STREAM-INF")) {
-        return rewriteMasterVariants(resolved, result.url, base, subLines, query_string);
+        return rewriteMasterVariants(resolved, result.url, base, subLines, query_string, referer2);
       }
       const varUrl = `${base}/stream/variant.m3u8?${query_string}&url=${encodeURIComponent(result.url)}`;
       const subsAttr = hasSubs ? ',SUBTITLES="subs"' : "";
@@ -66989,14 +67009,26 @@ ${varUrl}
   }
 ).get(
   "/variant.m3u8",
-  ({ query, set }) => {
+  async ({ query, request, set }) => {
     const q = query;
     if (!q.url) {
       set.status = 400;
       return "No url";
     }
+    const variantUrl = decodeURIComponent(q.url);
+    const referer2 = q.referer ? decodeURIComponent(q.referer) : "";
+    const base = baseUrl2(request);
+    const headers2 = referer2 ? { Referer: referer2 } : {};
+    const raw = await fetchM3u8(variantUrl, headers2);
+    if (raw) {
+      const resolved = resolveRelativeUrls(raw, variantUrl);
+      const rewritten = rewriteKeyUris(resolved, base, referer2);
+      set.headers["content-type"] = HLS_MIME;
+      return rewritten;
+    }
+    console.error(`[variant] fetchM3u8 fall\xF3 para ${variantUrl.slice(-60)} \u2014 redirigiendo`);
     set.status = 302;
-    set.headers["Location"] = decodeURIComponent(q.url);
+    set.headers["Location"] = variantUrl;
     return null;
   },
   {
@@ -67006,8 +67038,45 @@ ${varUrl}
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
       lang: t.Optional(t.String()),
+      referer: t.Optional(t.String()),
       url: t.String()
     })
+  }
+).get(
+  "/key",
+  async ({ query, set }) => {
+    const q = query;
+    if (!q.url) {
+      set.status = 400;
+      return "No url";
+    }
+    const keyUrl = decodeURIComponent(q.url);
+    const referer2 = q.referer ? decodeURIComponent(q.referer) : "";
+    const headers2 = referer2 ? { Referer: referer2 } : {};
+    const tryFetch = async (u, h) => {
+      try {
+        const r = await fetch(u, { headers: h, signal: AbortSignal.timeout?.(8e3) });
+        return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+      } catch {
+        return null;
+      }
+    };
+    let key2 = await tryFetch(keyUrl, headers2);
+    if (!key2 && PROXY_URL2) {
+      const proxyH = referer2 ? { "x-referer": referer2 } : {};
+      key2 = await tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(keyUrl)}`, proxyH);
+    }
+    if (!key2) {
+      console.error(`[key] no se pudo obtener: ${keyUrl.slice(-60)}`);
+      set.status = 502;
+      return "Key not available";
+    }
+    set.headers["content-type"] = "application/octet-stream";
+    set.headers["cache-control"] = "public, max-age=3600";
+    return key2;
+  },
+  {
+    query: t.Object({ url: t.String(), referer: t.Optional(t.String()) })
   }
 ).get(
   "/seg",

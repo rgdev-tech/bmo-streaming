@@ -5,6 +5,10 @@ import { langCode, srtToVtt, resolveRelativeUrls } from './hls'
 
 const HLS_MIME = 'application/vnd.apple.mpegurl'
 
+// CF Worker proxy (STREAM_PROXY_URL). Acepta ?destination=<url> y X-Referer header.
+// Usa IPs de Cloudflare → evita bloqueos de CDNs que rechazan IPs de Vercel.
+const PROXY_URL = process.env.STREAM_PROXY_URL
+
 function normalizeVtt(raw: string): string {
   const trimmed = raw.trimStart()
   if (!trimmed.startsWith('WEBVTT')) return `WEBVTT\n\n${trimmed}`
@@ -48,18 +52,32 @@ function refererOf(headers: Record<string, string>): string {
   return headers.Referer ?? headers.referer ?? ''
 }
 
-// Descarga un m3u8 desde el CDN con los headers correctos (Referer/Origin/etc.)
+// Descarga un m3u8 desde el CDN.
+// 1. Intento directo (rápido, funciona si el CDN no bloquea IPs de Vercel)
+// 2. Fallback vía CF Worker (IPs de Cloudflare — bypassa la mayoría de bloqueos CDN)
 async function fetchM3u8(url: string, headers: Record<string, string>): Promise<string | null> {
-  try {
-    const raw = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout?.(12000),
-    }).then((r) => r.text())
-    return raw.trimStart().startsWith('#EXTM3U') ? raw : null
-  } catch (e) {
-    console.error(`[m3u8] fetch error ${url.slice(-50)}: ${(e as Error).message}`)
-    return null
+  const tryFetch = async (fetchUrl: string, h: Record<string, string>) => {
+    try {
+      const r = await fetch(fetchUrl, { headers: h, signal: AbortSignal.timeout?.(8000) })
+      if (!r.ok) return null
+      const text = await r.text()
+      return text.trimStart().startsWith('#EXTM3U') ? text : null
+    } catch {
+      return null
+    }
   }
+
+  // 1. Directo
+  const direct = await tryFetch(url, headers)
+  if (direct) return direct
+
+  // 2. Via CF Worker
+  if (!PROXY_URL) return null
+  const referer = headers.Referer ?? headers.referer ?? ''
+  const proxyH: Record<string, string> = referer ? { 'x-referer': referer } : {}
+  const result = await tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH)
+  if (!result) console.error(`[m3u8] fetch failed (direct+proxy) ${url.slice(-60)}`)
+  return result
 }
 
 // Reescribe todas las URLs de un m3u8 (segmentos) para pasar por nuestro servidor.
@@ -82,9 +100,23 @@ function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string, re
   return out.join('\n')
 }
 
+// Reescribe las URIs #EXT-X-KEY para que pasen por nuestro proxy de claves.
+// AVPlayer fetcha la clave AES-128 desde nuestro servidor, que la descarga con
+// los headers correctos (Referer) vía CF Worker.
+function rewriteKeyUris(m3u8: string, proxyBase: string, referer: string): string {
+  return m3u8.replace(
+    /(#EXT-X-KEY:[^"\n]*URI=")([^"]+)(")/g,
+    (_, pre, keyUri, post) => {
+      const proxied = `${proxyBase}/stream/key?url=${encodeURIComponent(keyUri)}${referer ? `&referer=${encodeURIComponent(referer)}` : ''}`
+      return `${pre}${proxied}${post}`
+    }
+  )
+}
+
 // Reescribe solo las líneas de variante en un master (líneas después de #EXT-X-STREAM-INF).
 // queryStr = "type=tv&id=123&season=1&episode=2" — se propaga a las rutas hijas.
-function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: string, subLines: string[], queryStr: string): string {
+// referer se incluye en la URL de cada variante para que el endpoint lo use sin re-resolve.
+function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: string, subLines: string[], queryStr: string, referer: string): string {
   const base = baseUrl2.slice(0, baseUrl2.lastIndexOf('/') + 1)
   const origin = new URL(baseUrl2).origin
   const lines = master.split('\n')
@@ -115,7 +147,8 @@ function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: stri
       if (!t.startsWith('http')) {
         abs = t.startsWith('/') ? `${origin}${t}` : `${base}${t}`
       }
-      out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}`)
+      const refQ = referer ? `&referer=${encodeURIComponent(referer)}` : ''
+      out.push(`${proxyBase}/stream/variant.m3u8?${queryStr}${refQ}&url=${encodeURIComponent(abs)}`)
       continue
     }
 
@@ -129,7 +162,8 @@ function rewriteMasterVariants(master: string, baseUrl2: string, proxyBase: stri
           if (!uri.startsWith('http')) {
             abs = uri.startsWith('/') ? `${origin}${uri}` : `${base}${uri}`
           }
-          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}&url=${encodeURIComponent(abs)}"`
+          const refQ = referer ? `&referer=${encodeURIComponent(referer)}` : ''
+          return `URI="${proxyBase}/stream/variant.m3u8?${queryStr}${refQ}&url=${encodeURIComponent(abs)}"`
         })
       )
       continue
@@ -196,7 +230,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
 
         // ¿Es un master (con variantes) o un media playlist (segmentos directos)?
         if (resolved.includes('#EXT-X-STREAM-INF')) {
-          return rewriteMasterVariants(resolved, result.url, base, subLines, query_string)
+          return rewriteMasterVariants(resolved, result.url, base, subLines, query_string, referer)
         }
         // Media playlist: segmentos directos → un solo variant que envuelve este playlist
         const varUrl = `${base}/stream/variant.m3u8?${query_string}&url=${encodeURIComponent(result.url)}`
@@ -219,17 +253,34 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
     }
   )
 
-  // Variante HLS: redirige directamente al CDN.
-  // AVPlayer aplica source.headers (Referer) a TODOS los requests del asset via
-  // AVURLAssetHTTPHeaderFieldsKey — incluyendo variantes y segmentos post-redirect.
-  // Esto evita que los CDNs bloqueen los IPs de Vercel al fetchear playlists/segmentos.
+  // Variante HLS: descarga el playlist desde el CDN (directo o vía CF Worker),
+  // reescribe las URIs de claves AES-128 para que pasen por nuestro /stream/key,
+  // y devuelve el manifest con URLs de segmentos absolutas (el player las fetcha directo).
   .get(
     '/variant.m3u8',
-    ({ query, set }) => {
-      const q = query as { url?: string }
+    async ({ query, request, set }) => {
+      const q = query as { url?: string; referer?: string }
       if (!q.url) { set.status = 400; return 'No url' }
+
+      const variantUrl = decodeURIComponent(q.url)
+      const referer = q.referer ? decodeURIComponent(q.referer) : ''
+      const base = baseUrl(request)
+      const headers: Record<string, string> = referer ? { Referer: referer } : {}
+
+      const raw = await fetchM3u8(variantUrl, headers)
+      if (raw) {
+        // URLs de segmentos → absolutas (el player fetcha directo al CDN)
+        const resolved = resolveRelativeUrls(raw, variantUrl)
+        // Claves AES-128 → proxy (el key server requiere headers de browser)
+        const rewritten = rewriteKeyUris(resolved, base, referer)
+        set.headers['content-type'] = HLS_MIME
+        return rewritten
+      }
+
+      // Último recurso: redirect directo al CDN
+      console.error(`[variant] fetchM3u8 falló para ${variantUrl.slice(-60)} — redirigiendo`)
       set.status = 302
-      set.headers['Location'] = decodeURIComponent(q.url)
+      set.headers['Location'] = variantUrl
       return null
     },
     {
@@ -237,8 +288,52 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         type: t.Optional(t.String()), id: t.Optional(t.String()),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
         lang: t.Optional(t.String()),
+        referer: t.Optional(t.String()),
         url: t.String(),
       }),
+    }
+  )
+
+  // Proxy de claves AES-128. AVPlayer fetcha las claves desde aquí; nosotros las
+  // descargamos con los headers correctos (Referer) vía CF Worker.
+  .get(
+    '/key',
+    async ({ query, set }) => {
+      const q = query as { url?: string; referer?: string }
+      if (!q.url) { set.status = 400; return 'No url' }
+
+      const keyUrl = decodeURIComponent(q.url)
+      const referer = q.referer ? decodeURIComponent(q.referer) : ''
+      const headers: Record<string, string> = referer ? { Referer: referer } : {}
+
+      const tryFetch = async (u: string, h: Record<string, string>) => {
+        try {
+          const r = await fetch(u, { headers: h, signal: AbortSignal.timeout?.(8000) })
+          return r.ok ? new Uint8Array(await r.arrayBuffer()) : null
+        } catch { return null }
+      }
+
+      // 1. Directo
+      let key = await tryFetch(keyUrl, headers)
+
+      // 2. Vía CF Worker (si CDN bloquea Vercel)
+      if (!key && PROXY_URL) {
+        const proxyH: Record<string, string> = referer ? { 'x-referer': referer } : {}
+        key = await tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(keyUrl)}`, proxyH)
+      }
+
+      if (!key) {
+        console.error(`[key] no se pudo obtener: ${keyUrl.slice(-60)}`)
+        set.status = 502
+        return 'Key not available'
+      }
+
+      set.headers['content-type'] = 'application/octet-stream'
+      set.headers['cache-control'] = 'public, max-age=3600'
+      return key
+    },
+    {
+      query: t.Object({ url: t.String(), referer: t.Optional(t.String()) }),
     }
   )
 
