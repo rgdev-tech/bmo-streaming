@@ -5,11 +5,12 @@ import {
   Pressable, Animated,
 } from 'react-native'
 import { Image } from 'expo-image'
-import Video, { type VideoRef, TextTrackType, type TextTracks, type ISO639_1 } from 'react-native-video'
+import { useVideoPlayer, VideoView } from 'expo-video'
+import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
+import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang } from '@/lib/stream'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
@@ -40,10 +41,6 @@ export default function PlayerScreen() {
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
-  const [subtitles, setSubtitles] = useState<Subtitle[]>([])
-  // Fallback de fuentes: si una falla al reproducir, la marcamos y pedimos la siguiente.
-  const [failedSources, setFailedSources] = useState<string[]>([])
-  const [currentSource, setCurrentSource] = useState('')
 
   // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
   const [audioLang, setAudioLangState] = useState<AudioLang>('original')
@@ -76,24 +73,7 @@ export default function PlayerScreen() {
     setError(null)
     setReady(false)
     setStreamUrl(null)
-    setFailedSources([])   // reintento manual → volver a probar todas las fuentes
     setRetryCount((c) => c + 1)
-  }
-
-  // Máximo de fuentes a descartar antes de rendirse (evita loops largos)
-  const MAX_FALLBACK = 4
-
-  // El player falló al reproducir esta fuente. Si quedan intentos, la descartamos
-  // y el effect re-resuelve con la SIGUIENTE fuente disponible (auto-fallback).
-  function handlePlayerError(msg: string) {
-    if (currentSource && failedSources.length < MAX_FALLBACK) {
-      console.warn(`[player] fuente "${currentSource}" falló (${msg}) → probando siguiente`)
-      setReady(false)
-      setStreamUrl(null)
-      setFailedSources((prev) => (prev.includes(currentSource) ? prev : [...prev, currentSource]))
-    } else {
-      setError(msg || 'No se pudo reproducir con ninguna fuente disponible')
-    }
   }
 
   useEffect(() => {
@@ -111,15 +91,14 @@ export default function PlayerScreen() {
         // Reproducción offline: la URI ya es el m3u8 local
         setReferer('')
         setStartAt(pos)
-        setSubtitles([])
         setReady(true)
         return
       }
 
-      // 2. Resolución normal via API (idioma de audio + fuentes ya descartadas)
+      // 2. Resolución normal via API (con el idioma de audio preferido)
       const resolveP = isTv
-        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang, failedSources)
-        : stream.resolveMovie(id, audioLang, failedSources)
+        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+        : stream.resolveMovie(id, audioLang)
 
       const info = await resolveP
       if (cancelled) return
@@ -127,8 +106,6 @@ export default function PlayerScreen() {
       setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setStartAt(pos)
-      setSubtitles(info.subtitles ?? [])
-      setCurrentSource(info.source ?? '')
       setReady(true)
 
       // Pre-resuelve el siguiente episodio en segundo plano
@@ -137,7 +114,7 @@ export default function PlayerScreen() {
 
     resolve().catch((e) => !cancelled && setError(String(e)))
     return () => { cancelled = true }
-  }, [type, id, seasonN, episodeN, retryCount, audioLang, failedSources])
+  }, [type, id, seasonN, episodeN, retryCount, audioLang])
 
   // Si existe descarga local, el player la usará directamente (sin pasar por API)
   const [localUri, setLocalUri] = useState<string | null>(params.localPath ?? null)
@@ -153,22 +130,11 @@ export default function PlayerScreen() {
     ?? (streamType === 'file' && streamUrl
       ? streamUrl
       : (isTv
-        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang, failedSources)
-        : stream.masterMovie(id, audioLang, failedSources)))
+        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+        : stream.masterMovie(id, audioLang)))
 
   // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
   const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
-
-  // Para mp4 (file) inyectamos textTracks sideloaded con las pistas Wyzie (VTT).
-  // Para HLS los subtítulos ya vienen en el manifest (#EXT-X-MEDIA:TYPE=SUBTITLES).
-  const textTracksForPlayer: TextTracks = (contentType === 'auto' && subtitles.length > 0)
-    ? subtitles.map((s) => ({
-        title: s.label,
-        language: s.lang as ISO639_1,
-        type: TextTrackType.VTT,
-        uri: stream.subVtt(isTv ? 'tv' : 'movie', id, s.i, seasonN, episodeN, audioLang),
-      }))
-    : []
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
@@ -177,7 +143,6 @@ export default function PlayerScreen() {
     setReady(false)
     setStreamUrl(null)
     setError(null)
-    setFailedSources([])   // nueva versión de audio → empezar limpio
     setAudioLangState(lang)
   }
 
@@ -242,7 +207,6 @@ export default function PlayerScreen() {
     setReady(false)
     setStreamUrl(null)
     setStartAt(0)
-    setFailedSources([])   // nuevo episodio → empezar limpio
     setEpisodeN(nextEpisodeN)
   }
 
@@ -279,11 +243,10 @@ export default function PlayerScreen() {
         </View>
       ) : ready && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}-${currentSource}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
           uri={masterUrl}
           contentType={contentType}
           referer={referer}
-          textTracks={textTracksForPlayer}
           startAt={startAt}
           meta={meta}
           title={baseTitle}
@@ -292,14 +255,12 @@ export default function PlayerScreen() {
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
-          onError={handlePlayerError}
+          onError={(msg) => setError(msg || 'Player error')}
         />
       ) : (
         <View style={styles.center}>
           <ActivityIndicator color="#fff" size="large" />
-          <Text style={styles.loadingText}>
-            {failedSources.length > 0 ? 'Probando otra fuente…' : 'Preparando stream…'}
-          </Text>
+          <Text style={styles.loadingText}>Preparando stream…</Text>
           {!!title && (
             <Text style={styles.loadingSub}>
               {title}{season ? `  ·  T${season}:E${episode}` : ''}
@@ -334,7 +295,7 @@ export default function PlayerScreen() {
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError, textTracks,
+  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
@@ -345,22 +306,55 @@ function NativePlayer({
   onEnded: () => void
   onPlayNext: () => void
   onError: (msg: string) => void
-  textTracks?: TextTracks
 }) {
   const insets = useSafeAreaInsets()
-  const videoRef = useRef<VideoRef>(null)
+  const videoRef = useRef<VideoView>(null)
   const lastSave = useRef(0)
   const progressRef = useRef({ time: 0, duration: 0 })
   const [duration, setDuration] = useState(0)
   const [position, setPosition] = useState(0)
   const [inFullscreen, setInFullscreen] = useState(false)
-  const inFullscreenRef = useRef(false)
-  const seeked = useRef(false)
-  const hasError = useRef(false)
-  // Error capturado durante fullscreen — se propaga al cerrar, no inmediatamente,
-  // para evitar que el desmontaje del componente y el dismiss nativo colisionen.
-  const pendingError = useRef<string | null>(null)
 
+  const player = useVideoPlayer(
+    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
+    (p) => {
+      p.timeUpdateEventInterval = 0.5
+      p.bufferOptions = { preferredForwardBufferDuration: 30 }
+    }
+  )
+
+  // Arrancar cuando el stream esté listo + entrar al fullscreen nativo de Apple
+  // (AVPlayerViewController) — el que tiene Liquid Glass, velocidad, audio y subtítulos
+  const started = useRef(false)
+  useEventListener(player, 'statusChange', ({ status, error: playerError }) => {
+    if (status === 'readyToPlay' && !started.current) {
+      started.current = true
+      if (startAt > 5) player.currentTime = startAt
+      player.play()
+      // pequeño delay para que la vista esté montada antes de expandir
+      setTimeout(() => videoRef.current?.enterFullscreen(), 60)
+    } else if (status === 'error') {
+      console.warn('[player] error:', playerError?.message)
+      onError(playerError?.message ?? 'Player error desconocido')
+    }
+  })
+
+  // Progreso (throttle 5s) + posición para el pill "Siguiente"
+  useEventListener(player, 'timeUpdate', ({ currentTime }) => {
+    const dur = player.duration
+    progressRef.current = { time: currentTime, duration: dur }
+    setPosition(currentTime)
+    if (dur > 0) setDuration(dur)
+    const now = Date.now()
+    if (dur > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
+      lastSave.current = now
+      saveProgress({ ...meta, position: currentTime, duration: dur })
+    }
+  })
+
+  useEventListener(player, 'playToEnd', () => onEnded())
+
+  // Al desmontar → guarda el progreso final (el cierre lo maneja onFullscreenExit)
   useEffect(() => {
     return () => {
       const { time, duration: d } = progressRef.current
@@ -373,73 +367,28 @@ function NativePlayer({
 
   return (
     <View style={styles.fill}>
-      <Video
+      {/* Reproductor nativo de Apple (AVPlayerViewController fullscreen) —
+          Liquid Glass, velocidad, audio y subtítulos integrados */}
+      <VideoView
         ref={videoRef}
-        source={{
-          uri,
-          headers: referer ? { Referer: referer } : undefined,
-          ...(textTracks && textTracks.length > 0 ? { textTracks } : {}),
-        }}
-        controls
-        paused={false}
-        progressUpdateInterval={500}
-        resizeMode="contain"
-        onLoad={({ duration: dur }) => {
-          if (dur > 0) setDuration(dur)
-          if (startAt > 5 && !seeked.current) {
-            seeked.current = true
-            videoRef.current?.seek(startAt)
-          }
-          setTimeout(() => videoRef.current?.presentFullscreenPlayer(), 100)
-        }}
-        onProgress={({ currentTime, seekableDuration }) => {
-          progressRef.current = { time: currentTime, duration: seekableDuration }
-          setPosition(currentTime)
-          if (seekableDuration > 0) setDuration(seekableDuration)
-          const now = Date.now()
-          if (seekableDuration > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-            lastSave.current = now
-            saveProgress({ ...meta, position: currentTime, duration: seekableDuration })
-          }
-        }}
-        onEnd={() => { if (!hasError.current) onEnded() }}
-        onFullscreenPlayerDidPresent={() => {
-          setInFullscreen(true)
-          inFullscreenRef.current = true
-        }}
-        onFullscreenPlayerWillDismiss={() => {
-          setInFullscreen(false)
-          inFullscreenRef.current = false
-          const { time, duration: d } = progressRef.current
-          if (pendingError.current) {
-            // Había un error pendiente — propagar ahora que el fullscreen ya cerró
-            const msg = pendingError.current
-            pendingError.current = null
-            onError(msg)
-          } else {
-            onClose(d > 0 ? time / d : 0)
-          }
-        }}
-        onError={(e) => {
-          const msg = e.error?.error
-            ?? e.error?.localizedDescription
-            ?? e.error?.errorString
-            ?? 'Player error'
-          console.warn('[player] onError:', JSON.stringify(e))
-          hasError.current = true
-          if (inFullscreenRef.current) {
-            // En fullscreen: guardar el error y pedir cierre para que el dismiss
-            // lo propague de forma segura (evita colisión JS/nativo al desmontar)
-            pendingError.current = msg
-            videoRef.current?.dismissFullscreenPlayer()
-          } else {
-            onError(msg)
-          }
-        }}
+        player={player}
         style={styles.fill}
+        nativeControls={true}
+        allowsPictureInPicture
+        contentFit="contain"
+        onFullscreenEnter={() => setInFullscreen(true)}
+        onFullscreenExit={() => {
+          // El usuario cerró el reproductor nativo (botón "Listo"/X)
+          const { time, duration: d } = progressRef.current
+          onClose(d > 0 ? time / d : 0)
+        }}
       />
 
-      {/* Pill "Siguiente episodio" — solo visible fuera de fullscreen */}
+      {/* Tapa negra sobre los controles inline (feos) hasta entrar a fullscreen */}
+      {!inFullscreen && <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000' }]} pointerEvents="none" />}
+
+      {/* Pill "Siguiente episodio" — solo visible fuera de fullscreen
+          (en fullscreen Apple controla todo el overlay) */}
       {showPill && !inFullscreen && (
         <Pressable
           style={[styles.nextPill, { bottom: insets.bottom + 80, right: insets.right + 24 }]}
