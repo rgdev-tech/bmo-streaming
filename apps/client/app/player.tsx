@@ -41,6 +41,9 @@ export default function PlayerScreen() {
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
   const [subtitles, setSubtitles] = useState<Subtitle[]>([])
+  // Fallback de fuentes: si una falla al reproducir, la marcamos y pedimos la siguiente.
+  const [failedSources, setFailedSources] = useState<string[]>([])
+  const [currentSource, setCurrentSource] = useState('')
 
   // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
   const [audioLang, setAudioLangState] = useState<AudioLang>('original')
@@ -73,7 +76,24 @@ export default function PlayerScreen() {
     setError(null)
     setReady(false)
     setStreamUrl(null)
+    setFailedSources([])   // reintento manual → volver a probar todas las fuentes
     setRetryCount((c) => c + 1)
+  }
+
+  // Máximo de fuentes a descartar antes de rendirse (evita loops largos)
+  const MAX_FALLBACK = 4
+
+  // El player falló al reproducir esta fuente. Si quedan intentos, la descartamos
+  // y el effect re-resuelve con la SIGUIENTE fuente disponible (auto-fallback).
+  function handlePlayerError(msg: string) {
+    if (currentSource && failedSources.length < MAX_FALLBACK) {
+      console.warn(`[player] fuente "${currentSource}" falló (${msg}) → probando siguiente`)
+      setReady(false)
+      setStreamUrl(null)
+      setFailedSources((prev) => (prev.includes(currentSource) ? prev : [...prev, currentSource]))
+    } else {
+      setError(msg || 'No se pudo reproducir con ninguna fuente disponible')
+    }
   }
 
   useEffect(() => {
@@ -96,10 +116,10 @@ export default function PlayerScreen() {
         return
       }
 
-      // 2. Resolución normal via API (con el idioma de audio preferido)
+      // 2. Resolución normal via API (idioma de audio + fuentes ya descartadas)
       const resolveP = isTv
-        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-        : stream.resolveMovie(id, audioLang)
+        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang, failedSources)
+        : stream.resolveMovie(id, audioLang, failedSources)
 
       const info = await resolveP
       if (cancelled) return
@@ -108,6 +128,7 @@ export default function PlayerScreen() {
       setReferer(info.referer)
       setStartAt(pos)
       setSubtitles(info.subtitles ?? [])
+      setCurrentSource(info.source ?? '')
       setReady(true)
 
       // Pre-resuelve el siguiente episodio en segundo plano
@@ -116,7 +137,7 @@ export default function PlayerScreen() {
 
     resolve().catch((e) => !cancelled && setError(String(e)))
     return () => { cancelled = true }
-  }, [type, id, seasonN, episodeN, retryCount, audioLang])
+  }, [type, id, seasonN, episodeN, retryCount, audioLang, failedSources])
 
   // Si existe descarga local, el player la usará directamente (sin pasar por API)
   const [localUri, setLocalUri] = useState<string | null>(params.localPath ?? null)
@@ -132,8 +153,8 @@ export default function PlayerScreen() {
     ?? (streamType === 'file' && streamUrl
       ? streamUrl
       : (isTv
-        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-        : stream.masterMovie(id, audioLang)))
+        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang, failedSources)
+        : stream.masterMovie(id, audioLang, failedSources)))
 
   // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
   const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
@@ -156,6 +177,7 @@ export default function PlayerScreen() {
     setReady(false)
     setStreamUrl(null)
     setError(null)
+    setFailedSources([])   // nueva versión de audio → empezar limpio
     setAudioLangState(lang)
   }
 
@@ -220,6 +242,7 @@ export default function PlayerScreen() {
     setReady(false)
     setStreamUrl(null)
     setStartAt(0)
+    setFailedSources([])   // nuevo episodio → empezar limpio
     setEpisodeN(nextEpisodeN)
   }
 
@@ -256,7 +279,7 @@ export default function PlayerScreen() {
         </View>
       ) : ready && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}-${currentSource}`}
           uri={masterUrl}
           contentType={contentType}
           referer={referer}
@@ -269,12 +292,14 @@ export default function PlayerScreen() {
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
-          onError={(msg) => setError(msg || 'Player error')}
+          onError={handlePlayerError}
         />
       ) : (
         <View style={styles.center}>
           <ActivityIndicator color="#fff" size="large" />
-          <Text style={styles.loadingText}>Preparando stream…</Text>
+          <Text style={styles.loadingText}>
+            {failedSources.length > 0 ? 'Probando otra fuente…' : 'Preparando stream…'}
+          </Text>
           {!!title && (
             <Text style={styles.loadingSub}>
               {title}{season ? `  ·  T${season}:E${episode}` : ''}

@@ -6,6 +6,11 @@ function parseLang(v?: string): AudioLang {
   return v === 'latino' ? 'latino' : 'original'
 }
 
+// Fuentes a saltar (las que el cliente ya intentó y fallaron al reproducir)
+function parseExclude(v?: string): string[] {
+  return v ? v.split(',').map((s) => s.trim()).filter(Boolean) : []
+}
+
 // Algunos CDNs (vidlink → storm.vodvidl.site) incluyen en el query param ?headers=
 // el Referer que esperan recibir del cliente. Lo extraemos para dárselo al player.
 function extractCdnReferer(streamUrl: string): string {
@@ -80,7 +85,8 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     '/movie/:id',
     async ({ params, query, set }) => {
       const lang = parseLang(query.lang)
-      const result = await resolveStream('movie', Number(params.id), undefined, undefined, lang)
+      const exclude = parseExclude(query.exclude)
+      const result = await resolveStream('movie', Number(params.id), undefined, undefined, lang, exclude)
       console.error(`[resolve] movie ${params.id} (${lang}) →`, result?.source ?? 'null')
       const summary = summarize(result)
       if (!summary) {
@@ -91,7 +97,7 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     },
     {
       params: t.Object({ id: t.String() }),
-      query: t.Object({ lang: t.Optional(t.String()) }),
+      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) }),
     }
   )
 
@@ -99,12 +105,14 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     '/tv/:id/:season/:episode',
     async ({ params, query, set }) => {
       const lang = parseLang(query.lang)
+      const exclude = parseExclude(query.exclude)
       const result = await resolveStream(
         'tv',
         Number(params.id),
         Number(params.season),
         Number(params.episode),
-        lang
+        lang,
+        exclude
       )
       const summary = summarize(result)
       if (!summary) {
@@ -119,6 +127,6 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
         season: t.String(),
         episode: t.String(),
       }),
-      query: t.Object({ lang: t.Optional(t.String()) }),
+      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) }),
     }
   )

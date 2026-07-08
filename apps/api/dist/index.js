@@ -66448,6 +66448,57 @@ function makeSimpleProxyFetcher(proxyUrl, f) {
   return proxiedFetch;
 }
 
+// src/resolver/hls.ts
+function resolveRelativeUrls(m3u8, baseUrl3) {
+  const base = baseUrl3.slice(0, baseUrl3.lastIndexOf("/") + 1);
+  const origin2 = new URL(baseUrl3).origin;
+  return m3u8.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return line;
+    if (trimmed.startsWith("//")) return `https:${trimmed}`;
+    if (trimmed.startsWith("/")) return `${origin2}${trimmed}`;
+    return `${base}${trimmed}`;
+  }).join("\n");
+}
+function langCode(language) {
+  const l = language.toLowerCase();
+  if (l.includes("spanish") || l.includes("espa\xF1ol") || l.includes("castellano")) return "es";
+  if (l.includes("english")) return "en";
+  if (l.includes("portuguese") || l.includes("portugu\xEAs")) return "pt";
+  if (l.includes("french") || l.includes("fran\xE7ais")) return "fr";
+  if (l.includes("german") || l.includes("deutsch")) return "de";
+  if (l.includes("italian")) return "it";
+  if (l.includes("japanese")) return "ja";
+  if (l.includes("korean")) return "ko";
+  if (l.includes("chinese") || l.includes("mandarin")) return "zh";
+  if (l.includes("russian")) return "ru";
+  if (l.includes("arabic")) return "ar";
+  return "und";
+}
+function srtToVtt(srt) {
+  const body = srt.replace(/\r+/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+  return `WEBVTT
+
+${body}`;
+}
+function estimateBandwidth(streamInf) {
+  const m = streamInf.match(/RESOLUTION=\d+x(\d+)/);
+  const height = m ? Number(m[1]) : 0;
+  if (height >= 2e3) return 16e6;
+  if (height >= 1300) return 1e7;
+  if (height >= 1e3) return 6e6;
+  if (height >= 700) return 3e6;
+  if (height >= 460) return 14e5;
+  if (height > 0) return 8e5;
+  return 2e6;
+}
+function ensureBandwidth(streamInf) {
+  if (/\bBANDWIDTH=\d+/.test(streamInf)) return streamInf;
+  const bw = estimateBandwidth(streamInf);
+  return streamInf.replace(/^(#EXT-X-STREAM-INF:)/, `$1BANDWIDTH=${bw},`);
+}
+
 // src/resolver/resolver.service.ts
 var STREAM_TTL = 30 * 60 * 1e3;
 var PROXY_URL = process.env.STREAM_PROXY_URL;
@@ -66464,13 +66515,15 @@ var providers2 = makeProviders({
   target: targets.NATIVE,
   consistentIpForRequests: true
 });
-var DEPRIORITIZED = /* @__PURE__ */ new Set(["vidlink"]);
+var DEPRIORITIZED = /* @__PURE__ */ new Set(["vidlink", "vidrock"]);
 var LATINO_SOURCES = ["cuevana3", "pelisplushd", "cinehdplus"];
 var BASE_ORDER = providers2.listSources().filter((s) => !DEPRIORITIZED.has(s.id)).sort((a, b) => b.rank - a.rank).map((s) => s.id);
-function buildSourceOrder(lang) {
-  if (lang !== "latino") return BASE_ORDER;
-  const latino = LATINO_SOURCES.filter((id) => BASE_ORDER.includes(id));
-  const rest = BASE_ORDER.filter((id) => !latino.includes(id));
+function buildSourceOrder(lang, exclude = []) {
+  const ex = new Set(exclude);
+  const base = BASE_ORDER.filter((id) => !ex.has(id));
+  if (lang !== "latino") return base;
+  const latino = LATINO_SOURCES.filter((id) => base.includes(id));
+  const rest = base.filter((id) => !latino.includes(id));
   return [...latino, ...rest];
 }
 function languageLabel(sourceId) {
@@ -66565,29 +66618,131 @@ async function fetchSubtitles(type, tmdbId, season, episode) {
     return [];
   }
 }
-async function scrape2(type, tmdbId, lang, season, episode) {
+async function fetchHead(url, referer2) {
+  const tryFetch = async (u, h) => {
+    try {
+      const r = await fetch(u, { headers: h, signal: AbortSignal.timeout(6e3) });
+      if (!r.ok) return null;
+      const ct = r.headers.get("content-type") ?? "";
+      const reader = r.body?.getReader();
+      if (!reader) {
+        const buf = new Uint8Array((await r.arrayBuffer()).slice(0, 64));
+        return { contentType: ct, bytes: buf };
+      }
+      const { value } = await reader.read();
+      reader.cancel().catch(() => {
+      });
+      return { contentType: ct, bytes: (value ?? new Uint8Array()).slice(0, 64) };
+    } catch {
+      return null;
+    }
+  };
+  const direct = await tryFetch(url, referer2 ? { Referer: referer2 } : {});
+  if (direct) return direct;
+  if (!PROXY_URL) return null;
+  const proxyH = referer2 ? { "x-referer": referer2 } : {};
+  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH);
+}
+async function fetchText(url, referer2) {
+  const tryFetch = async (u, h) => {
+    try {
+      const r = await fetch(u, { headers: h, signal: AbortSignal.timeout(6e3) });
+      return r.ok ? await r.text() : null;
+    } catch {
+      return null;
+    }
+  };
+  const direct = await tryFetch(url, referer2 ? { Referer: referer2 } : {});
+  if (direct) return direct;
+  if (!PROXY_URL) return null;
+  const proxyH = referer2 ? { "x-referer": referer2 } : {};
+  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH);
+}
+function firstUri(playlist) {
+  for (const line of playlist.split("\n")) {
+    const t2 = line.trim();
+    if (t2 && !t2.startsWith("#")) return t2;
+  }
+  return null;
+}
+async function firstSegmentUrl(playlistUrl, referer2) {
+  const master = await fetchText(playlistUrl, referer2);
+  if (!master) return null;
+  let mediaUrl = playlistUrl;
+  let media = resolveRelativeUrls(master, playlistUrl);
+  if (media.includes("#EXT-X-STREAM-INF")) {
+    const variant = firstUri(media);
+    if (!variant) return null;
+    const v = await fetchText(variant, referer2);
+    if (!v) return null;
+    mediaUrl = variant;
+    media = resolveRelativeUrls(v, variant);
+  }
+  return firstUri(media);
+}
+function looksLikeImage(contentType, b) {
+  if (contentType.startsWith("image/")) return true;
+  if (b.length < 4) return false;
+  const [a, c, d, e] = b;
+  if (a === 137 && c === 80 && d === 78 && e === 71) return true;
+  if (a === 255 && c === 216 && d === 255) return true;
+  if (a === 71 && c === 73 && d === 70 && e === 56) return true;
+  if (a === 66 && c === 77) return true;
+  if (a === 82 && c === 73 && d === 70 && e === 70 && b.length >= 12 && b[8] === 87 && b[9] === 69) return true;
+  return false;
+}
+var DECOY_BUDGET_MS = 5e3;
+async function isDecoy(result) {
+  const check = async () => {
+    const referer2 = result.headers.Referer ?? result.headers.referer ?? "";
+    const segUrl = result.type === "hls" ? await firstSegmentUrl(result.url, referer2) : result.url;
+    if (!segUrl) return false;
+    const head = await fetchHead(segUrl, referer2);
+    if (!head) return false;
+    return looksLikeImage(head.contentType, head.bytes);
+  };
+  const budget = new Promise((res) => setTimeout(() => res(false), DECOY_BUDGET_MS));
+  return Promise.race([check(), budget]);
+}
+async function scrape2(type, tmdbId, lang, season, episode, exclude = []) {
   const media = await buildMedia(type, tmdbId, season, episode);
   if (!media) {
     console.error(`[resolve] no se pudo construir media para ${type}/${tmdbId}`);
     return null;
   }
-  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}`);
+  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}${exclude.length ? ` excl=${exclude.join(",")}` : ""}`);
   const t0 = Date.now();
   try {
-    const [output, wyzieSubs] = await Promise.all([
-      providers2.runAll({ media, sourceOrder: buildSourceOrder(lang) }),
-      fetchSubtitles(type, tmdbId, season, episode)
-    ]);
-    if (!output) {
-      console.error(`[resolve] sin stream para "${media.title}" (${Date.now() - t0}ms)`);
+    const subsP = fetchSubtitles(type, tmdbId, season, episode);
+    const blocked = new Set(exclude);
+    let result = null;
+    let winner = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const order = buildSourceOrder(lang).filter((id) => !blocked.has(id));
+      if (!order.length) break;
+      const output = await providers2.runAll({ media, sourceOrder: order });
+      if (!output) break;
+      const candidate = toStreamResult(output);
+      if (!candidate) {
+        blocked.add(output.sourceId);
+        continue;
+      }
+      if (await isDecoy(candidate)) {
+        console.error(`[resolve] se\xF1uelo descartado: ${output.sourceId}`);
+        blocked.add(output.sourceId);
+        continue;
+      }
+      result = candidate;
+      winner = output.sourceId;
+      break;
+    }
+    if (!result) {
+      console.error(`[resolve] sin stream v\xE1lido para "${media.title}" (${Date.now() - t0}ms)`);
       return null;
     }
-    const result = toStreamResult(output);
-    if (result) {
-      result.captions = [...wyzieSubs, ...result.captions];
-    }
+    result.captions = [...await subsP, ...result.captions];
     console.error(
-      `[resolve] OK via ${output.sourceId} (${result?.type}, ${result?.language}, ${result?.captions.length ?? 0} subs) en ${Date.now() - t0}ms`
+      `[resolve] OK via ${winner} (${result.type}, ${result.language}, ${result.captions.length} subs) en ${Date.now() - t0}ms`
     );
     return result;
   } catch (e) {
@@ -66595,10 +66750,11 @@ async function scrape2(type, tmdbId, lang, season, episode) {
     return null;
   }
 }
-function resolveStream(type, tmdbId, season, episode, lang = "original") {
+function resolveStream(type, tmdbId, season, episode, lang = "original", exclude = []) {
   const base = type === "tv" ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`;
-  const key2 = `${base}:${lang}`;
-  return cache3.resolve(key2, () => scrape2(type, tmdbId, lang, season, episode));
+  const ex = [...exclude].sort().join(",");
+  const key2 = ex ? `${base}:${lang}:x=${ex}` : `${base}:${lang}`;
+  return cache3.resolve(key2, () => scrape2(type, tmdbId, lang, season, episode, exclude));
 }
 async function debugSubs(type, tmdbId, season, episode) {
   if (!WYZIE_KEY) return { error: "WYZIE_API_KEY no est\xE1 definida en el entorno" };
@@ -66683,44 +66839,12 @@ async function checkProviders() {
   return [{ name: "movie-web", tier: 1, ok, ms: Date.now() - start }];
 }
 
-// src/resolver/hls.ts
-function resolveRelativeUrls(m3u8, baseUrl3) {
-  const base = baseUrl3.slice(0, baseUrl3.lastIndexOf("/") + 1);
-  const origin2 = new URL(baseUrl3).origin;
-  return m3u8.split("\n").map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) return line;
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return line;
-    if (trimmed.startsWith("//")) return `https:${trimmed}`;
-    if (trimmed.startsWith("/")) return `${origin2}${trimmed}`;
-    return `${base}${trimmed}`;
-  }).join("\n");
-}
-function langCode(language) {
-  const l = language.toLowerCase();
-  if (l.includes("spanish") || l.includes("espa\xF1ol") || l.includes("castellano")) return "es";
-  if (l.includes("english")) return "en";
-  if (l.includes("portuguese") || l.includes("portugu\xEAs")) return "pt";
-  if (l.includes("french") || l.includes("fran\xE7ais")) return "fr";
-  if (l.includes("german") || l.includes("deutsch")) return "de";
-  if (l.includes("italian")) return "it";
-  if (l.includes("japanese")) return "ja";
-  if (l.includes("korean")) return "ko";
-  if (l.includes("chinese") || l.includes("mandarin")) return "zh";
-  if (l.includes("russian")) return "ru";
-  if (l.includes("arabic")) return "ar";
-  return "und";
-}
-function srtToVtt(srt) {
-  const body = srt.replace(/\r+/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-  return `WEBVTT
-
-${body}`;
-}
-
 // src/resolver/resolver.routes.ts
 function parseLang(v) {
   return v === "latino" ? "latino" : "original";
+}
+function parseExclude(v) {
+  return v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
 }
 function extractCdnReferer(streamUrl) {
   try {
@@ -66777,7 +66901,8 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
   "/movie/:id",
   async ({ params, query, set }) => {
     const lang = parseLang(query.lang);
-    const result = await resolveStream("movie", Number(params.id), void 0, void 0, lang);
+    const exclude = parseExclude(query.exclude);
+    const result = await resolveStream("movie", Number(params.id), void 0, void 0, lang, exclude);
     console.error(`[resolve] movie ${params.id} (${lang}) \u2192`, result?.source ?? "null");
     const summary = summarize(result);
     if (!summary) {
@@ -66788,18 +66913,20 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
   },
   {
     params: t.Object({ id: t.String() }),
-    query: t.Object({ lang: t.Optional(t.String()) })
+    query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) })
   }
 ).get(
   "/tv/:id/:season/:episode",
   async ({ params, query, set }) => {
     const lang = parseLang(query.lang);
+    const exclude = parseExclude(query.exclude);
     const result = await resolveStream(
       "tv",
       Number(params.id),
       Number(params.season),
       Number(params.episode),
-      lang
+      lang,
+      exclude
     );
     const summary = summarize(result);
     if (!summary) {
@@ -66814,7 +66941,7 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
       season: t.String(),
       episode: t.String()
     }),
-    query: t.Object({ lang: t.Optional(t.String()) })
+    query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) })
   }
 );
 
@@ -66846,11 +66973,12 @@ function resolveFromQuery(q) {
     Number(q.id),
     q.season ? Number(q.season) : void 0,
     q.episode ? Number(q.episode) : void 0,
-    q.lang === "latino" ? "latino" : "original"
+    q.lang === "latino" ? "latino" : "original",
+    q.exclude ? q.exclude.split(",").map((s) => s.trim()).filter(Boolean) : []
   );
 }
 function qs(q) {
-  return `type=${q.type}&id=${q.id}&season=${q.season ?? ""}&episode=${q.episode ?? ""}&lang=${q.lang ?? ""}`;
+  return `type=${q.type}&id=${q.id}&season=${q.season ?? ""}&episode=${q.episode ?? ""}&lang=${q.lang ?? ""}&exclude=${q.exclude ?? ""}`;
 }
 function baseUrl2(request) {
   const host = request.headers.get("host") ?? "localhost:3000";
@@ -66903,7 +67031,8 @@ function rewriteMasterVariants(master, baseUrl22, proxyBase, subLines, queryStr,
     const t2 = line.trim();
     if (!t2 || t2 === "#EXTM3U") continue;
     if (t2.startsWith("#EXT-X-STREAM-INF:")) {
-      const withSubs = hasSubs && !t2.includes("SUBTITLES=") ? t2 + ',SUBTITLES="subs"' : t2;
+      const withBw = ensureBandwidth(t2);
+      const withSubs = hasSubs && !withBw.includes("SUBTITLES=") ? withBw + ',SUBTITLES="subs"' : withBw;
       out.push(withSubs);
       nextIsVariant = true;
       continue;
@@ -67004,7 +67133,8 @@ ${varUrl}
       id: t.String(),
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
-      lang: t.Optional(t.String())
+      lang: t.Optional(t.String()),
+      exclude: t.Optional(t.String())
     })
   }
 ).get(
@@ -67038,6 +67168,7 @@ ${varUrl}
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
       lang: t.Optional(t.String()),
+      exclude: t.Optional(t.String()),
       referer: t.Optional(t.String()),
       url: t.String()
     })
@@ -67135,6 +67266,8 @@ ${varUrl}
     const vttUrl = `${base}/stream/sub.vtt?${qs_str}&i=${idx}`;
     set.headers["content-type"] = HLS_MIME;
     return `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-PLAYLIST-TYPE:VOD
 #EXT-X-TARGETDURATION:99999
 #EXT-X-MEDIA-SEQUENCE:0
 #EXTINF:99999.0,
@@ -67148,6 +67281,7 @@ ${vttUrl}
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
       lang: t.Optional(t.String()),
+      exclude: t.Optional(t.String()),
       i: t.String()
     })
   }
@@ -67180,6 +67314,7 @@ ${vttUrl}
       season: t.Optional(t.String()),
       episode: t.Optional(t.String()),
       lang: t.Optional(t.String()),
+      exclude: t.Optional(t.String()),
       i: t.String()
     })
   }

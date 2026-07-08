@@ -77,10 +77,13 @@ const BASE_ORDER: string[] = providers
   .map((s) => s.id)
 
 // Orden de fuentes según el idioma de audio preferido.
-function buildSourceOrder(lang: AudioLang): string[] {
-  if (lang !== 'latino') return BASE_ORDER
-  const latino = LATINO_SOURCES.filter((id) => BASE_ORDER.includes(id))
-  const rest = BASE_ORDER.filter((id) => !latino.includes(id))
+// exclude: fuentes que el cliente ya intentó y fallaron al reproducir → se saltan.
+function buildSourceOrder(lang: AudioLang, exclude: string[] = []): string[] {
+  const ex = new Set(exclude)
+  const base = BASE_ORDER.filter((id) => !ex.has(id))
+  if (lang !== 'latino') return base
+  const latino = LATINO_SOURCES.filter((id) => base.includes(id))
+  const rest = base.filter((id) => !latino.includes(id))
   return [...latino, ...rest]
 }
 
@@ -316,7 +319,8 @@ async function scrape(
   tmdbId: number,
   lang: AudioLang,
   season?: number,
-  episode?: number
+  episode?: number,
+  exclude: string[] = []
 ): Promise<StreamResult | null> {
   const media = await buildMedia(type, tmdbId, season, episode)
   if (!media) {
@@ -324,7 +328,7 @@ async function scrape(
     return null
   }
 
-  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}`)
+  console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}${exclude.length ? ` excl=${exclude.join(',')}` : ''}`)
   const t0 = Date.now()
   try {
     // Subtítulos en paralelo (no dependen del scrape de video)
@@ -332,7 +336,8 @@ async function scrape(
 
     // Iteramos fuentes: si la ganadora resulta ser un señuelo (segmentos = imágenes),
     // la descartamos y reintentamos con el resto. Máx 3 intentos para acotar latencia.
-    const blocked = new Set<string>()
+    // Semilla: las fuentes que el cliente ya intentó y fallaron al REPRODUCIR (exclude).
+    const blocked = new Set<string>(exclude)
     let result: StreamResult | null = null
     let winner = ''
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -377,11 +382,13 @@ export function resolveStream(
   tmdbId: number,
   season?: number,
   episode?: number,
-  lang: AudioLang = 'original'
+  lang: AudioLang = 'original',
+  exclude: string[] = []
 ): Promise<StreamResult | null> {
   const base = type === 'tv' ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`
-  const key = `${base}:${lang}`
-  return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode))
+  const ex = [...exclude].sort().join(',')
+  const key = ex ? `${base}:${lang}:x=${ex}` : `${base}:${lang}`
+  return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode, exclude))
 }
 
 // Diagnóstico de subtítulos: hace el fetch crudo a Wyzie y reporta qué pasó.

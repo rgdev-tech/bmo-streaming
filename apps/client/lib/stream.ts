@@ -34,18 +34,20 @@ export type ResolveInfo = {
 const RESOLVE_TIMEOUT = 55_000  // 55s — el scraper puede tardar pero no más que esto
 
 const langQ = (lang: AudioLang) => (lang === 'latino' ? '&lang=latino' : '')
+// Fuentes que fallaron al reproducir → el servidor las salta y prueba la siguiente
+const exQ = (exclude?: string[]) => (exclude && exclude.length ? `&exclude=${exclude.join(',')}` : '')
 
 export const stream = {
-  resolveMovie: (id: string | number, lang: AudioLang = 'original') =>
-    api<ResolveInfo>(`/resolve/movie/${id}?lang=${lang}`, RESOLVE_TIMEOUT),
-  resolveTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original') =>
-    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}?lang=${lang}`, RESOLVE_TIMEOUT),
+  resolveMovie: (id: string | number, lang: AudioLang = 'original', exclude?: string[]) =>
+    api<ResolveInfo>(`/resolve/movie/${id}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
+  resolveTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original', exclude?: string[]) =>
+    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
 
   // Master HLS proxeado por nuestro servidor (variantes + segmentos + subs)
-  masterMovie: (id: string | number, lang: AudioLang = 'original') =>
-    `${API_URL}/stream/master.m3u8?type=movie&id=${id}${langQ(lang)}`,
-  masterTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original') =>
-    `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}${langQ(lang)}`,
+  masterMovie: (id: string | number, lang: AudioLang = 'original', exclude?: string[]) =>
+    `${API_URL}/stream/master.m3u8?type=movie&id=${id}${langQ(lang)}${exQ(exclude)}`,
+  masterTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original', exclude?: string[]) =>
+    `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}${langQ(lang)}${exQ(exclude)}`,
 
   // URL VTT de un subtítulo (servida/convertida por nuestro API) — para textTracks
   subVtt: (
