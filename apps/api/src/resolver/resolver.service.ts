@@ -335,12 +335,16 @@ async function scrape(
     const subsP = fetchSubtitles(type, tmdbId, season, episode)
 
     // Iteramos fuentes: si la ganadora resulta ser un señuelo (segmentos = imágenes),
-    // la descartamos y reintentamos con el resto. Máx 3 intentos para acotar latencia.
+    // la descartamos y seguimos con la siguiente. Acotado por TIEMPO (no por nº de
+    // intentos): antes cortábamos a los 3 y dejábamos fuera fuentes buenas (p.ej.
+    // cuevana3 quedaba tras 3 señuelos en lang=original → 404 falso).
     // Semilla: las fuentes que el cliente ya intentó y fallaron al REPRODUCIR (exclude).
+    const SCRAPE_BUDGET_MS = 22_000  // margen bajo el límite de 30s de Vercel
+    const deadline = t0 + SCRAPE_BUDGET_MS
     const blocked = new Set<string>(exclude)
     let result: StreamResult | null = null
     let winner = ''
-    for (let attempt = 0; attempt < 3; attempt++) {
+    while (Date.now() < deadline) {
       const order = buildSourceOrder(lang).filter((id) => !blocked.has(id))
       if (!order.length) break
 

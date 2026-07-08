@@ -66714,10 +66714,12 @@ async function scrape2(type, tmdbId, lang, season, episode, exclude = []) {
   const t0 = Date.now();
   try {
     const subsP = fetchSubtitles(type, tmdbId, season, episode);
+    const SCRAPE_BUDGET_MS = 22e3;
+    const deadline = t0 + SCRAPE_BUDGET_MS;
     const blocked = new Set(exclude);
     let result = null;
     let winner = "";
-    for (let attempt = 0; attempt < 3; attempt++) {
+    while (Date.now() < deadline) {
       const order = buildSourceOrder(lang).filter((id) => !blocked.has(id));
       if (!order.length) break;
       const output = await providers2.runAll({ media, sourceOrder: order });
