@@ -37,6 +37,8 @@ export default function PlayerScreen() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
@@ -71,6 +73,7 @@ export default function PlayerScreen() {
   function retry() {
     setError(null)
     setReady(false)
+    setStreamUrl(null)
     setRetryCount((c) => c + 1)
   }
 
@@ -93,17 +96,15 @@ export default function PlayerScreen() {
         return
       }
 
-      // 2. Resolución normal vía API (con el idioma de audio preferido) — se
-      // usa solo para PRE-CALENTAR el cache del servidor antes de mostrar el
-      // player: master.m3u8 hace el mismo resolve internamente, así que para
-      // cuando el player pida la URL, ya está resuelta (arranca al instante,
-      // sin un segundo salto de carga).
+      // 2. Resolución normal vía API (con el idioma de audio preferido)
       const resolveP = isTv
         ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
         : stream.resolveMovie(id, audioLang)
 
       const info = await resolveP
       if (cancelled) return
+      setStreamUrl(info.streamUrl)
+      setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setStartAt(pos)
       setReady(true)
@@ -122,20 +123,32 @@ export default function PlayerScreen() {
     getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
   }, [id, isTv, seasonN, episodeN])
 
-  // URI final: local (m3u8 descargado) o master proxeado por nuestro servidor
-  // (variantes/mp4 + segmentos + subtítulos) — siempre HLS, incluso para
-  // fuentes mp4 directas (Real-Debrid), así los subtítulos externos funcionan
-  // vía el selector nativo de Apple en ambos casos.
+  // URI final según la fuente:
+  //  - local: m3u8 descargado
+  //  - file (mp4, p.ej. Real-Debrid): URL DIRECTA al CDN — proxearla por
+  //    nuestro servidor no funciona (Vercel no está pensado para relayar un
+  //    archivo de cientos de MB: agota su tiempo de ejecución a mitad de
+  //    descarga). El costo: sin subtítulos externos para estas fuentes,
+  //    expo-video no soporta sideloading de subs en mp4 progresivo.
+  //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
   const masterUrl = localUri
-    ?? (isTv
-      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-      : stream.masterMovie(id, audioLang))
+    ?? (streamType === 'file' && streamUrl
+      ? streamUrl
+      : (isTv
+        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+        : stream.masterMovie(id, audioLang)))
+
+  // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
+  // por extensión/bytes — más tolerante que el parser HLS con headers "raros"
+  // como el application/force-download que devuelve Real-Debrid.
+  const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
     if (lang === audioLang) return
     persistAudioLang(lang)
     setReady(false)
+    setStreamUrl(null)
     setError(null)
     setAudioLangState(lang)
   }
@@ -199,6 +212,7 @@ export default function PlayerScreen() {
   function playNextEpisode() {
     setShowNext(false)
     setReady(false)
+    setStreamUrl(null)
     setStartAt(0)
     setEpisodeN(nextEpisodeN)
   }
@@ -236,8 +250,9 @@ export default function PlayerScreen() {
         </View>
       ) : ready && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
           uri={masterUrl}
+          contentType={contentType}
           referer={referer}
           startAt={startAt}
           meta={meta}
@@ -327,9 +342,9 @@ function LoadingScreen({
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
-  uri: string; referer: string; startAt: number
+  uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -348,7 +363,7 @@ function NativePlayer({
   const [inFullscreen, setInFullscreen] = useState(false)
 
   const player = useVideoPlayer(
-    { uri, headers: referer ? { Referer: referer } : undefined, contentType: 'hls' },
+    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
     (p) => {
       p.timeUpdateEventInterval = 0.5
       p.bufferOptions = { preferredForwardBufferDuration: 30 }
