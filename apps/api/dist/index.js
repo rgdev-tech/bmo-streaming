@@ -66589,6 +66589,13 @@ function rankCandidates(streams, lang) {
 }
 var RESOLVE_TIMEOUT_MS = 1e4;
 var MAX_REDIRECTS = 6;
+function isTorrentioErrorPlaceholder(url) {
+  try {
+    return new URL(url).hostname.endsWith("torrentio.strem.fun");
+  } catch {
+    return false;
+  }
+}
 async function followResolveUrl(startUrl) {
   let url = startUrl;
   try {
@@ -66596,11 +66603,13 @@ async function followResolveUrl(startUrl) {
       const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
       const loc = r.headers.get("location");
       if (!loc) {
-        return r.status >= 200 && r.status < 400 ? url : null;
+        if (r.status < 200 || r.status >= 400) return null;
+        return isTorrentioErrorPlaceholder(url) ? null : url;
       }
       url = new URL(loc, url).toString();
+      if (isTorrentioErrorPlaceholder(url)) return null;
     }
-    return url;
+    return isTorrentioErrorPlaceholder(url) ? null : url;
   } catch {
     return null;
   }

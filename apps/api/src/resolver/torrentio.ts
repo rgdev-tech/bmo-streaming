@@ -144,6 +144,22 @@ function rankCandidates(streams: TorrentioStream[], lang: 'original' | 'latino')
 const RESOLVE_TIMEOUT_MS = 10_000
 const MAX_REDIRECTS = 6
 
+// Cuando el archivo resuelto no es reproducible (p.ej. el torrent resultó ser
+// un .rar, no un video) Torrentio NO da un error HTTP — redirige a un video
+// placeholder en SU PROPIO dominio ("failed_rar_v2.mp4" y similares). Ese
+// archivo existe y responde 200, así que sin este chequeo lo tratábamos como
+// éxito y se lo pasábamos al player (que fallaba con -12646 al no ser el
+// contenido real). El video final SIEMPRE vive en la CDN de Real-Debrid, nunca
+// de vuelta en torrentio.strem.fun — cualquier resultado en ese dominio es
+// un placeholder de error, se descarta.
+function isTorrentioErrorPlaceholder(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith('torrentio.strem.fun')
+  } catch {
+    return false
+  }
+}
+
 async function followResolveUrl(startUrl: string): Promise<string | null> {
   let url = startUrl
   try {
@@ -152,11 +168,13 @@ async function followResolveUrl(startUrl: string): Promise<string | null> {
       const loc = r.headers.get('location')
       if (!loc) {
         // Sin más redirects: si la respuesta fue exitosa, esta ES la URL final.
-        return r.status >= 200 && r.status < 400 ? url : null
+        if (r.status < 200 || r.status >= 400) return null
+        return isTorrentioErrorPlaceholder(url) ? null : url
       }
       url = new URL(loc, url).toString()
+      if (isTorrentioErrorPlaceholder(url)) return null
     }
-    return url // agotó los saltos permitidos — devolver la última URL conocida
+    return isTorrentioErrorPlaceholder(url) ? null : url
   } catch {
     return null
   }
