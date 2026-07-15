@@ -67280,7 +67280,7 @@ var streamRoutes = new Elysia({ prefix: "/stream" }).get("/health", async () => 
       });
       const hasSubs = subLines.length > 0;
       if (result.type === "file") {
-        const varUrl2 = referer2 ? `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer2)}` : result.url;
+        const varUrl2 = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer2)}`;
         const subsAttr2 = hasSubs ? ',SUBTITLES="subs"' : "";
         let fb2 = "#EXTM3U\n";
         if (hasSubs) fb2 += subLines.join("\n") + "\n";
@@ -67400,7 +67400,7 @@ ${varUrl}
   }
 ).get(
   "/seg",
-  async ({ query, set }) => {
+  async ({ query, request, set }) => {
     const q = query;
     if (!q.url) {
       set.status = 400;
@@ -67409,20 +67409,29 @@ ${varUrl}
     const segUrl = decodeURIComponent(q.url);
     const referer2 = q.referer ? decodeURIComponent(q.referer) : "";
     const headers2 = referer2 ? { Referer: referer2 } : {};
+    const range = request.headers.get("range");
+    if (range) headers2["Range"] = range;
     try {
       const resp = await fetch(segUrl, {
         headers: headers2,
         signal: AbortSignal.timeout?.(3e4)
       });
-      if (!resp.ok) {
+      if (!resp.ok && resp.status !== 206) {
         console.error(`[seg] CDN returned ${resp.status} for ${segUrl.slice(-60)}`);
         set.status = resp.status;
         return `CDN error ${resp.status}`;
       }
-      const ct = resp.headers.get("content-type") ?? "video/mp2t";
-      set.headers["content-type"] = ct;
-      set.headers["cache-control"] = "public, max-age=3600";
-      return new Uint8Array(await resp.arrayBuffer());
+      let ct = resp.headers.get("content-type") ?? "video/mp4";
+      if (!ct.startsWith("video/") && !ct.startsWith("audio/")) ct = "video/mp4";
+      const respHeaders = new Headers();
+      respHeaders.set("content-type", ct);
+      respHeaders.set("cache-control", "public, max-age=3600");
+      respHeaders.set("accept-ranges", "bytes");
+      const cl = resp.headers.get("content-length");
+      if (cl) respHeaders.set("content-length", cl);
+      const cr = resp.headers.get("content-range");
+      if (cr) respHeaders.set("content-range", cr);
+      return new Response(resp.body, { status: resp.status, headers: respHeaders });
     } catch (e) {
       console.error(`[seg] fetch error: ${e.message}`);
       set.status = 502;

@@ -209,14 +209,12 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         const hasSubs = subLines.length > 0
 
         // Stream tipo file (mp4): no hay playlist → un solo "variant" que apunta al mp4.
-        // Si la fuente no necesita headers especiales (p.ej. Real-Debrid: link directo,
-        // sin Referer) apuntamos DIRECTO a su CDN — evita que nuestro /seg tenga que
-        // bufferear el archivo entero en memoria (no soporta Range) y deja que el
-        // dispositivo descargue a la velocidad real del CDN, sin pasar por Vercel.
+        // Siempre proxeado por /seg (nunca directo a la fuente): algunos CDNs
+        // (Real-Debrid) devuelven Content-Type: application/force-download en
+        // vez de video/mp4 — AVPlayer no lo reconoce como media reproducible
+        // y falla con CoreMediaErrorDomain -12646. /seg corrige el header.
         if (result.type === 'file') {
-          const varUrl = referer
-            ? `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
-            : result.url
+          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
           const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
           let fb = '#EXTM3U\n'
           if (hasSubs) fb += subLines.join('\n') + '\n'
@@ -347,10 +345,16 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
     }
   )
 
-  // Proxy de segmentos (TS binario) — usa referer del query param, sin lookup de stream.
+  // Proxy de segmentos — usa referer del query param, sin lookup de stream.
+  // Reenvía el Range del cliente y devuelve el body como STREAM (no lo
+  // bufferea en memoria) — necesario para archivos grandes (mp4 de Real-Debrid,
+  // varios GB) que antes se descargaban enteros en cada pedido y agotaban la
+  // memoria/tiempo de la función. También corrige el Content-Type: algunas
+  // fuentes (Real-Debrid) devuelven "application/force-download", que AVPlayer
+  // no reconoce como video reproducible (CoreMediaErrorDomain -12646).
   .get(
     '/seg',
-    async ({ query, set }) => {
+    async ({ query, request, set }) => {
       const q = query as { url: string; referer?: string }
       if (!q.url) { set.status = 400; return 'No url' }
 
@@ -358,20 +362,33 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       const referer = q.referer ? decodeURIComponent(q.referer) : ''
       const headers: Record<string, string> = referer ? { Referer: referer } : {}
 
+      const range = request.headers.get('range')
+      if (range) headers['Range'] = range
+
       try {
         const resp = await fetch(segUrl, {
           headers,
           signal: AbortSignal.timeout?.(30000),
         })
-        if (!resp.ok) {
+        if (!resp.ok && resp.status !== 206) {
           console.error(`[seg] CDN returned ${resp.status} for ${segUrl.slice(-60)}`)
           set.status = resp.status
           return `CDN error ${resp.status}`
         }
-        const ct = resp.headers.get('content-type') ?? 'video/mp2t'
-        set.headers['content-type'] = ct
-        set.headers['cache-control'] = 'public, max-age=3600'
-        return new Uint8Array(await resp.arrayBuffer())
+
+        let ct = resp.headers.get('content-type') ?? 'video/mp4'
+        if (!ct.startsWith('video/') && !ct.startsWith('audio/')) ct = 'video/mp4'
+
+        const respHeaders = new Headers()
+        respHeaders.set('content-type', ct)
+        respHeaders.set('cache-control', 'public, max-age=3600')
+        respHeaders.set('accept-ranges', 'bytes')
+        const cl = resp.headers.get('content-length')
+        if (cl) respHeaders.set('content-length', cl)
+        const cr = resp.headers.get('content-range')
+        if (cr) respHeaders.set('content-range', cr)
+
+        return new Response(resp.body, { status: resp.status, headers: respHeaders })
       } catch (e) {
         console.error(`[seg] fetch error: ${(e as Error).message}`)
         set.status = 502
