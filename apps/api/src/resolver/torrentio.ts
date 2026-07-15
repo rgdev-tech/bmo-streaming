@@ -134,30 +134,43 @@ function rankCandidates(streams: TorrentioStream[], lang: 'original' | 'latino')
 
 // El `url` que trae cada stream es el endpoint de RESOLUCIÓN de Torrentio (no
 // el link final) — visitarlo hace que Torrentio arme el link en Real-Debrid y
-// redirija a él. Lo seguimos server-side (sin descargar el archivo) para
-// obtener la URL directa real. Timeout corto: si el torrent NO está cacheado
-// en RD esto tarda mucho (o nunca resuelve) — mejor descartarlo rápido y que
-// gane otro candidato ya cacheado (instantáneo).
+// redirija a él. La cadena puede tener MÁS DE UN salto (Torrentio → arma el
+// link en RD → RD redirige a su CDN) — seguir solo el primer Location dejaba
+// una URL intermedia (no reproducible → CoreMediaErrorDomain -12646). Seguimos
+// la cadena completa nosotros mismos, sin descargar el archivo.
+// Timeout corto: si el torrent NO está cacheado en RD esto tarda mucho (o
+// nunca resuelve) — mejor descartarlo rápido y que gane otro candidato ya
+// cacheado (instantáneo).
 const RESOLVE_TIMEOUT_MS = 10_000
+const MAX_REDIRECTS = 6
 
-async function followResolveUrl(url: string): Promise<string | null> {
+async function followResolveUrl(startUrl: string): Promise<string | null> {
+  let url = startUrl
   try {
-    const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
-    const loc = r.headers.get('location')
-    if (loc) return loc
-  } catch {}
-  try {
-    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
-    if (r.ok && r.url && r.url !== url) return r.url
-  } catch {}
-  return null
+    for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
+      const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
+      const loc = r.headers.get('location')
+      if (!loc) {
+        // Sin más redirects: si la respuesta fue exitosa, esta ES la URL final.
+        return r.status >= 200 && r.status < 400 ? url : null
+      }
+      url = new URL(loc, url).toString()
+    }
+    return url // agotó los saltos permitidos — devolver la última URL conocida
+  } catch {
+    return null
+  }
 }
 
 export const debridEnabled = !!DEBRID_KEY
 
 export type DebridResult = { url: string; label: string; language: string }
 
-const MAX_TRIES = 4
+// Más candidatos en la carrera = más chance de incluir uno ya cacheado en RD
+// (Torrentio suele adelantar los cacheados en su propio orden; si nuestro
+// re-ranking por calidad los empuja fuera del pool, perdemos esa ventaja).
+// Promise.any no espera a todos — el costo extra es mínimo.
+const MAX_TRIES = 6
 
 async function tryCandidate(c: Candidate): Promise<DebridResult> {
   const finalUrl = await followResolveUrl(c.resolveUrl)
@@ -174,20 +187,29 @@ export async function resolveDebridStream(
 ): Promise<DebridResult | null> {
   if (!DEBRID_KEY) return null
 
+  const t0 = Date.now()
   const imdbId = await imdbIdOf(type, tmdbId)
   if (!imdbId) return null
 
   const streams = await fetchStreams(imdbId, type, season, episode)
+  const tFetch = Date.now() - t0
   const candidates = rankCandidates(streams, lang)
-  if (!candidates.length) return null
+  if (!candidates.length) {
+    console.error(`[debrid] torrentio: ${streams.length} streams (${tFetch}ms) — 0 candidatos mp4`)
+    return null
+  }
 
   // Carrera en paralelo entre los mejores candidatos — el que ya está
   // cacheado en Real-Debrid resuelve casi al instante, así no esperamos
   // secuencialmente a que cada uno agote su timeout antes de probar el siguiente.
   const top = candidates.slice(0, MAX_TRIES)
+  const tRaceStart = Date.now()
   try {
-    return await Promise.any(top.map(tryCandidate))
+    const winner = await Promise.any(top.map(tryCandidate))
+    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (${top.length} candidatos) → ${winner.label}`)
+    return winner
   } catch {
+    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms — ninguno de ${top.length} candidatos resolvió`)
     return null // AggregateError: ninguno resolvió a tiempo
   }
 }

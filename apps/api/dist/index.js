@@ -66588,22 +66588,25 @@ function rankCandidates(streams, lang) {
   return ranked.map(({ stream, resolveUrl: resolveUrl2, label, latino }) => ({ stream, resolveUrl: resolveUrl2, label, latino }));
 }
 var RESOLVE_TIMEOUT_MS = 1e4;
-async function followResolveUrl(url) {
+var MAX_REDIRECTS = 6;
+async function followResolveUrl(startUrl) {
+  let url = startUrl;
   try {
-    const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
-    const loc = r.headers.get("location");
-    if (loc) return loc;
+    for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
+      const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
+      const loc = r.headers.get("location");
+      if (!loc) {
+        return r.status >= 200 && r.status < 400 ? url : null;
+      }
+      url = new URL(loc, url).toString();
+    }
+    return url;
   } catch {
+    return null;
   }
-  try {
-    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
-    if (r.ok && r.url && r.url !== url) return r.url;
-  } catch {
-  }
-  return null;
 }
 var debridEnabled = !!DEBRID_KEY;
-var MAX_TRIES = 4;
+var MAX_TRIES = 6;
 async function tryCandidate(c) {
   const finalUrl = await followResolveUrl(c.resolveUrl);
   if (!finalUrl) throw new Error(`no resolvi\xF3: ${c.label}`);
@@ -66611,15 +66614,24 @@ async function tryCandidate(c) {
 }
 async function resolveDebridStream(type, tmdbId, lang, season, episode) {
   if (!DEBRID_KEY) return null;
+  const t0 = Date.now();
   const imdbId = await imdbIdOf(type, tmdbId);
   if (!imdbId) return null;
   const streams = await fetchStreams(imdbId, type, season, episode);
+  const tFetch = Date.now() - t0;
   const candidates = rankCandidates(streams, lang);
-  if (!candidates.length) return null;
+  if (!candidates.length) {
+    console.error(`[debrid] torrentio: ${streams.length} streams (${tFetch}ms) \u2014 0 candidatos mp4`);
+    return null;
+  }
   const top = candidates.slice(0, MAX_TRIES);
+  const tRaceStart = Date.now();
   try {
-    return await Promise.any(top.map(tryCandidate));
+    const winner = await Promise.any(top.map(tryCandidate));
+    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (${top.length} candidatos) \u2192 ${winner.label}`);
+    return winner;
   } catch {
+    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms \u2014 ninguno de ${top.length} candidatos resolvi\xF3`);
     return null;
   }
 }
