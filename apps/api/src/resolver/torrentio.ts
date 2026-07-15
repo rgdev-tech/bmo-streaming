@@ -135,15 +135,19 @@ function rankCandidates(streams: TorrentioStream[], lang: 'original' | 'latino')
 // El `url` que trae cada stream es el endpoint de RESOLUCIÓN de Torrentio (no
 // el link final) — visitarlo hace que Torrentio arme el link en Real-Debrid y
 // redirija a él. Lo seguimos server-side (sin descargar el archivo) para
-// obtener la URL directa real.
+// obtener la URL directa real. Timeout corto: si el torrent NO está cacheado
+// en RD esto tarda mucho (o nunca resuelve) — mejor descartarlo rápido y que
+// gane otro candidato ya cacheado (instantáneo).
+const RESOLVE_TIMEOUT_MS = 10_000
+
 async function followResolveUrl(url: string): Promise<string | null> {
   try {
-    const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(20_000) })
+    const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
     const loc = r.headers.get('location')
     if (loc) return loc
   } catch {}
   try {
-    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(20_000) })
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
     if (r.ok && r.url && r.url !== url) return r.url
   } catch {}
   return null
@@ -154,6 +158,12 @@ export const debridEnabled = !!DEBRID_KEY
 export type DebridResult = { url: string; label: string; language: string }
 
 const MAX_TRIES = 4
+
+async function tryCandidate(c: Candidate): Promise<DebridResult> {
+  const finalUrl = await followResolveUrl(c.resolveUrl)
+  if (!finalUrl) throw new Error(`no resolvió: ${c.label}`)
+  return { url: finalUrl, label: c.label, language: c.latino ? 'Español Latino' : 'Original' }
+}
 
 export async function resolveDebridStream(
   type: 'movie' | 'tv',
@@ -171,13 +181,15 @@ export async function resolveDebridStream(
   const candidates = rankCandidates(streams, lang)
   if (!candidates.length) return null
 
-  for (const c of candidates.slice(0, MAX_TRIES)) {
-    const finalUrl = await followResolveUrl(c.resolveUrl)
-    if (finalUrl) {
-      return { url: finalUrl, label: c.label, language: c.latino ? 'Español Latino' : 'Original' }
-    }
+  // Carrera en paralelo entre los mejores candidatos — el que ya está
+  // cacheado en Real-Debrid resuelve casi al instante, así no esperamos
+  // secuencialmente a que cada uno agote su timeout antes de probar el siguiente.
+  const top = candidates.slice(0, MAX_TRIES)
+  try {
+    return await Promise.any(top.map(tryCandidate))
+  } catch {
+    return null // AggregateError: ninguno resolvió a tiempo
   }
-  return null
 }
 
 // Diagnóstico: lista los candidatos rankeados sin resolver el link final (rápido).

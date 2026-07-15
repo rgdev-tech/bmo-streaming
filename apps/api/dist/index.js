@@ -66587,15 +66587,16 @@ function rankCandidates(streams, lang) {
   });
   return ranked.map(({ stream, resolveUrl: resolveUrl2, label, latino }) => ({ stream, resolveUrl: resolveUrl2, label, latino }));
 }
+var RESOLVE_TIMEOUT_MS = 1e4;
 async function followResolveUrl(url) {
   try {
-    const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(2e4) });
+    const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
     const loc = r.headers.get("location");
     if (loc) return loc;
   } catch {
   }
   try {
-    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(2e4) });
+    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) });
     if (r.ok && r.url && r.url !== url) return r.url;
   } catch {
   }
@@ -66603,6 +66604,11 @@ async function followResolveUrl(url) {
 }
 var debridEnabled = !!DEBRID_KEY;
 var MAX_TRIES = 4;
+async function tryCandidate(c) {
+  const finalUrl = await followResolveUrl(c.resolveUrl);
+  if (!finalUrl) throw new Error(`no resolvi\xF3: ${c.label}`);
+  return { url: finalUrl, label: c.label, language: c.latino ? "Espa\xF1ol Latino" : "Original" };
+}
 async function resolveDebridStream(type, tmdbId, lang, season, episode) {
   if (!DEBRID_KEY) return null;
   const imdbId = await imdbIdOf(type, tmdbId);
@@ -66610,13 +66616,12 @@ async function resolveDebridStream(type, tmdbId, lang, season, episode) {
   const streams = await fetchStreams(imdbId, type, season, episode);
   const candidates = rankCandidates(streams, lang);
   if (!candidates.length) return null;
-  for (const c of candidates.slice(0, MAX_TRIES)) {
-    const finalUrl = await followResolveUrl(c.resolveUrl);
-    if (finalUrl) {
-      return { url: finalUrl, label: c.label, language: c.latino ? "Espa\xF1ol Latino" : "Original" };
-    }
+  const top = candidates.slice(0, MAX_TRIES);
+  try {
+    return await Promise.any(top.map(tryCandidate));
+  } catch {
+    return null;
   }
-  return null;
 }
 async function debugTorrentio(type, tmdbId, season, episode) {
   const imdbId = await imdbIdOf(type, tmdbId);
@@ -67254,7 +67259,7 @@ var streamRoutes = new Elysia({ prefix: "/stream" }).get("/health", async () => 
       });
       const hasSubs = subLines.length > 0;
       if (result.type === "file") {
-        const varUrl2 = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer2)}`;
+        const varUrl2 = referer2 ? `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer2)}` : result.url;
         const subsAttr2 = hasSubs ? ',SUBTITLES="subs"' : "";
         let fb2 = "#EXTM3U\n";
         if (hasSubs) fb2 += subLines.join("\n") + "\n";

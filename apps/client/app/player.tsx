@@ -37,8 +37,6 @@ export default function PlayerScreen() {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startAt, setStartAt] = useState(0)
-  const [streamUrl, setStreamUrl] = useState<string | null>(null)
-  const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
   const [referer, setReferer] = useState('')
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
@@ -73,7 +71,6 @@ export default function PlayerScreen() {
   function retry() {
     setError(null)
     setReady(false)
-    setStreamUrl(null)
     setRetryCount((c) => c + 1)
   }
 
@@ -96,15 +93,17 @@ export default function PlayerScreen() {
         return
       }
 
-      // 2. Resolución normal via API (con el idioma de audio preferido)
+      // 2. Resolución normal vía API (con el idioma de audio preferido) — se
+      // usa solo para PRE-CALENTAR el cache del servidor antes de mostrar el
+      // player: master.m3u8 hace el mismo resolve internamente, así que para
+      // cuando el player pida la URL, ya está resuelta (arranca al instante,
+      // sin un segundo salto de carga).
       const resolveP = isTv
         ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
         : stream.resolveMovie(id, audioLang)
 
       const info = await resolveP
       if (cancelled) return
-      setStreamUrl(info.streamUrl)
-      setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setStartAt(pos)
       setReady(true)
@@ -123,26 +122,20 @@ export default function PlayerScreen() {
     getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
   }, [id, isTv, seasonN, episodeN])
 
-  // URI final según la fuente:
-  //  - local: m3u8 descargado
-  //  - file (mp4): URL directa del CDN → AVPlayer la reproduce nativo (range/seek)
-  //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
+  // URI final: local (m3u8 descargado) o master proxeado por nuestro servidor
+  // (variantes/mp4 + segmentos + subtítulos) — siempre HLS, incluso para
+  // fuentes mp4 directas (Real-Debrid), así los subtítulos externos funcionan
+  // vía el selector nativo de Apple en ambos casos.
   const masterUrl = localUri
-    ?? (streamType === 'file' && streamUrl
-      ? streamUrl
-      : (isTv
-        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-        : stream.masterMovie(id, audioLang)))
-
-  // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
-  const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
+    ?? (isTv
+      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+      : stream.masterMovie(id, audioLang))
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
     if (lang === audioLang) return
     persistAudioLang(lang)
     setReady(false)
-    setStreamUrl(null)
     setError(null)
     setAudioLangState(lang)
   }
@@ -206,7 +199,6 @@ export default function PlayerScreen() {
   function playNextEpisode() {
     setShowNext(false)
     setReady(false)
-    setStreamUrl(null)
     setStartAt(0)
     setEpisodeN(nextEpisodeN)
   }
@@ -244,9 +236,8 @@ export default function PlayerScreen() {
         </View>
       ) : ready && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}`}
           uri={masterUrl}
-          contentType={contentType}
           referer={referer}
           startAt={startAt}
           meta={meta}
@@ -259,48 +250,86 @@ export default function PlayerScreen() {
           onError={(msg) => setError(msg || 'Player error')}
         />
       ) : (
-        <View style={styles.center}>
-          <ActivityIndicator color="#fff" size="large" />
-          <Text style={styles.loadingText}>Preparando stream…</Text>
-          {!!title && (
-            <Text style={styles.loadingSub}>
-              {title}{season ? `  ·  T${season}:E${episode}` : ''}
-            </Text>
-          )}
-
-          {/* Selector de idioma de audio / versión */}
-          {!localUri && (
-            <View style={styles.langSwitch}>
-              <Text style={styles.langSwitchLabel}>Audio</Text>
-              <View style={styles.langSegmented}>
-                {(['original', 'latino'] as const).map((opt) => (
-                  <Touchable
-                    key={opt}
-                    scaleTo={0.94}
-                    haptic="selection"
-                    style={[styles.langOption, audioLang === opt && styles.langOptionActive]}
-                    onPress={() => changeAudioLang(opt)}
-                  >
-                    <Text style={[styles.langOptionText, audioLang === opt && styles.langOptionTextActive]}>
-                      {opt === 'original' ? 'Original' : 'Español Latino'}
-                    </Text>
-                  </Touchable>
-                ))}
-              </View>
-            </View>
-          )}
-        </View>
+        <LoadingScreen
+          title={baseTitle}
+          episodeLabel={isTv && season ? `T${season}:E${episode}` : undefined}
+          backdrop={params.backdrop ?? null}
+          audioLang={audioLang}
+          showAudioSwitch={!localUri}
+          onChangeAudioLang={changeAudioLang}
+        />
       )}
     </GestureHandlerRootView>
+  )
+}
+
+// ── Pantalla de carga: mínima, rápida, con selector de audio discreto ───────
+
+function LoadingScreen({
+  title, episodeLabel, backdrop, audioLang, showAudioSwitch, onChangeAudioLang,
+}: {
+  title: string
+  episodeLabel?: string
+  backdrop: string | null
+  audioLang: AudioLang
+  showAudioSwitch: boolean
+  onChangeAudioLang: (lang: AudioLang) => void
+}) {
+  const insets = useSafeAreaInsets()
+  const fade = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    Animated.timing(fade, { toValue: 1, duration: 350, delay: 200, useNativeDriver: true }).start()
+  }, [])
+
+  const backdropUri = backdropUrl(backdrop, 'w780')
+
+  return (
+    <View style={styles.loadingRoot}>
+      {backdropUri && (
+        <Image source={backdropUri} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={30} />
+      )}
+      <View style={styles.loadingScrim} />
+
+      <View style={styles.loadingCenter}>
+        <ActivityIndicator color="#fff" size="small" />
+        {!!title && (
+          <Text style={styles.loadingTitle} numberOfLines={1}>
+            {title}{episodeLabel ? `  ·  ${episodeLabel}` : ''}
+          </Text>
+        )}
+      </View>
+
+      {/* Selector de audio: discreto, aparece un instante después para no competir
+          visualmente con el spinner — la carga arranca sola con la preferencia guardada. */}
+      {showAudioSwitch && (
+        <Animated.View style={[styles.langSwitch, { bottom: insets.bottom + 40, opacity: fade }]}>
+          <View style={styles.langSegmented}>
+            {(['original', 'latino'] as const).map((opt) => (
+              <Touchable
+                key={opt}
+                scaleTo={0.94}
+                haptic="selection"
+                style={[styles.langOption, audioLang === opt && styles.langOptionActive]}
+                onPress={() => onChangeAudioLang(opt)}
+              >
+                <Text style={[styles.langOptionText, audioLang === opt && styles.langOptionTextActive]}>
+                  {opt === 'original' ? 'Original' : 'Español Latino'}
+                </Text>
+              </Touchable>
+            ))}
+          </View>
+        </Animated.View>
+      )}
+    </View>
   )
 }
 
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
-  uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
+  uri: string; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -319,7 +348,7 @@ function NativePlayer({
   const [inFullscreen, setInFullscreen] = useState(false)
 
   const player = useVideoPlayer(
-    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
+    { uri, headers: referer ? { Referer: referer } : undefined, contentType: 'hls' },
     (p) => {
       p.timeUpdateEventInterval = 0.5
       p.bufferOptions = { preferredForwardBufferDuration: 30 }
@@ -479,22 +508,24 @@ const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000' },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  loadingText: { color: '#fff', fontSize: 17, fontWeight: '600', marginTop: 20, textAlign: 'center' },
-  loadingSub: { color: 'rgba(255,255,255,0.55)', fontSize: 14, marginTop: 6, textAlign: 'center' },
 
-  // Selector de idioma de audio (pantalla de carga)
-  langSwitch: { alignItems: 'center', marginTop: 32 },
-  langSwitchLabel: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '600',
-    textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10,
+  // Pantalla de carga: minimalista — backdrop desenfocado + spinner chico + título.
+  loadingRoot: { flex: 1, backgroundColor: '#000' },
+  loadingScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  loadingCenter: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40,
   },
+  loadingTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+
+  // Selector de idioma de audio: flotante, discreto, abajo del todo
+  langSwitch: { position: 'absolute', left: 0, right: 0, bottom: 56, alignItems: 'center' },
   langSegmented: {
-    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: 12, padding: 4, gap: 4,
   },
-  langOption: { paddingVertical: 10, paddingHorizontal: 18, borderRadius: 9 },
+  langOption: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 9 },
   langOptionActive: { backgroundColor: '#fff' },
-  langOptionText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+  langOptionText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
   langOptionTextActive: { color: '#000', fontWeight: '700' },
 
   // Pill siguiente episodio

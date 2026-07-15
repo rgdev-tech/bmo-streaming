@@ -208,9 +208,15 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         })
         const hasSubs = subLines.length > 0
 
-        // Stream tipo file (mp4): no hay playlist → un solo "variant" que apunta al mp4
+        // Stream tipo file (mp4): no hay playlist → un solo "variant" que apunta al mp4.
+        // Si la fuente no necesita headers especiales (p.ej. Real-Debrid: link directo,
+        // sin Referer) apuntamos DIRECTO a su CDN — evita que nuestro /seg tenga que
+        // bufferear el archivo entero en memoria (no soporta Range) y deja que el
+        // dispositivo descargue a la velocidad real del CDN, sin pasar por Vercel.
         if (result.type === 'file') {
-          const varUrl = `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
+          const varUrl = referer
+            ? `${base}/stream/seg?url=${encodeURIComponent(result.url)}&referer=${encodeURIComponent(referer)}`
+            : result.url
           const subsAttr = hasSubs ? ',SUBTITLES="subs"' : ''
           let fb = '#EXTM3U\n'
           if (hasSubs) fb += subLines.join('\n') + '\n'
