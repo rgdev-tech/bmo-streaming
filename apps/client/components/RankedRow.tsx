@@ -1,7 +1,9 @@
-import { View, Text, FlatList, StyleSheet, Pressable } from 'react-native'
+import { View, Text, FlatList, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
+import { rowHeading } from '@/lib/typography'
 
 const CARD_W = 110
 const CARD_H = CARD_W * 1.5
@@ -13,8 +15,9 @@ function RankedCard({ item, rank }: { item: MediaItem; rank: number }) {
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
 
   return (
-    <Pressable
+    <Touchable
       style={styles.card}
+      haptic="light"
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       <Text style={styles.num}>{rank}</Text>
@@ -25,7 +28,7 @@ function RankedCard({ item, rank }: { item: MediaItem; rank: number }) {
           <Text style={styles.placeholderText} numberOfLines={3}>{titleOf(item)}</Text>
         </View>
       )}
-    </Pressable>
+    </Touchable>
   )
 }
 
@@ -50,10 +53,7 @@ export function RankedRow({ title, items }: { title: string; items: MediaItem[] 
 const styles = StyleSheet.create({
   row: { marginBottom: 24 },
   heading: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },

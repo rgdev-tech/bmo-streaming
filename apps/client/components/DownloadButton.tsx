@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Pressable, StyleSheet, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 import { SymbolView } from 'expo-symbols'
-import * as Haptics from 'expo-haptics'
 import Svg, { Circle } from 'react-native-svg'
 import {
   downloadKey,
@@ -11,6 +10,7 @@ import {
   onDownloadsChange,
   type DownloadItem,
 } from '@/lib/download'
+import { Touchable } from './Touchable'
 
 type Props = {
   id: number
@@ -43,7 +43,6 @@ export function DownloadButton({
   const progress = item?.progress ?? 0
 
   async function handlePress() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     if (status === 'done') {
       await cancelDownload(key)
     } else if (status === 'downloading' || status === 'pending') {
@@ -56,7 +55,7 @@ export function DownloadButton({
   const iconSize = { width: size * 0.75, height: size * 0.75 }
 
   return (
-    <Pressable onPress={handlePress} hitSlop={10} style={styles.btn}>
+    <Touchable scaleTo={0.85} haptic="medium" onPress={handlePress} hitSlop={10} style={styles.btn}>
       {status === 'done' ? (
         <SymbolView name="arrow.down.circle.fill" tintColor="#34C759" style={{ width: size, height: size }} />
 
@@ -73,7 +72,7 @@ export function DownloadButton({
       ) : (
         <SymbolView name="arrow.down.circle" tintColor={tintColor} style={{ width: size, height: size }} />
       )}
-    </Pressable>
+    </Touchable>
   )
 }
 

@@ -6,7 +6,7 @@ export function posterUrl(path: string | null, size: 'w342' | 'w500' = 'w342') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
-export function backdropUrl(path: string | null, size: 'w780' | 'w1280' = 'w780') {
+export function backdropUrl(path: string | null, size: 'w780' | 'w1280' | 'original' = 'w780') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
@@ -86,6 +86,9 @@ export type MediaDetails = MediaItem & {
   credits?: { cast: CastMember[] }
   videos?: { results: Video[] }
   similar?: Paged<MediaItem>
+  // Clasificación por edad — movies vienen en release_dates, series en content_ratings
+  release_dates?: { results: { iso_3166_1: string; release_dates: { certification: string }[] }[] }
+  content_ratings?: { results: { iso_3166_1: string; rating: string }[] }
 }
 
 export function profileUrl(path: string | null, size: 'w185' | 'h632' = 'w185') {
@@ -201,4 +204,29 @@ export function isUpcoming(item: MediaItem) {
 
 export function titleOf(item: MediaItem) {
   return item.title ?? item.name ?? 'Sin título'
+}
+
+// Clasificación por edad ("18", "PG-13", "TV-MA"...): prioriza España, luego EE.UU.,
+// luego cualquier país con dato. Devuelve null si TMDB no reporta ninguna.
+export function certificationOf(data: MediaDetails): string | null {
+  if (data.release_dates?.results?.length) {
+    const byCountry = (cc: string) =>
+      data.release_dates!.results
+        .find((r) => r.iso_3166_1 === cc)
+        ?.release_dates.map((d) => d.certification)
+        .find((c) => c)
+    return byCountry('ES') ?? byCountry('US')
+      ?? data.release_dates.results.flatMap((r) => r.release_dates.map((d) => d.certification)).find((c) => c)
+      ?? null
+  }
+
+  if (data.content_ratings?.results?.length) {
+    const byCountry = (cc: string) =>
+      data.content_ratings!.results.find((r) => r.iso_3166_1 === cc)?.rating
+    return byCountry('ES') ?? byCountry('US')
+      ?? data.content_ratings.results.map((r) => r.rating).find((c) => c)
+      ?? null
+  }
+
+  return null
 }

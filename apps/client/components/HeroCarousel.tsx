@@ -4,19 +4,64 @@ import {
   StyleSheet,
   Dimensions,
   Animated,
-  PanResponder,
-  Easing,
+  Pressable,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native'
+import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
 import { Hero } from './Hero'
-import { type MediaItem } from '@/lib/tmdb'
+import { type MediaItem, backdropUrl } from '@/lib/tmdb'
 
 const { width, height } = Dimensions.get('window')
 const HERO_H = height * 0.74
 const AUTO_MS = 7000
-const FADE_MS = 480
-const SWIPE_THRESHOLD = 45
 const MAX_ITEMS = 6
 
+// Capa de fondo del pull-to-refresh: vive DETRÁS del FlatList, sin recorte
+// horizontal, mostrando solo el backdrop del slide activo. Necesita estar
+// separada del FlatList porque cada slide SÍ está recortado (overflow:hidden,
+// para no sangrar hacia el vecino) — un recorte que mataría este estiramiento
+// si viviera adentro. Al reposo (scale 1) queda tapada por el propio slide
+// encima; solo se ve en el hueco que aparece arriba al halar.
+function PullStretchBackdrop({ uri, scrollY }: { uri: string | null; scrollY?: Animated.Value }) {
+  if (!uri || !scrollY) return null
+
+  const transform = [
+    {
+      translateY: scrollY.interpolate({
+        inputRange: [-HERO_H, 0],
+        outputRange: [-HERO_H / 2, 0],
+        extrapolateRight: 'clamp' as const,
+      }),
+    },
+    {
+      scale: scrollY.interpolate({
+        inputRange: [-HERO_H, 0],
+        outputRange: [2, 1],
+        extrapolateLeft: 'extend' as const,
+        extrapolateRight: 'clamp' as const,
+      }),
+    },
+  ]
+
+  return (
+    <Animated.View pointerEvents="none" style={[styles.pullBackdrop, { transform }]}>
+      <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" />
+      {/* Mismo degradado que el fondo del Hero — si no, se ve más brillante al halar */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.25)', 'transparent', 'rgba(0,0,0,0.5)', '#000']}
+        locations={[0, 0.35, 0.78, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+    </Animated.View>
+  )
+}
+
+// FlatList horizontal con paginado nativo — el scroll real sigue el dedo 1:1
+// y el sistema resuelve solo el conflicto con el ScrollView vertical que lo
+// envuelve (a diferencia del PanResponder manual anterior, que competía con
+// los Pressable internos del Hero y perdía gestos).
 export function HeroCarousel({
   items,
   scrollY,
@@ -29,59 +74,21 @@ export function HeroCarousel({
     [items]
   )
 
-  // Un Animated.Value de opacidad por slot (fijo, nunca se recrea)
-  // El primero empieza en 1, el resto en 0
-  const opacities = useRef(
-    Array.from({ length: MAX_ITEMS }, (_, i) => new Animated.Value(i === 0 ? 1 : 0))
-  ).current
-
-  const dotAnim = useRef(new Animated.Value(0)).current
-  const currentIdxRef = useRef(0)
-  const isAnimating = useRef(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
-  // Solo para pointerEvents: actualiza DESPUÉS de que termine la animación
+  const scrollX = useRef(new Animated.Value(0)).current
+  const listRef = useRef<Animated.FlatList<MediaItem>>(null)
+  const activeIdxRef = useRef(0)
   const [activeIdx, setActiveIdx] = useState(0)
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
-  function crossfadeTo(next: number) {
-    if (isAnimating.current || next === currentIdxRef.current) return
-    isAnimating.current = true
-    const prev = currentIdxRef.current
-
-    // Dot sigue la transición
-    Animated.timing(dotAnim, {
-      toValue: next,
-      duration: FADE_MS,
-      useNativeDriver: false,
-      easing: Easing.out(Easing.cubic),
-    }).start()
-
-    // Crossfade: prev → 0, next → 1 en paralelo (native thread, sin parpadeo)
-    Animated.parallel([
-      Animated.timing(opacities[prev], {
-        toValue: 0,
-        duration: FADE_MS,
-        useNativeDriver: true,
-        easing: Easing.out(Easing.cubic),
-      }),
-      Animated.timing(opacities[next], {
-        toValue: 1,
-        duration: FADE_MS,
-        useNativeDriver: true,
-        easing: Easing.out(Easing.cubic),
-      }),
-    ]).start(() => {
-      currentIdxRef.current = next
-      setActiveIdx(next)
-      isAnimating.current = false
-    })
+  function goTo(index: number) {
+    listRef.current?.scrollToOffset({ offset: index * width, animated: true })
   }
 
   function startTimer() {
     clearInterval(timerRef.current)
     if (data.length < 2) return
     timerRef.current = setInterval(() => {
-      const next = (currentIdxRef.current + 1) % data.length
-      crossfadeTo(next)
+      goTo((activeIdxRef.current + 1) % data.length)
     }, AUTO_MS)
   }
 
@@ -90,54 +97,65 @@ export function HeroCarousel({
     return () => clearInterval(timerRef.current)
   }, [data.length])
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-          Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 8,
-        onPanResponderGrant: () => clearInterval(timerRef.current),
-        onPanResponderRelease: (_, { dx }) => {
-          if (Math.abs(dx) >= SWIPE_THRESHOLD) {
-            const dir = dx > 0 ? -1 : 1
-            const next = (currentIdxRef.current + dir + data.length) % data.length
-            crossfadeTo(next)
-          }
-          startTimer()
-        },
-      }),
-    [data.length]
-  )
+  function onMomentumScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / width)
+    activeIdxRef.current = idx
+    setActiveIdx(idx)
+    startTimer() // reinicia el autoplay recién cuando el paginado terminó de asentar
+  }
 
   if (!data.length) return null
 
   return (
-    <View style={styles.wrap} {...panResponder.panHandlers}>
-      {/* Todos los heroes pre-renderizados; solo cambia su opacidad */}
-      {data.map((item, i) => (
-        <Animated.View
-          key={String(item.id)}
-          style={[styles.layer, { opacity: opacities[i] }]}
-          pointerEvents={i === activeIdx ? 'box-none' : 'none'}
-        >
-          <Hero item={item} scrollY={scrollY} />
-        </Animated.View>
-      ))}
+    <View style={styles.wrap}>
+      <PullStretchBackdrop
+        uri={backdropUrl(data[activeIdx]?.backdrop_path ?? null, 'original')}
+        scrollY={scrollY}
+      />
 
-      {/* Dots */}
+      <Animated.FlatList
+        ref={listRef}
+        data={data}
+        keyExtractor={(item) => String(item.id)}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
+        bounces={false}
+        onScrollBeginDrag={() => clearInterval(timerRef.current)}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        onScroll={Animated.event(
+          // false: los dots animan `width` (no soportado por el native driver,
+          // solo opacity/transform) — mismo patrón que FeaturedCarousel.tsx
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: false }
+        )}
+        scrollEventThrottle={16}
+        renderItem={({ item, index }) => (
+          <View style={styles.slide}>
+            <Hero item={item} active={index === activeIdx} scrollY={scrollY} />
+          </View>
+        )}
+      />
+
+      {/* Dots — tocables: saltan directo a ese slide y reinician el autoplay */}
       <View style={styles.dots} pointerEvents="box-none">
         {data.map((_, i) => {
-          const dotWidth = dotAnim.interpolate({
-            inputRange: [i - 1, i, i + 1],
-            outputRange: [6, 18, 6],
+          const inputRange = [(i - 1) * width, i * width, (i + 1) * width]
+          const dotWidth = scrollX.interpolate({
+            inputRange,
+            outputRange: [5, 26, 5],
             extrapolate: 'clamp',
           })
-          const opacity = dotAnim.interpolate({
-            inputRange: [i - 1, i, i + 1],
-            outputRange: [0.35, 1, 0.35],
+          const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0.4, 1, 0.4],
             extrapolate: 'clamp',
           })
           return (
-            <Animated.View key={i} style={[styles.dot, { width: dotWidth, opacity }]} />
+            <Pressable key={i} hitSlop={10} onPress={() => goTo(i)}>
+              <Animated.View style={[styles.dot, { width: dotWidth, opacity }]} />
+            </Pressable>
           )
         })}
       </View>
@@ -147,7 +165,8 @@ export function HeroCarousel({
 
 const styles = StyleSheet.create({
   wrap: { width, height: HERO_H },
-  layer: { position: 'absolute', width, height: HERO_H },
+  pullBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1C1C1E' },
+  slide: { width, height: HERO_H, overflow: 'hidden' },
   dots: {
     position: 'absolute',
     bottom: 12,
@@ -155,7 +174,7 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 5,
+    gap: 6,
   },
-  dot: { height: 6, borderRadius: 3, backgroundColor: '#fff' },
+  dot: { height: 5, borderRadius: 2.5, backgroundColor: '#fff' },
 })

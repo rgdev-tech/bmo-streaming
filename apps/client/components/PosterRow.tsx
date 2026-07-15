@@ -1,6 +1,7 @@
 import { View, Text, FlatList, StyleSheet } from 'react-native'
 import { type MediaItem } from '@/lib/tmdb'
 import { PosterCard } from './PosterCard'
+import { rowHeading } from '@/lib/typography'
 
 export function PosterRow({
   title,
@@ -31,10 +32,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   heading: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },

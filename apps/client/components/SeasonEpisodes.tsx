@@ -2,7 +2,6 @@ import { useState, useCallback } from 'react'
 import {
   View,
   Text,
-  Pressable,
   ScrollView,
   StyleSheet,
   ActivityIndicator,
@@ -10,11 +9,11 @@ import {
 import { Image } from 'expo-image'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
-import * as Haptics from 'expo-haptics'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { getWatchedEpisodes, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
 import { DownloadButton } from './DownloadButton'
+import { Touchable } from './Touchable'
 
 export function SeasonEpisodes({
   tvId,
@@ -44,7 +43,6 @@ export function SeasonEpisodes({
   useFocusEffect(reloadWatched)
 
   async function toggle(season: number, episode: number) {
-    Haptics.selectionAsync()
     await toggleEpisodeWatched(tvId, season, episode)
     reloadWatched()
   }
@@ -58,7 +56,6 @@ export function SeasonEpisodes({
     releasedEps.every((e) => watched.has(`${selected}:${e}`))
 
   async function toggleSeason() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     await setSeasonWatched(tvId, selected, releasedEps, !allWatched)
     reloadWatched()
   }
@@ -74,22 +71,24 @@ export function SeasonEpisodes({
         {real.map((s) => {
           const active = s.season_number === selected
           return (
-            <Pressable
+            <Touchable
               key={s.id}
+              scaleTo={0.94}
+              haptic="selection"
               onPress={() => setSelected(s.season_number)}
               style={[styles.seasonChip, active && styles.seasonChipActive]}
             >
               <Text style={[styles.seasonText, active && styles.seasonTextActive]}>
                 Temporada {s.season_number}
               </Text>
-            </Pressable>
+            </Touchable>
           )
         })}
       </ScrollView>
 
       {/* Marcar temporada completa */}
       {releasedEps.length > 0 && (
-        <Pressable style={styles.markSeasonBtn} onPress={toggleSeason}>
+        <Touchable scaleTo={0.97} haptic="medium" style={styles.markSeasonBtn} onPress={toggleSeason}>
           <SymbolView
             name={allWatched ? 'checkmark.circle.fill' : 'circle'}
             tintColor={allWatched ? '#34C759' : 'rgba(255,255,255,0.6)'}
@@ -98,7 +97,7 @@ export function SeasonEpisodes({
           <Text style={styles.markSeasonText}>
             {allWatched ? 'Temporada vista' : 'Marcar temporada como vista'}
           </Text>
-        </Pressable>
+        </Touchable>
       )}
 
       {loading && <ActivityIndicator color="#fff" style={styles.spinner} />}
@@ -159,7 +158,9 @@ function EpisodeRow({
   }
 
   return (
-    <Pressable
+    <Touchable
+      scaleTo={0.98}
+      haptic="light"
       style={[styles.epRow, !released && styles.epRowSoon]}
       onPress={released ? open : undefined}
       disabled={!released}
@@ -216,7 +217,9 @@ function EpisodeRow({
             size={22}
             tintColor="rgba(255,255,255,0.6)"
           />
-          <Pressable
+          <Touchable
+            scaleTo={0.85}
+            haptic="selection"
             style={styles.markBtn}
             onPress={onToggleWatched}
             hitSlop={10}
@@ -226,10 +229,10 @@ function EpisodeRow({
               tintColor={watched ? '#34C759' : 'rgba(255,255,255,0.5)'}
               style={styles.markIcon}
             />
-          </Pressable>
+          </Touchable>
         </View>
       )}
-    </Pressable>
+    </Touchable>
   )
 }
 

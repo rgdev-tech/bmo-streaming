@@ -12,6 +12,7 @@ import { tmdb, type MediaItem } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterCard } from '@/components/PosterCard'
 import { CategoryCard } from '@/components/CategoryCard'
+import { EmptyState } from '@/components/EmptyState'
 
 const { width } = Dimensions.get('window')
 const CAT_W = Math.floor((width - 32 - 24) / 3)
@@ -77,7 +78,15 @@ export default function SearchScreen() {
           searching && loading
             ? <ActivityIndicator color="#fff" style={styles.spinner} />
             : searching
-            ? <View style={styles.empty}><Text style={styles.hint}>Sin resultados</Text></View>
+            ? (
+              <View style={styles.empty}>
+                <EmptyState
+                  icon="magnifyingglass"
+                  title="Sin resultados"
+                  subtitle="Prueba con otro título, actor o género."
+                />
+              </View>
+            )
             : <ActivityIndicator color="#fff" style={styles.spinner} />
         }
       />
@@ -90,6 +99,5 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 120 },
   col: { gap: 12, marginBottom: 12, justifyContent: 'flex-start' },
   spinner: { marginTop: 80 },
-  empty: { marginTop: 100, alignItems: 'center' },
-  hint: { color: 'rgba(255,255,255,0.4)', fontSize: 16 },
+  empty: { marginTop: 80, alignItems: 'center' },
 })

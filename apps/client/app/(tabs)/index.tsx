@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   Animated,
-  Pressable,
 } from 'react-native'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -19,6 +18,9 @@ import { FeaturedCard } from '@/components/FeaturedCard'
 import { HeroCarousel } from '@/components/HeroCarousel'
 import { ContinueRow } from '@/components/ContinueRow'
 import { HomeSkeleton } from '@/components/Skeleton'
+import { Touchable } from '@/components/Touchable'
+import { EmptyState } from '@/components/EmptyState'
+import { screenTitle, rowHeading } from '@/lib/typography'
 import { getContinueWatching, type Progress } from '@/lib/library'
 
 export default function HomeScreen() {
@@ -26,7 +28,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets()
   const scrollY = useRef(new Animated.Value(0)).current
 
-  const { data, loading, error } = useAsync(() => tmdb.home())
+  const { data, loading, error, refetch } = useAsync(() => tmdb.home())
   const { data: collections } = useAsync(() => tmdb.collections())
 
   const [watching, setWatching] = useState<Progress[]>([])
@@ -39,7 +41,16 @@ export default function HomeScreen() {
     return <HomeSkeleton />
   }
   if (error || !data) {
-    return <View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>
+    return (
+      <View style={styles.fill}>
+        <EmptyState
+          icon="wifi.slash"
+          title="No pude cargar el catálogo"
+          subtitle="Revisa tu conexión e intenta de nuevo."
+          action={{ label: 'Reintentar', onPress: refetch }}
+        />
+      </View>
+    )
   }
 
   const headerOpacity = scrollY.interpolate({
@@ -125,9 +136,9 @@ export default function HomeScreen() {
         pointerEvents="box-none"
       >
         <Text style={styles.headerTitle}>Inicio</Text>
-        <Pressable style={styles.avatar}>
+        <Touchable scaleTo={0.9} haptic="light" style={styles.avatar}>
           <SymbolView name="person.fill" tintColor="rgba(255,255,255,0.9)" style={styles.avatarIcon} />
-        </Pressable>
+        </Touchable>
       </Animated.View>
     </View>
   )
@@ -137,13 +148,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   rows: { paddingTop: 16, paddingBottom: 90 },
-  error: { color: '#FF6B6B', fontSize: 15 },
   featuredWrap: { marginBottom: 24 },
   rowTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },
@@ -156,10 +163,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerTitle: {
-    color: '#fff',
-    fontSize: 30,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    ...screenTitle,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowRadius: 8,
   },

@@ -1,8 +1,10 @@
-import { View, Text, FlatList, StyleSheet, Pressable, Dimensions } from 'react-native'
+import { View, Text, FlatList, StyleSheet, Dimensions } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { type MediaItem, backdropUrl, titleOf } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
+import { rowHeading } from '@/lib/typography'
 
 const { width } = Dimensions.get('window')
 const CARD_W = Math.round(width * 0.62)
@@ -14,8 +16,9 @@ function BackdropCard({ item }: { item: MediaItem }) {
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
 
   return (
-    <Pressable
+    <Touchable
       style={styles.card}
+      haptic="light"
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       {uri ? (
@@ -29,7 +32,7 @@ function BackdropCard({ item }: { item: MediaItem }) {
         style={StyleSheet.absoluteFill}
       />
       <Text style={styles.title} numberOfLines={2}>{titleOf(item)}</Text>
-    </Pressable>
+    </Touchable>
   )
 }
 
@@ -55,10 +58,7 @@ export function BackdropRow({ title, items }: { title: string; items: MediaItem[
 const styles = StyleSheet.create({
   row: { marginBottom: 24 },
   heading: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },

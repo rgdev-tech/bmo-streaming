@@ -1,7 +1,9 @@
-import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native'
+import { View, Text, FlatList, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { type CastMember, profileUrl } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
+import { rowHeading } from '@/lib/typography'
 
 export function CastRow({ cast }: { cast: CastMember[] }) {
   const router = useRouter()
@@ -20,8 +22,9 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
         renderItem={({ item }) => {
           const img = profileUrl(item.profile_path)
           return (
-            <Pressable
+            <Touchable
               style={styles.person}
+              haptic="light"
               onPress={() => router.push(`/person/${item.id}` as never)}
             >
               {img ? (
@@ -33,7 +36,7 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
               )}
               <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
               <Text style={styles.character} numberOfLines={1}>{item.character}</Text>
-            </Pressable>
+            </Touchable>
           )
         }}
       />
@@ -44,10 +47,7 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
 const styles = StyleSheet.create({
   section: { marginTop: 28 },
   heading: {
-    color: '#fff',
-    fontSize: 19,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 14,
   },
   list: { gap: 14 },

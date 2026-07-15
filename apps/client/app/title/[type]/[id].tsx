@@ -1,20 +1,20 @@
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ScrollView,
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
-  Pressable,
   Dimensions,
+  Animated,
+  Easing,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import * as WebBrowser from 'expo-web-browser'
-import * as Haptics from 'expo-haptics'
-import { tmdb, backdropUrl, logoUrl, titleOf, yearOf, isReleased, trailerKey, type MediaDetails } from '@/lib/tmdb'
+import { tmdb, backdropUrl, logoUrl, titleOf, yearOf, isReleased, trailerKey, certificationOf, type MediaDetails } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
@@ -22,6 +22,9 @@ import { PosterRow } from '@/components/PosterRow'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 import { stream } from '@/lib/stream'
 import { DownloadButton } from '@/components/DownloadButton'
+import { Touchable } from '@/components/Touchable'
+import { EmptyState } from '@/components/EmptyState'
+import { TitleSkeleton } from '@/components/Skeleton'
 
 type Availability = 'checking' | 'available' | 'unavailable'
 
@@ -31,7 +34,6 @@ export default function TitleScreen() {
   const isTv = type === 'tv'
 
   function play() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     router.push({
       pathname: '/player',
       params: {
@@ -45,7 +47,7 @@ export default function TitleScreen() {
     })
   }
 
-  const { data, loading, error } = useAsync<MediaDetails>(
+  const { data, loading, error, refetch } = useAsync<MediaDetails>(
     () => (isTv ? tmdb.tv(id) : tmdb.movie(id)),
     [type, id]
   )
@@ -81,164 +83,221 @@ export default function TitleScreen() {
 
   async function onToggleList() {
     if (!data) return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     const added = await toggleMyList(toLibraryItem({ ...data, media_type: isTv ? 'tv' : 'movie' }))
     setInList(added)
   }
 
+  const certification = data ? certificationOf(data) : null
   const trailer = trailerKey(data?.videos?.results)
   function openTrailer() {
     if (trailer) WebBrowser.openBrowserAsync(`https://www.youtube.com/watch?v=${trailer}`)
   }
 
+  const screenOptions = {
+    headerTransparent: true,
+    headerBlurEffect: 'dark' as const,
+    title: '',
+    headerTintColor: '#fff',
+  }
+
+  if (loading) {
+    return (
+      <>
+        <Stack.Screen options={screenOptions} />
+        <TitleSkeleton />
+      </>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <>
+        <Stack.Screen options={screenOptions} />
+        <View style={styles.errorFill}>
+          <EmptyState
+            icon="exclamationmark.triangle"
+            title="No pude cargar el título"
+            subtitle="Revisa tu conexión e intenta de nuevo."
+            action={{ label: 'Reintentar', onPress: refetch }}
+          />
+        </View>
+      </>
+    )
+  }
+
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerTransparent: true,
-          headerBlurEffect: 'dark',
-          title: '',
-          headerTintColor: '#fff',
-        }}
-      />
+      <Stack.Screen options={screenOptions} />
       <ScrollView style={styles.container}>
-        {loading && <ActivityIndicator color="#fff" style={styles.spinner} />}
-        {error && <Text style={styles.error}>No pude cargar el título.</Text>}
-
-        {data && (
-          <>
-            <View style={styles.hero}>
-              {backdropUrl(data.backdrop_path, 'w1280') && (
-                <Image
-                  source={backdropUrl(data.backdrop_path, 'w1280')}
-                  style={styles.heroBg}
-                  contentFit="cover"
-                  transition={250}
-                />
-              )}
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.5)', '#000']}
-                locations={[0, 0.7, 1]}
-                style={styles.heroGradient}
-              />
-              <View style={styles.heroContent}>
-                {logo ? (
-                  <Image source={logo} style={styles.logo} contentFit="contain" transition={300} />
-                ) : (
-                  <Text style={styles.title} numberOfLines={2}>
-                    {titleOf(data)}
-                  </Text>
-                )}
-                <View style={styles.metaRow}>
-                  {yearOf(data) ? <Text style={styles.meta}>{yearOf(data)}</Text> : null}
-                  {data.vote_average ? (
-                    <Text style={styles.meta}>★ {data.vote_average.toFixed(1)}</Text>
-                  ) : null}
-                  {isTv && data.number_of_seasons ? (
-                    <Text style={styles.meta}>{data.number_of_seasons} temp.</Text>
-                  ) : null}
-                  {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
+        <View style={styles.hero}>
+          {backdropUrl(data.backdrop_path, 'w1280') && (
+            <Image
+              source={backdropUrl(data.backdrop_path, 'w1280')}
+              style={styles.heroBg}
+              contentFit="cover"
+              transition={250}
+            />
+          )}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.5)', '#000']}
+            locations={[0, 0.7, 1]}
+            style={styles.heroGradient}
+          />
+          <View style={styles.heroContent}>
+            {logo ? (
+              <Image source={logo} style={styles.logo} contentFit="contain" transition={300} />
+            ) : (
+              <Text style={styles.title} numberOfLines={2}>
+                {titleOf(data)}
+              </Text>
+            )}
+            <View style={styles.metaRow}>
+              {yearOf(data) ? <Text style={styles.meta}>{yearOf(data)}</Text> : null}
+              {certification ? (
+                <View style={styles.certBadge}>
+                  <Text style={styles.certText}>{certification}</Text>
                 </View>
-              </View>
+              ) : null}
+              {data.vote_average ? (
+                <Text style={styles.meta}>★ {data.vote_average.toFixed(1)}</Text>
+              ) : null}
+              {isTv && data.number_of_seasons ? (
+                <Text style={styles.meta}>{data.number_of_seasons} temp.</Text>
+              ) : null}
+              {data.runtime ? <Text style={styles.meta}>{data.runtime} min</Text> : null}
             </View>
+          </View>
+        </View>
 
-            <View style={styles.body}>
-              {!isTv &&
-                (!isReleased(data.release_date) ? (
-                  <View style={styles.soonButton}>
-                    <SymbolView name="clock" tintColor="rgba(255,255,255,0.7)" style={styles.playIcon} />
-                    <Text style={styles.soonText}>
-                      Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
-                    </Text>
-                  </View>
-                ) : availability === 'unavailable' ? (
-                  <View style={styles.unavailableButton}>
-                    <SymbolView name="exclamationmark.triangle" tintColor="rgba(255,255,255,0.6)" style={styles.playIcon} />
-                    <Text style={styles.soonText}>No disponible</Text>
-                  </View>
-                ) : (
-                  <Pressable
-                    style={[styles.playButton, availability === 'checking' && styles.playButtonChecking]}
-                    onPress={play}
-                  >
-                    {availability === 'checking' ? (
-                      <ActivityIndicator color="#000" size="small" />
-                    ) : (
-                      <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                    )}
-                    <Text style={styles.playText}>
-                      {availability === 'checking' ? 'Comprobando…' : 'Reproducir'}
-                    </Text>
-                  </Pressable>
-                ))}
-
-              <View style={styles.secondaryRow}>
-                <Pressable style={styles.secondaryBtn} onPress={onToggleList}>
-                  <SymbolView
-                    name={inList ? 'checkmark' : 'plus'}
-                    tintColor="#fff"
-                    style={styles.listIcon}
-                  />
-                  <Text style={styles.listText}>Mi Lista</Text>
-                </Pressable>
-                {!isTv && data && isReleased(data.release_date) && availability === 'available' && (
-                  <View style={[styles.secondaryBtn, { gap: 8 }]}>
-                    <DownloadButton
-                      id={Number(id)}
-                      media_type="movie"
-                      title={titleOf(data)}
-                      poster_path={data.poster_path}
-                      backdrop_path={data.backdrop_path}
-                      size={20}
-                    />
-                    <Text style={styles.listText}>Descargar</Text>
-                  </View>
-                )}
-                {trailer && (
-                  <Pressable style={styles.secondaryBtn} onPress={openTrailer}>
-                    <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />
-                    <Text style={styles.listText}>Tráiler</Text>
-                  </Pressable>
-                )}
-              </View>
-
-              {data.genres?.length ? (
-                <Text style={styles.genres}>
-                  {data.genres.map((g) => g.name).join(' · ')}
+        <View style={styles.body}>
+          {!isTv &&
+            (!isReleased(data.release_date) ? (
+              <View style={styles.soonButton}>
+                <SymbolView name="clock" tintColor="rgba(255,255,255,0.7)" style={styles.playIcon} />
+                <Text style={styles.soonText}>
+                  Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
                 </Text>
-              ) : null}
-
-              <Text style={styles.overview}>{data.overview || 'Sin sinopsis.'}</Text>
-
-              {isTv && data.seasons?.length ? (
-                <SeasonEpisodes
-                  tvId={id}
-                  title={titleOf(data)}
-                  seasons={data.seasons}
-                  poster={data.poster_path}
-                  backdrop={data.backdrop_path}
-                />
-              ) : null}
-
-              {data.credits?.cast?.length ? (
-                <CastRow cast={data.credits.cast} />
-              ) : null}
-            </View>
-
-            {data.similar?.results?.length ? (
-              <View style={styles.similar}>
-                <PosterRow title="Similares" items={data.similar.results} />
               </View>
-            ) : null}
-          </>
-        )}
+            ) : availability === 'unavailable' ? (
+              <View style={styles.unavailableButton}>
+                <SymbolView name="exclamationmark.triangle" tintColor="rgba(255,255,255,0.6)" style={styles.playIcon} />
+                <Text style={styles.soonText}>No disponible</Text>
+              </View>
+            ) : (
+              <Touchable
+                scaleTo={0.97}
+                haptic="medium"
+                style={[styles.playButton, availability === 'checking' && styles.playButtonChecking]}
+                onPress={play}
+              >
+                {availability === 'checking' && <ShimmerSweep />}
+                {availability === 'checking' ? (
+                  <ActivityIndicator color="#000" size="small" />
+                ) : (
+                  <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+                )}
+                <Text style={styles.playText}>
+                  {availability === 'checking' ? 'Comprobando…' : 'Reproducir'}
+                </Text>
+              </Touchable>
+            ))}
+
+          <View style={styles.secondaryRow}>
+            <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={onToggleList}>
+              <SymbolView
+                name={inList ? 'checkmark' : 'plus'}
+                tintColor="#fff"
+                style={styles.listIcon}
+              />
+              <Text style={styles.listText}>Mi Lista</Text>
+            </Touchable>
+            {!isTv && data && isReleased(data.release_date) && availability === 'available' && (
+              <View style={[styles.secondaryBtn, { gap: 8 }]}>
+                <DownloadButton
+                  id={Number(id)}
+                  media_type="movie"
+                  title={titleOf(data)}
+                  poster_path={data.poster_path}
+                  backdrop_path={data.backdrop_path}
+                  size={20}
+                />
+                <Text style={styles.listText}>Descargar</Text>
+              </View>
+            )}
+            {trailer && (
+              <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={openTrailer}>
+                <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />
+                <Text style={styles.listText}>Tráiler</Text>
+              </Touchable>
+            )}
+          </View>
+
+          {data.genres?.length ? (
+            <Text style={styles.genres}>
+              {data.genres.map((g) => g.name).join(' · ')}
+            </Text>
+          ) : null}
+
+          <Text style={styles.overview}>{data.overview || 'Sin sinopsis.'}</Text>
+
+          {isTv && data.seasons?.length ? (
+            <SeasonEpisodes
+              tvId={id}
+              title={titleOf(data)}
+              seasons={data.seasons}
+              poster={data.poster_path}
+              backdrop={data.backdrop_path}
+            />
+          ) : null}
+
+          {data.credits?.cast?.length ? (
+            <CastRow cast={data.credits.cast} />
+          ) : null}
+        </View>
+
+        {data.similar?.results?.length ? (
+          <View style={styles.similar}>
+            <PosterRow title="Similares" items={data.similar.results} />
+          </View>
+        ) : null}
       </ScrollView>
     </>
   )
 }
 
+// Barrido sutil de brillo sobre el botón mientras se resuelve el stream
+// ("Comprobando…") — refuerzo visual del spinner, no lo reemplaza.
+function ShimmerSweep() {
+  const x = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(x, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [])
+
+  const translateX = x.interpolate({ inputRange: [0, 1], outputRange: [-BUTTON_W, BUTTON_W] })
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFillObject, styles.shimmerClip, { transform: [{ translateX }] }]}
+    >
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.12)', 'transparent']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.shimmerGradient}
+      />
+    </Animated.View>
+  )
+}
+
 const { width } = Dimensions.get('window')
 const HERO_H = width * 0.95
+const BUTTON_W = width - 40 // ancho del playButton (paddingHorizontal: 20 en .body)
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
@@ -264,6 +323,14 @@ const styles = StyleSheet.create({
   },
   metaRow: { flexDirection: 'row', gap: 14, marginTop: 10, justifyContent: 'center' },
   meta: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '500' },
+  certBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.5)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  certText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700' },
   playButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -319,6 +386,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   similar: { marginTop: 8, marginBottom: 24 },
-  spinner: { marginTop: 120 },
-  error: { color: '#FF6B6B', textAlign: 'center', marginTop: 120 },
+  errorFill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  shimmerClip: { borderRadius: 12, overflow: 'hidden' },
+  shimmerGradient: { width: BUTTON_W * 0.5, height: '100%' },
 })

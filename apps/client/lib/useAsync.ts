@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 type State<T> = {
   data: T | null
@@ -12,6 +12,8 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
     loading: true,
     error: null,
   })
+  // Incrementar fuerza un nuevo intento sin depender de que `deps` cambie
+  const [tick, setTick] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -28,7 +30,9 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
+  }, [...deps, tick])
 
-  return state
+  const refetch = useCallback(() => setTick((t) => t + 1), [])
+
+  return { ...state, refetch }
 }

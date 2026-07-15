@@ -4,9 +4,7 @@ import {
   ScrollView,
   View,
   Text,
-  Pressable,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native'
 import { Image } from 'expo-image'
 import {
@@ -17,6 +15,9 @@ import {
 } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { PosterRow } from '@/components/PosterRow'
+import { Touchable } from '@/components/Touchable'
+import { EmptyState } from '@/components/EmptyState'
+import { PersonSkeleton } from '@/components/Skeleton'
 
 function dedupeSorted(credits: PersonCredit[], type: 'movie' | 'tv') {
   const seen = new Set<number>()
@@ -35,28 +36,48 @@ function dedupeSorted(credits: PersonCredit[], type: 'movie' | 'tv') {
 
 export default function PersonScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { data, loading, error } = useAsync<PersonDetails>(
+  const { data, loading, error, refetch } = useAsync<PersonDetails>(
     () => tmdb.person(id),
     [id]
   )
   const [expanded, setExpanded] = useState(false)
 
+  const screenOptions = {
+    headerTransparent: true,
+    headerBlurEffect: 'dark' as const,
+    title: '',
+    headerTintColor: '#fff',
+  }
+
+  if (loading) {
+    return (
+      <>
+        <Stack.Screen options={screenOptions} />
+        <PersonSkeleton />
+      </>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <>
+        <Stack.Screen options={screenOptions} />
+        <View style={styles.errorFill}>
+          <EmptyState
+            icon="exclamationmark.triangle"
+            title="No pude cargar el perfil"
+            subtitle="Revisa tu conexión e intenta de nuevo."
+            action={{ label: 'Reintentar', onPress: refetch }}
+          />
+        </View>
+      </>
+    )
+  }
+
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerTransparent: true,
-          headerBlurEffect: 'dark',
-          title: '',
-          headerTintColor: '#fff',
-        }}
-      />
+      <Stack.Screen options={screenOptions} />
       <ScrollView style={styles.container} contentInsetAdjustmentBehavior="automatic">
-        {loading && <ActivityIndicator color="#fff" style={styles.spinner} />}
-        {error && <Text style={styles.error}>No pude cargar el perfil.</Text>}
-
-        {data && (
-          <>
             <View style={styles.header}>
               {profileUrl(data.profile_path, 'h632') ? (
                 <Image
@@ -85,11 +106,11 @@ export default function PersonScreen() {
             </View>
 
             {data.biography ? (
-              <Pressable onPress={() => setExpanded((e) => !e)} style={styles.bioWrap}>
+              <Touchable scaleTo={0.98} onPress={() => setExpanded((e) => !e)} style={styles.bioWrap}>
                 <Text style={styles.bio} numberOfLines={expanded ? undefined : 4}>
                   {data.biography}
                 </Text>
-              </Pressable>
+              </Touchable>
             ) : null}
 
             <View style={styles.rows}>
@@ -102,8 +123,6 @@ export default function PersonScreen() {
                 items={dedupeSorted(data.combined_credits.cast, 'tv')}
               />
             </View>
-          </>
-        )}
       </ScrollView>
     </>
   )
@@ -121,6 +140,5 @@ const styles = StyleSheet.create({
   bioWrap: { paddingHorizontal: 20, paddingBottom: 8 },
   bio: { color: 'rgba(255,255,255,0.8)', fontSize: 15, lineHeight: 22 },
   rows: { paddingTop: 16, paddingBottom: 24 },
-  spinner: { marginTop: 120 },
-  error: { color: '#FF6B6B', textAlign: 'center', marginTop: 120 },
+  errorFill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
 })

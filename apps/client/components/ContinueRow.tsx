@@ -1,6 +1,8 @@
-import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native'
+import { View, Text, FlatList, StyleSheet } from 'react-native'
 import { SymbolView } from 'expo-symbols'
 import { ContinueCard } from './ContinueCard'
+import { Touchable } from './Touchable'
+import { rowHeading } from '@/lib/typography'
 import type { Progress } from '@/lib/library'
 
 export function ContinueRow({
@@ -16,8 +18,10 @@ export function ContinueRow({
 
   return (
     <View style={styles.section}>
-      <Pressable
+      <Touchable
         style={styles.headingRow}
+        scaleTo={0.98}
+        haptic="light"
         onPress={onSeeAll}
         disabled={!onSeeAll}
       >
@@ -25,7 +29,7 @@ export function ContinueRow({
         {onSeeAll && (
           <SymbolView name="chevron.right" tintColor="#fff" style={styles.chevron} />
         )}
-      </Pressable>
+      </Touchable>
       <FlatList
         horizontal
         data={items}
@@ -47,12 +51,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 20,
   },
-  heading: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-  },
+  heading: rowHeading,
   chevron: { width: 18, height: 18, marginTop: 2 },
   row: { paddingHorizontal: 20 },
 })

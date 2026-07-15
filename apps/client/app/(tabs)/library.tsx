@@ -1,11 +1,10 @@
 import { useCallback, useState } from 'react'
 import {
   ScrollView, View, Text, StyleSheet, Dimensions,
-  Pressable, Alert,
+  Alert,
 } from 'react-native'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { Image } from 'expo-image'
-import * as Haptics from 'expo-haptics'
 import { SymbolView } from 'expo-symbols'
 import {
   getMyList,
@@ -24,6 +23,9 @@ import {
 } from '@/lib/download'
 import { PosterCard } from '@/components/PosterCard'
 import { ContinueRow } from '@/components/ContinueRow'
+import { Touchable } from '@/components/Touchable'
+import { EmptyState } from '@/components/EmptyState'
+import { screenTitle, rowHeading } from '@/lib/typography'
 import { backdropUrl } from '@/lib/tmdb'
 import type { MediaItem } from '@/lib/tmdb'
 
@@ -55,13 +57,11 @@ export default function LibraryScreen() {
   }, []))
 
   async function removeFromList(item: LibraryItem) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     await toggleMyList(item)
     setList(prev => prev.filter(i => !(i.id === item.id && i.media_type === item.media_type)))
   }
 
   async function handleDeleteDownload(item: DownloadItem) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     Alert.alert(
       'Eliminar descarga',
       `¿Eliminar "${item.title}"${item.episode ? ` T${item.season}:E${item.episode}` : ''}?`,
@@ -80,7 +80,6 @@ export default function LibraryScreen() {
 
   function playDownload(item: DownloadItem) {
     if (item.status !== 'done') return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
     router.push({
       pathname: '/player',
       params: {
@@ -114,9 +113,11 @@ export default function LibraryScreen() {
 
       {empty && (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>
-            Aquí aparecerá lo que guardes en Mi Lista, lo que estés viendo y tus descargas.
-          </Text>
+          <EmptyState
+            icon="bookmark"
+            title="Tu biblioteca está vacía"
+            subtitle="Guarda títulos en Mi Lista, sigue viendo algo o descárgalo para verlo aquí."
+          />
         </View>
       )}
 
@@ -127,7 +128,7 @@ export default function LibraryScreen() {
         <View style={styles.section}>
           <View style={styles.headingRow}>
             <Text style={styles.heading}>Descargas</Text>
-            <Pressable style={styles.smartPill} onPress={toggleSmart}>
+            <Touchable scaleTo={0.95} haptic="light" style={styles.smartPill} onPress={toggleSmart}>
               <SymbolView
                 name={smartEnabled ? 'bolt.fill' : 'bolt.slash'}
                 tintColor={smartEnabled ? '#FFD60A' : 'rgba(255,255,255,0.4)'}
@@ -136,7 +137,7 @@ export default function LibraryScreen() {
               <Text style={[styles.smartText, !smartEnabled && styles.smartTextOff]}>
                 Descarga inteligente
               </Text>
-            </Pressable>
+            </Touchable>
           </View>
 
           {downloads.map(item => (
@@ -193,7 +194,9 @@ function DownloadRow({
       : item.quality
 
   return (
-    <Pressable
+    <Touchable
+      scaleTo={0.98}
+      haptic="medium"
       style={styles.dlRow}
       onPress={isDone ? onPlay : undefined}
       disabled={!isDone}
@@ -222,14 +225,14 @@ function DownloadRow({
         <Text style={styles.dlStatus} numberOfLines={1}>{statusLabel}</Text>
       </View>
 
-      <Pressable style={styles.dlDelete} onPress={onDelete} hitSlop={10}>
+      <Touchable scaleTo={0.85} haptic="light" style={styles.dlDelete} onPress={onDelete} hitSlop={10}>
         <SymbolView
           name="trash"
           tintColor="rgba(255,80,80,0.8)"
           style={styles.dlDeleteIcon}
         />
-      </Pressable>
-    </Pressable>
+      </Touchable>
+    </Touchable>
   )
 }
 
@@ -238,24 +241,18 @@ function DownloadRow({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   title: {
-    fontSize: 34, fontWeight: '700', color: '#fff',
-    letterSpacing: -0.5, paddingHorizontal: 20,
+    ...screenTitle,
+    paddingHorizontal: 20,
     paddingTop: 16, paddingBottom: 8,
   },
-  emptyBox: { paddingHorizontal: 24, paddingTop: 80, alignItems: 'center' },
-  emptyText: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 15,
-    textAlign: 'center', lineHeight: 22,
-  },
+  emptyBox: { paddingTop: 60, alignItems: 'center' },
   section: { marginTop: 24, marginBottom: 8 },
   headingRow: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20, marginBottom: 12,
   },
-  heading: {
-    color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: -0.3,
-  },
+  heading: rowHeading,
   smartPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
     backgroundColor: 'rgba(255,255,255,0.08)',

@@ -3,9 +3,7 @@ import {
   ScrollView,
   View,
   Text,
-  Pressable,
   FlatList,
-  ActivityIndicator,
   StyleSheet,
   Dimensions,
 } from 'react-native'
@@ -18,6 +16,10 @@ import { BackdropRow } from './BackdropRow'
 import { RankedRow } from './RankedRow'
 import { FeaturedCard } from './FeaturedCard'
 import { PosterCard } from './PosterCard'
+import { Touchable } from './Touchable'
+import { EmptyState } from './EmptyState'
+import { CatalogSkeleton } from './Skeleton'
+import { screenTitle, rowHeading } from '@/lib/typography'
 import type { CatalogData, MediaItem } from '@/lib/tmdb'
 
 const GRID_GAP = 12
@@ -36,7 +38,7 @@ export function CatalogScreen({
   load: () => Promise<CatalogData>
 }) {
   const insets = useSafeAreaInsets()
-  const { data, loading, error } = useAsync(load)
+  const { data, loading, error, refetch } = useAsync(load)
   const [genre, setGenre] = useState<string | null>(null)
 
   const shell = (inner: React.ReactNode, pad = false) => (
@@ -46,8 +48,18 @@ export function CatalogScreen({
     </View>
   )
 
-  if (loading) return shell(<View style={styles.fill}><ActivityIndicator color="#fff" size="large" /></View>, true)
-  if (error || !data) return shell(<View style={styles.fill}><Text style={styles.error}>No pude cargar el catálogo.</Text></View>, true)
+  if (loading) return shell(<CatalogSkeleton />, true)
+  if (error || !data) return shell(
+    <View style={styles.fill}>
+      <EmptyState
+        icon="wifi.slash"
+        title="No pude cargar el catálogo"
+        subtitle="Revisa tu conexión e intenta de nuevo."
+        action={{ label: 'Reintentar', onPress: refetch }}
+      />
+    </View>,
+    true
+  )
 
   const chips = [
     { key: 'all', label: 'Destacados' },
@@ -134,14 +146,16 @@ export function CatalogScreen({
           renderItem={({ item }) => {
             const active = (genre ?? 'all') === item.key
             return (
-              <Pressable
+              <Touchable
+                scaleTo={0.94}
+                haptic="selection"
                 onPress={() => setGenre(item.key === 'all' ? null : item.key)}
                 style={[styles.chip, active && styles.chipActive]}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
                   {item.label}
                 </Text>
-              </Pressable>
+              </Touchable>
             )
           }}
         />
@@ -155,10 +169,9 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   container: { flex: 1, backgroundColor: '#000' },
   fill: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  error: { color: '#FF6B6B', fontSize: 15 },
 
   titleWrap: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
-  bigTitle: { color: '#fff', fontSize: 34, fontWeight: '800', letterSpacing: -0.5 },
+  bigTitle: screenTitle,
 
   chipsBar: {
     position: 'absolute',
@@ -181,10 +194,7 @@ const styles = StyleSheet.create({
   rows: { paddingTop: 12, paddingBottom: 120 },
   section: { marginBottom: 24 },
   sectionTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },

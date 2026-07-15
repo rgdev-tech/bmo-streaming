@@ -5,8 +5,6 @@ import {
   StyleSheet,
   Dimensions,
   ScrollView,
-  Pressable,
-  ActivityIndicator,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -19,6 +17,10 @@ import { PosterRow } from '@/components/PosterRow'
 import { RankedRow } from '@/components/RankedRow'
 import { FeaturedCarousel } from '@/components/FeaturedCarousel'
 import { BackdropRow } from '@/components/BackdropRow'
+import { Touchable } from '@/components/Touchable'
+import { EmptyState } from '@/components/EmptyState'
+import { SkeletonRow } from '@/components/Skeleton'
+import { rowHeading } from '@/lib/typography'
 
 const { width } = Dimensions.get('window')
 const HERO_H = width * 0.68
@@ -32,7 +34,7 @@ export default function BrowseScreen() {
   }>()
   const insets = useSafeAreaInsets()
   const kind: 'movie' | 'tv' = type === 'tv' ? 'tv' : 'movie'
-  const { data, loading, error } = useAsync(() => tmdb.genre(kind, id!), [type, id])
+  const { data, loading, error, refetch } = useAsync(() => tmdb.genre(kind, id!), [type, id])
 
   // Tag all items with the correct media_type
   const tag = (items: MediaItem[]): MediaItem[] =>
@@ -83,9 +85,19 @@ export default function BrowseScreen() {
 
         {/* ── Content ── */}
         {loading ? (
-          <ActivityIndicator color="#fff" style={styles.spinner} />
+          <View style={styles.skeletonRows}>
+            <SkeletonRow />
+            <SkeletonRow />
+          </View>
         ) : error ? (
-          <Text style={styles.errorText}>No se pudo cargar el contenido</Text>
+          <View style={styles.errorBox}>
+            <EmptyState
+              icon="wifi.slash"
+              title="No se pudo cargar el contenido"
+              subtitle="Revisa tu conexión e intenta de nuevo."
+              action={{ label: 'Reintentar', onPress: refetch }}
+            />
+          </View>
         ) : (
           <View style={styles.sections}>
 
@@ -122,7 +134,9 @@ export default function BrowseScreen() {
       </ScrollView>
 
       {/* ── Liquid glass back button ── */}
-      <Pressable
+      <Touchable
+        scaleTo={0.88}
+        haptic="light"
         style={[styles.backBtn, { top: insets.top + 10 }]}
         onPress={() => router.back()}
         hitSlop={10}
@@ -130,7 +144,7 @@ export default function BrowseScreen() {
         <BlurView intensity={55} tint="dark" style={styles.blurWrap}>
           <SymbolView name="chevron.left" tintColor="#fff" style={styles.backIcon} />
         </BlurView>
-      </Pressable>
+      </Touchable>
     </View>
   )
 }
@@ -152,20 +166,12 @@ const styles = StyleSheet.create({
   sections: { paddingTop: 20 },
   section: { marginBottom: 24 },
   sectionLabel: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: -0.3,
+    ...rowHeading,
     marginBottom: 12,
     paddingHorizontal: 20,
   },
-  spinner: { marginTop: 60 },
-  errorText: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 15,
-    textAlign: 'center',
-    marginTop: 60,
-  },
+  skeletonRows: { paddingTop: 20, gap: 28 },
+  errorBox: { paddingTop: 60, alignItems: 'center' },
   // Liquid glass button
   backBtn: {
     position: 'absolute',

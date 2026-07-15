@@ -1,10 +1,11 @@
-import { Pressable, View, Text, StyleSheet, Alert } from 'react-native'
+import { View, Text, StyleSheet, Alert } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { backdropUrl, posterUrl } from '@/lib/tmdb'
 import { removeProgress, type Progress } from '@/lib/library'
+import { Touchable } from './Touchable'
 
 const CARD_WIDTH = 300
 
@@ -65,7 +66,7 @@ export function ContinueCard({
   }
 
   return (
-    <Pressable style={styles.card} onPress={resume}>
+    <Touchable style={styles.card} haptic="light" onPress={resume}>
       {img ? (
         <Image source={img} style={styles.thumb} contentFit="cover" transition={150} />
       ) : (
@@ -86,11 +87,11 @@ export function ContinueCard({
             {remainingLabel(item)}
           </Text>
         </View>
-        <Pressable onPress={more} hitSlop={12}>
+        <Touchable scaleTo={0.85} haptic="light" onPress={more} hitSlop={12}>
           <SymbolView name="ellipsis" tintColor="#fff" style={styles.more} />
-        </Pressable>
+        </Touchable>
       </View>
-    </Pressable>
+    </Touchable>
   )
 }
 

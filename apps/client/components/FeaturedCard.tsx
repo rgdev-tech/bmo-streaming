@@ -1,8 +1,9 @@
-import { Pressable, Text, StyleSheet, View, Dimensions } from 'react-native'
+import { Text, StyleSheet, View, Dimensions } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { type MediaItem, backdropUrl, titleOf, genreNames } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
 
 const { width } = Dimensions.get('window')
 const CARD_W = width - 32
@@ -16,7 +17,9 @@ export function FeaturedCard({ item }: { item: MediaItem }) {
   const type = isTv ? 'Serie' : 'Película'
 
   return (
-    <Pressable
+    <Touchable
+      scaleTo={0.98}
+      haptic="light"
       style={styles.card}
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
@@ -42,7 +45,7 @@ export function FeaturedCard({ item }: { item: MediaItem }) {
           <Text style={styles.overview} numberOfLines={3}>{item.overview}</Text>
         )}
       </View>
-    </Pressable>
+    </Touchable>
   )
 }
 

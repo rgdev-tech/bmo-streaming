@@ -1,16 +1,18 @@
-import { Pressable, Text, StyleSheet, View } from 'react-native'
+import { Text, StyleSheet, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { backdropUrl, type Category } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
 
 export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
   const router = useRouter()
   const img = backdropUrl(cat.backdrop_path, 'w780')
 
   return (
-    <Pressable
+    <Touchable
       style={[styles.card, { width, height: width * 1.4 }]}
+      haptic="light"
       onPress={() =>
         router.push({
           pathname: '/browse/[type]/[id]',
@@ -30,7 +32,7 @@ export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
       <Text style={styles.name} numberOfLines={2}>
         {cat.name}
       </Text>
-    </Pressable>
+    </Touchable>
   )
 }
 

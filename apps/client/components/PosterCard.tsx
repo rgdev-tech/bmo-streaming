@@ -3,6 +3,7 @@ import { Image } from 'expo-image'
 import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf, isUpcoming } from '@/lib/tmdb'
+import { Touchable } from './Touchable'
 
 const CARD_WIDTH = 124
 
@@ -53,9 +54,9 @@ export function PosterCard({
 
         {/* Botón quitar (Mi Lista) */}
         {onRemove && (
-          <Pressable style={styles.removeBtn} onPress={onRemove} hitSlop={8}>
+          <Touchable style={styles.removeBtn} scaleTo={0.85} haptic="light" onPress={onRemove} hitSlop={8}>
             <SymbolView name="xmark" tintColor="#fff" style={styles.removeIcon} />
-          </Pressable>
+          </Touchable>
         )}
       </View>
 

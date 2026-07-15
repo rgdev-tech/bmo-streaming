@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  Pressable, Animated,
+  Animated,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
@@ -14,6 +14,7 @@ import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang 
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
+import { Touchable } from '@/components/Touchable'
 
 const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
@@ -232,13 +233,13 @@ export default function PlayerScreen() {
           <Text style={styles.errText}>No se pudo cargar</Text>
           <Text style={styles.errSub}>{error}</Text>
           <View style={styles.errButtons}>
-            <Pressable style={styles.retry} onPress={retry}>
+            <Touchable scaleTo={0.95} haptic="light" style={styles.retry} onPress={retry}>
               <SymbolView name="arrow.clockwise" tintColor="#000" style={styles.retryIcon} />
               <Text style={styles.retryText}>Reintentar</Text>
-            </Pressable>
-            <Pressable style={styles.errBackBtn} onPress={exitToBack}>
+            </Touchable>
+            <Touchable scaleTo={0.95} haptic="light" style={styles.errBackBtn} onPress={exitToBack}>
               <Text style={styles.errBackText}>Volver</Text>
-            </Pressable>
+            </Touchable>
           </View>
         </View>
       ) : ready && masterUrl ? (
@@ -273,15 +274,17 @@ export default function PlayerScreen() {
               <Text style={styles.langSwitchLabel}>Audio</Text>
               <View style={styles.langSegmented}>
                 {(['original', 'latino'] as const).map((opt) => (
-                  <Pressable
+                  <Touchable
                     key={opt}
+                    scaleTo={0.94}
+                    haptic="selection"
                     style={[styles.langOption, audioLang === opt && styles.langOptionActive]}
                     onPress={() => changeAudioLang(opt)}
                   >
                     <Text style={[styles.langOptionText, audioLang === opt && styles.langOptionTextActive]}>
                       {opt === 'original' ? 'Original' : 'Español Latino'}
                     </Text>
-                  </Pressable>
+                  </Touchable>
                 ))}
               </View>
             </View>
@@ -390,13 +393,15 @@ function NativePlayer({
       {/* Pill "Siguiente episodio" — solo visible fuera de fullscreen
           (en fullscreen Apple controla todo el overlay) */}
       {showPill && !inFullscreen && (
-        <Pressable
+        <Touchable
+          scaleTo={0.95}
+          haptic="medium"
           style={[styles.nextPill, { bottom: insets.bottom + 80, right: insets.right + 24 }]}
           onPress={onPlayNext}
         >
           <SymbolView name="forward.fill" tintColor="#000" style={styles.nextPillIcon} />
           <Text style={styles.nextPillText}>Siguiente episodio</Text>
-        </Pressable>
+        </Touchable>
       )}
     </View>
   )
@@ -455,14 +460,14 @@ function NextEpisodeScreen({
         </View>
 
         <View style={styles.nextButtons}>
-          <Pressable style={styles.playNextBtn} onPress={onPlay}>
+          <Touchable scaleTo={0.95} haptic="medium" style={styles.playNextBtn} onPress={onPlay}>
             <SymbolView name="play.fill" tintColor="#000" style={styles.playNextIcon} />
             <Text style={styles.playNextText}>Reproducir ({seconds}s)</Text>
-          </Pressable>
+          </Touchable>
 
-          <Pressable style={styles.backBtn} onPress={onBack}>
+          <Touchable scaleTo={0.95} haptic="light" style={styles.backBtn} onPress={onBack}>
             <Text style={styles.backText}>Salir</Text>
-          </Pressable>
+          </Touchable>
         </View>
       </View>
     </View>
