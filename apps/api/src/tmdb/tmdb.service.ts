@@ -89,6 +89,10 @@ export const tmdbService = {
   tvSeason: (id: number, season: number) =>
     tmdb(`/tv/${id}/season/${season}`),
 
+  // IMDb id — lo necesita Torrentio (indexa por imdb, no por tmdb)
+  externalIds: (type: 'movie' | 'tv', id: number) =>
+    tmdb(`/${type}/${id}/external_ids`),
+
   // Logos (PNG transparente) del título, en varios idiomas
   images: (type: 'movie' | 'tv', id: number) =>
     tmdb(`/${type}/${id}/images`, { include_image_language: 'es,en,null' }),

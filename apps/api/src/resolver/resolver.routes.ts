@@ -1,5 +1,6 @@
 import { Elysia, t } from 'elysia'
 import { resolveStream, checkProviders, debugScrape, debugSubs, type AudioLang } from './resolver.service'
+import { debugTorrentio } from './torrentio'
 import { langCode } from './hls'
 
 function parseLang(v?: string): AudioLang {
@@ -78,6 +79,18 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   .get(
     '/debug/subs/tv/:id/:season/:episode',
     ({ params }) => debugSubs('tv', Number(params.id), Number(params.season), Number(params.episode)),
+    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+  )
+
+  // Diagnóstico: candidatos de Torrentio (mp4 rankeados) sin resolver el link final
+  .get(
+    '/debug/debrid/movie/:id',
+    ({ params }) => debugTorrentio('movie', Number(params.id)),
+    { params: t.Object({ id: t.String() }) }
+  )
+  .get(
+    '/debug/debrid/tv/:id/:season/:episode',
+    ({ params }) => debugTorrentio('tv', Number(params.id), Number(params.season), Number(params.episode)),
     { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
   )
 

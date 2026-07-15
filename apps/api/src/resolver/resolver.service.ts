@@ -9,6 +9,7 @@ import {
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
+import { resolveDebridStream, debridEnabled, debugTorrentio } from './torrentio'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
 
@@ -333,6 +334,31 @@ async function scrape(
   try {
     // Subtítulos en paralelo (no dependen del scrape de video)
     const subsP = fetchSubtitles(type, tmdbId, season, episode)
+
+    // Real-Debrid primero (si está configurado y el cliente no lo excluyó ya
+    // por haber fallado al reproducir): cobertura y calidad muy superiores a
+    // los scrapers HTTP. 'realdebrid' se trata como una fuente más para el
+    // mecanismo de exclude del cliente.
+    if (debridEnabled && !exclude.includes('realdebrid')) {
+      try {
+        const debrid = await resolveDebridStream(type, tmdbId, lang, season, episode)
+        if (debrid) {
+          const result: StreamResult = {
+            url: debrid.url,
+            type: 'file',
+            captions: await subsP,
+            headers: {},
+            source: 'realdebrid',
+            language: debrid.language,
+          }
+          console.error(`[resolve] OK via realdebrid (${debrid.label}) en ${Date.now() - t0}ms`)
+          return result
+        }
+        console.error(`[resolve] realdebrid sin resultado (${Date.now() - t0}ms), cae a scrapers`)
+      } catch (e) {
+        console.error(`[resolve] realdebrid error: ${(e as Error).message}`)
+      }
+    }
 
     // Iteramos fuentes: si la ganadora resulta ser un señuelo (segmentos = imágenes),
     // la descartamos y seguimos con la siguiente. Acotado por TIEMPO (no por nº de

@@ -13991,7 +13991,7 @@ var require_types2 = __commonJS({
         bandwidth,
         // required
         averageBandwidth,
-        score,
+        score: score2,
         codecs,
         // required?
         resolution,
@@ -14012,7 +14012,7 @@ var require_types2 = __commonJS({
         this.isIFrameOnly = isIFrameOnly;
         this.bandwidth = bandwidth;
         this.averageBandwidth = averageBandwidth;
-        this.score = score;
+        this.score = score2;
         this.codecs = codecs;
         this.resolution = resolution;
         this.frameRate = frameRate;
@@ -31043,10 +31043,10 @@ function SelectUnion(union, references, value) {
   const schemas = union.anyOf.map((schema) => Deref(schema, references));
   let [select2, best] = [schemas[0], 0];
   for (const schema of schemas) {
-    const score = ScoreUnion(schema, references, value);
-    if (score > best) {
+    const score2 = ScoreUnion(schema, references, value);
+    if (score2 > best) {
       select2 = schema;
-      best = score;
+      best = score2;
     }
   }
   return select2;
@@ -42409,6 +42409,8 @@ var tmdbService = {
     include_video_language: "es,en"
   }),
   tvSeason: (id, season) => tmdb(`/tv/${id}/season/${season}`),
+  // IMDb id — lo necesita Torrentio (indexa por imdb, no por tmdb)
+  externalIds: (type, id) => tmdb(`/${type}/${id}/external_ids`),
   // Logos (PNG transparente) del título, en varios idiomas
   images: (type, id) => tmdb(`/${type}/${id}/images`, { include_image_language: "es,en,null" }),
   // Persona (actor/director) + su filmografía
@@ -56902,8 +56904,8 @@ function search(text3, pattern, patternAlphabet, { location = Config.location, d
   const matchMask = computeMatches ? Array(textLen) : [];
   let index2;
   while ((index2 = text3.indexOf(pattern, bestLocation)) > -1) {
-    const score = calcScore(0, index2);
-    currentThreshold = Math.min(score, currentThreshold);
+    const score2 = calcScore(0, index2);
+    currentThreshold = Math.min(score2, currentThreshold);
     bestLocation = index2 + patternLen;
     if (computeMatches) {
       let i = 0;
@@ -57059,7 +57061,7 @@ var BitapSearch = class {
     let totalScore = 0;
     let hasMatches = false;
     this.chunks.forEach(({ pattern, alphabet, startIndex }) => {
-      const { isMatch, score, indices } = search(text3, pattern, alphabet, {
+      const { isMatch, score: score2, indices } = search(text3, pattern, alphabet, {
         location: location + startIndex,
         distance,
         threshold,
@@ -57069,7 +57071,7 @@ var BitapSearch = class {
         ignoreLocation
       });
       if (isMatch) hasMatches = true;
-      totalScore += score;
+      totalScore += score2;
       if (isMatch && indices) allIndices.push(...indices);
     });
     const result = {
@@ -57344,10 +57346,10 @@ var ExtendedSearch = class {
       hasInverse = false;
       for (let j = 0, pLen = searchers.length; j < pLen; j += 1) {
         const matcher = searchers[j];
-        const { isMatch, indices, score } = matcher.search(text3);
+        const { isMatch, indices, score: score2 } = matcher.search(text3);
         if (isMatch) {
           numMatches += 1;
-          totalScore += score;
+          totalScore += score2;
           if (isInverse(matcher.type)) hasInverse = true;
           if (includeMatches) if (MULTI_MATCH_TYPES.has(matcher.type)) allIndices.push(...indices);
           else allIndices.push(indices);
@@ -57439,9 +57441,9 @@ function parse9(query, options, { auto = true } = {}) {
 }
 function computeScoreSingle(matches, { ignoreFieldNorm = Config.ignoreFieldNorm }) {
   let totalScore = 1;
-  matches.forEach(({ key: key2, norm: norm2, score }) => {
+  matches.forEach(({ key: key2, norm: norm2, score: score2 }) => {
     const weight = key2 ? key2.weight : null;
-    totalScore *= Math.pow(score === 0 && weight ? Number.EPSILON : score, (weight || 1) * (ignoreFieldNorm ? 1 : norm2));
+    totalScore *= Math.pow(score2 === 0 && weight ? Number.EPSILON : score2, (weight || 1) * (ignoreFieldNorm ? 1 : norm2));
   });
   return totalScore;
 }
@@ -57458,8 +57460,8 @@ var MaxHeap = class {
   get size() {
     return this.heap.length;
   }
-  shouldInsert(score) {
-    return this.size < this.limit || score < this.heap[0].score;
+  shouldInsert(score2) {
+    return this.size < this.limit || score2 < this.heap[0].score;
   }
   insert(item) {
     if (this.size < this.limit) {
@@ -63394,11 +63396,11 @@ async function getAnilistIdFromMedia(ctx, media) {
     const exact = normTitles.includes(targetTitle);
     const partial = normTitles.some((t2) => t2.includes(targetTitle) || targetTitle.includes(t2));
     const yearDelta = it.seasonYear ? Math.abs(it.seasonYear - media.releaseYear) : 5;
-    let score = 0;
-    if (exact) score += 100;
-    else if (partial) score += 50;
-    score += Math.max(0, 20 - yearDelta * 4);
-    return { it, score };
+    let score2 = 0;
+    if (exact) score2 += 100;
+    else if (partial) score2 += 50;
+    score2 += Math.max(0, 20 - yearDelta * 4);
+    return { it, score: score2 };
   }).sort((a, b) => b.score - a.score);
   const winner = ((_c = scored[0]) == null ? void 0 : _c.it) ?? items[0];
   const anilistId = winner == null ? void 0 : winner.id;
@@ -63837,13 +63839,13 @@ function normalizeQuality(resolution) {
   return "unknown";
 }
 function scoreStream(stream) {
-  let score = 0;
-  if (stream.container === "mp4") score += 10;
-  if (stream.audio === "aac") score += 5;
-  if (stream.codec === "h265") score += 2;
-  if (stream.container === "mkv") score -= 2;
-  if (stream.complete) score += 1;
-  return score;
+  let score2 = 0;
+  if (stream.container === "mp4") score2 += 10;
+  if (stream.audio === "aac") score2 += 5;
+  if (stream.codec === "h265") score2 += 2;
+  if (stream.container === "mkv") score2 -= 2;
+  if (stream.complete) score2 += 1;
+  return score2;
 }
 async function comboScraper$h(ctx) {
   const apiKey = getDebridToken();
@@ -66500,19 +66502,149 @@ function ensureBandwidth(streamInf) {
   return streamInf.replace(/^(#EXT-X-STREAM-INF:)/, `$1BANDWIDTH=${bw},`);
 }
 
+// src/resolver/torrentio.ts
+var PROXY_URL = process.env.STREAM_PROXY_URL;
+var DEBRID_KEY = process.env.DEBRID_KEY;
+var TORRENTIO_BASE = "https://torrentio.strem.fun";
+var FETCH_TIMEOUT = 12e3;
+async function safeFetch(url, init = {}) {
+  try {
+    const r = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    if (r.ok) return r;
+  } catch {
+  }
+  if (!PROXY_URL) return null;
+  try {
+    const proxied = `${PROXY_URL}?destination=${encodeURIComponent(url)}`;
+    const r = await fetch(proxied, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    return r.ok ? r : null;
+  } catch {
+    return null;
+  }
+}
+async function imdbIdOf(type, tmdbId) {
+  try {
+    const d = await tmdbService.externalIds(type, tmdbId);
+    return d?.imdb_id ?? null;
+  } catch {
+    return null;
+  }
+}
+function buildStreamUrl(imdbId, type, season, episode) {
+  const config = DEBRID_KEY ? `realdebrid=${DEBRID_KEY}/` : "";
+  const kind = type === "tv" ? "series" : "movie";
+  const id = type === "tv" ? `${imdbId}:${season ?? 1}:${episode ?? 1}` : imdbId;
+  return `${TORRENTIO_BASE}/${config}stream/${kind}/${id}.json`;
+}
+async function fetchStreams(imdbId, type, season, episode) {
+  const url = buildStreamUrl(imdbId, type, season, episode);
+  const r = await safeFetch(url);
+  if (!r) return [];
+  try {
+    const data2 = await r.json();
+    return data2.streams ?? [];
+  } catch {
+    return [];
+  }
+}
+function fileText(s) {
+  return `${s.title ?? ""} ${s.behaviorHints?.filename ?? ""}`;
+}
+function isMp4(s) {
+  return (s.behaviorHints?.filename ?? "").toLowerCase().endsWith(".mp4");
+}
+function score(s) {
+  const text3 = fileText(s);
+  let pts = 0;
+  if (/2160p|4k/i.test(text3)) pts += 40;
+  else if (/1080p/i.test(text3)) pts += 30;
+  else if (/720p/i.test(text3)) pts += 20;
+  else pts += 5;
+  if (/hdr|dolby.?vision|\bdv\b/i.test(text3)) pts += 5;
+  const sizeMatch = text3.match(/💾\s*([\d.]+)\s*GB/i);
+  const sizeGB = sizeMatch ? parseFloat(sizeMatch[1]) : null;
+  if (sizeGB != null) {
+    if (sizeGB > 25) pts -= 20;
+    else if (sizeGB > 12) pts -= 6;
+  }
+  if (/remux/i.test(text3)) pts -= 10;
+  return pts;
+}
+function hasLatinoAudio(s) {
+  return /latino|castellano/i.test(fileText(s));
+}
+function rankCandidates(streams, lang) {
+  const playable = streams.filter((s) => s.url && isMp4(s));
+  const ranked = playable.map((s) => ({
+    stream: s,
+    resolveUrl: s.url,
+    label: s.behaviorHints?.filename ?? s.title ?? "stream",
+    latino: hasLatinoAudio(s),
+    sc: score(s)
+  })).sort((a, b) => {
+    if (lang === "latino" && a.latino !== b.latino) return a.latino ? -1 : 1;
+    return b.sc - a.sc;
+  });
+  return ranked.map(({ stream, resolveUrl: resolveUrl2, label, latino }) => ({ stream, resolveUrl: resolveUrl2, label, latino }));
+}
+async function followResolveUrl(url) {
+  try {
+    const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(2e4) });
+    const loc = r.headers.get("location");
+    if (loc) return loc;
+  } catch {
+  }
+  try {
+    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(2e4) });
+    if (r.ok && r.url && r.url !== url) return r.url;
+  } catch {
+  }
+  return null;
+}
+var debridEnabled = !!DEBRID_KEY;
+var MAX_TRIES = 4;
+async function resolveDebridStream(type, tmdbId, lang, season, episode) {
+  if (!DEBRID_KEY) return null;
+  const imdbId = await imdbIdOf(type, tmdbId);
+  if (!imdbId) return null;
+  const streams = await fetchStreams(imdbId, type, season, episode);
+  const candidates = rankCandidates(streams, lang);
+  if (!candidates.length) return null;
+  for (const c of candidates.slice(0, MAX_TRIES)) {
+    const finalUrl = await followResolveUrl(c.resolveUrl);
+    if (finalUrl) {
+      return { url: finalUrl, label: c.label, language: c.latino ? "Espa\xF1ol Latino" : "Original" };
+    }
+  }
+  return null;
+}
+async function debugTorrentio(type, tmdbId, season, episode) {
+  const imdbId = await imdbIdOf(type, tmdbId);
+  if (!imdbId) return { error: "no se pudo obtener imdb_id", debridEnabled };
+  const streams = await fetchStreams(imdbId, type, season, episode);
+  const mp4 = streams.filter(isMp4);
+  return {
+    imdbId,
+    debridEnabled,
+    totalStreams: streams.length,
+    mp4Count: mp4.length,
+    top: rankCandidates(streams, "original").slice(0, 8).map((c) => ({ label: c.label, latino: c.latino }))
+  };
+}
+
 // src/resolver/resolver.service.ts
 var STREAM_TTL = 30 * 60 * 1e3;
-var PROXY_URL = process.env.STREAM_PROXY_URL;
+var PROXY_URL2 = process.env.STREAM_PROXY_URL;
 var CACHE_FILE = process.env.VERCEL ? "/tmp/bmo-streams.json" : ".cache/streams.json";
 var cache3 = new TTLCache(STREAM_TTL, CACHE_FILE);
-var FETCH_TIMEOUT = 8e3;
-var safeFetch = ((url, init = {}) => {
+var FETCH_TIMEOUT2 = 8e3;
+var safeFetch2 = ((url, init = {}) => {
   const { signal: _foreign, ...rest } = init ?? {};
-  return fetch(url, { ...rest, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+  return fetch(url, { ...rest, signal: AbortSignal.timeout(FETCH_TIMEOUT2) });
 });
 var providers2 = makeProviders({
-  fetcher: makeStandardFetcher(safeFetch),
-  proxiedFetcher: PROXY_URL ? makeSimpleProxyFetcher(PROXY_URL, safeFetch) : void 0,
+  fetcher: makeStandardFetcher(safeFetch2),
+  proxiedFetcher: PROXY_URL2 ? makeSimpleProxyFetcher(PROXY_URL2, safeFetch2) : void 0,
   target: targets.NATIVE,
   consistentIpForRequests: true
 });
@@ -66640,9 +66772,9 @@ async function fetchHead(url, referer2) {
   };
   const direct = await tryFetch(url, referer2 ? { Referer: referer2 } : {});
   if (direct) return direct;
-  if (!PROXY_URL) return null;
+  if (!PROXY_URL2) return null;
   const proxyH = referer2 ? { "x-referer": referer2 } : {};
-  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH);
+  return tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(url)}`, proxyH);
 }
 async function fetchText(url, referer2) {
   const tryFetch = async (u, h) => {
@@ -66655,9 +66787,9 @@ async function fetchText(url, referer2) {
   };
   const direct = await tryFetch(url, referer2 ? { Referer: referer2 } : {});
   if (direct) return direct;
-  if (!PROXY_URL) return null;
+  if (!PROXY_URL2) return null;
   const proxyH = referer2 ? { "x-referer": referer2 } : {};
-  return tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH);
+  return tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(url)}`, proxyH);
 }
 function firstUri(playlist) {
   for (const line of playlist.split("\n")) {
@@ -66715,6 +66847,26 @@ async function scrape2(type, tmdbId, lang, season, episode, exclude = []) {
   const t0 = Date.now();
   try {
     const subsP = fetchSubtitles(type, tmdbId, season, episode);
+    if (debridEnabled && !exclude.includes("realdebrid")) {
+      try {
+        const debrid = await resolveDebridStream(type, tmdbId, lang, season, episode);
+        if (debrid) {
+          const result2 = {
+            url: debrid.url,
+            type: "file",
+            captions: await subsP,
+            headers: {},
+            source: "realdebrid",
+            language: debrid.language
+          };
+          console.error(`[resolve] OK via realdebrid (${debrid.label}) en ${Date.now() - t0}ms`);
+          return result2;
+        }
+        console.error(`[resolve] realdebrid sin resultado (${Date.now() - t0}ms), cae a scrapers`);
+      } catch (e) {
+        console.error(`[resolve] realdebrid error: ${e.message}`);
+      }
+    }
     const SCRAPE_BUDGET_MS = 22e3;
     const deadline = t0 + SCRAPE_BUDGET_MS;
     const blocked = new Set(exclude);
@@ -66823,7 +66975,7 @@ async function debugScrape(type, tmdbId, season, episode) {
     ok: !!found,
     ms: Date.now() - t0,
     media,
-    proxy: PROXY_URL ? "configured" : "none",
+    proxy: PROXY_URL2 ? "configured" : "none",
     totalSources: sourceIds.length,
     sourceIds,
     found,
@@ -66901,6 +67053,14 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
   ({ params }) => debugSubs("tv", Number(params.id), Number(params.season), Number(params.episode)),
   { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
 ).get(
+  "/debug/debrid/movie/:id",
+  ({ params }) => debugTorrentio("movie", Number(params.id)),
+  { params: t.Object({ id: t.String() }) }
+).get(
+  "/debug/debrid/tv/:id/:season/:episode",
+  ({ params }) => debugTorrentio("tv", Number(params.id), Number(params.season), Number(params.episode)),
+  { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+).get(
   "/movie/:id",
   async ({ params, query, set }) => {
     const lang = parseLang(query.lang);
@@ -66950,7 +67110,7 @@ var resolverRoutes = new Elysia({ prefix: "/resolve" }).get("/health", async () 
 
 // src/resolver/stream.routes.ts
 var HLS_MIME = "application/vnd.apple.mpegurl";
-var PROXY_URL2 = process.env.STREAM_PROXY_URL;
+var PROXY_URL3 = process.env.STREAM_PROXY_URL;
 function normalizeVtt(raw) {
   const trimmed = raw.trimStart();
   if (!trimmed.startsWith("WEBVTT")) return `WEBVTT
@@ -67005,10 +67165,10 @@ async function fetchM3u8(url, headers2) {
   };
   const direct = await tryFetch(url, headers2);
   if (direct) return direct;
-  if (!PROXY_URL2) return null;
+  if (!PROXY_URL3) return null;
   const referer2 = headers2.Referer ?? headers2.referer ?? "";
   const proxyH = referer2 ? { "x-referer": referer2 } : {};
-  const result = await tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(url)}`, proxyH);
+  const result = await tryFetch(`${PROXY_URL3}?destination=${encodeURIComponent(url)}`, proxyH);
   if (!result) console.error(`[m3u8] fetch failed (direct+proxy) ${url.slice(-60)}`);
   return result;
 }
@@ -67196,9 +67356,9 @@ ${varUrl}
       }
     };
     let key2 = await tryFetch(keyUrl, headers2);
-    if (!key2 && PROXY_URL2) {
+    if (!key2 && PROXY_URL3) {
       const proxyH = referer2 ? { "x-referer": referer2 } : {};
-      key2 = await tryFetch(`${PROXY_URL2}?destination=${encodeURIComponent(keyUrl)}`, proxyH);
+      key2 = await tryFetch(`${PROXY_URL3}?destination=${encodeURIComponent(keyUrl)}`, proxyH);
     }
     if (!key2) {
       console.error(`[key] no se pudo obtener: ${keyUrl.slice(-60)}`);
