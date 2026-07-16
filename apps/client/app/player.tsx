@@ -5,6 +5,7 @@ import {
   Animated, Pressable, ScrollView,
 } from 'react-native'
 import { Image } from 'expo-image'
+import * as FileSystem from 'expo-file-system'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
@@ -152,15 +153,50 @@ export default function PlayerScreen() {
   const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
 
   // Subtítulos para VLCKit: las fuentes "file" no traen subs embebidos casi
-  // nunca, así que los buscamos aparte (Wyzie, vía /stream/sub.vtt) y los
-  // sideloadeamos. Solo el español — el resto (en/pt) no aporta acá.
-  const vlcTextTracks = subtitles
-    .filter((s) => s.lang === 'es')
-    .map((s) => ({
-      uri: stream.subVtt(isTv ? 'tv' : 'movie', id, s.i, seasonN, episodeN, audioLang),
-      language: s.lang,
-      title: s.label,
-    }))
+  // nunca, así que los buscamos aparte (Wyzie) y los sideloadeamos. Solo el
+  // español — el resto (en/pt) no aporta acá.
+  // Los bajamos ACÁ, desde el teléfono, en vez de vía nuestro servidor:
+  // dl.opensubtitles.org bloquea por Cloudflare las IPs de datacenter (Vercel
+  // y también nuestro proxy CF Worker, probado) pero no la del propio
+  // teléfono. Se cachean en disco para no re-descargar en cada apertura.
+  const [vlcTextTracks, setVlcTextTracks] = useState<{ uri: string; language: string; title: string }[]>([])
+  useEffect(() => {
+    if (!isVlcSource) { setVlcTextTracks([]); return }
+    let cancelled = false
+    const esSubs = subtitles.filter((s) => s.lang === 'es')
+    if (!esSubs.length) { setVlcTextTracks([]); return }
+
+    async function loadSpanishSubs() {
+      const dir = `${FileSystem.cacheDirectory}subs/`
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
+      const results: { uri: string; language: string; title: string }[] = []
+      for (const s of esSubs) {
+        const localPath = `${dir}${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}-${s.i}.srt`
+        const cached = await FileSystem.getInfoAsync(localPath)
+        if (cached.exists) {
+          results.push({ uri: localPath, language: s.lang, title: s.label })
+          continue
+        }
+        for (const url of [s.url, ...s.altUrls]) {
+          try {
+            const dl = await FileSystem.downloadAsync(url, localPath)
+            if (dl.status !== 200) continue
+            const text = await FileSystem.readAsStringAsync(localPath)
+            // Un srt real nunca empieza con HTML — una página de bloqueo/challenge sí.
+            if (/^\s*<(!doctype|html)/i.test(text)) {
+              await FileSystem.deleteAsync(localPath, { idempotent: true })
+              continue
+            }
+            results.push({ uri: localPath, language: s.lang, title: s.label })
+            break
+          } catch {}
+        }
+      }
+      if (!cancelled) setVlcTextTracks(results)
+    }
+    loadSpanishSubs()
+    return () => { cancelled = true }
+  }, [isVlcSource, subtitles, type, id, seasonN, episodeN])
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {

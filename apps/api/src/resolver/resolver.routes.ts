@@ -32,9 +32,12 @@ function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
   // Prefiere el referer embebido en el CDN URL (más preciso) sobre el del embed page
   const cdnReferer = extractCdnReferer(result.url)
   // Subtítulos con su código ISO (para react-native-video textTracks). El cliente
-  // construye la URL /stream/sub.vtt usando el índice (mismo orden que result.captions).
+  // construye la URL /stream/sub.vtt usando el índice (mismo orden que result.captions)
+  // como fallback, pero para fuentes VLC (mp4/mkv) prefiere bajar directo desde
+  // `url`/`altUrls` — dl.opensubtitles.org bloquea las IPs de Vercel (datacenter)
+  // por Cloudflare, pero no bloquea la IP del propio teléfono.
   const subtitles = result.captions
-    .map((c, i) => ({ i, label: c.language, lang: langCode(c.language) }))
+    .map((c, i) => ({ i, label: c.language, lang: langCode(c.language), url: c.url, altUrls: c.altUrls ?? [] }))
     .filter((s) => s.lang !== 'und')   // solo idiomas reconocidos
   return {
     streamUrl: result.url,
