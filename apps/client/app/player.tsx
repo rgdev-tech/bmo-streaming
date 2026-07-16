@@ -508,6 +508,8 @@ function VlcPlayer({
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const seeking = useRef(false)
   const seekGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSeekTarget = useRef<number | null>(null)
+  const seekGuardUntil = useRef(0)
 
   // Zoom con pellizco: escala el video para recortar las bandas negras.
   // Sin reanimated en este proyecto — se arma con Animated (RN) clásico.
@@ -583,12 +585,30 @@ function VlcPlayer({
     setSelectedTextTrack(selText ? selText.id : -1)
     if (!startedRef.current) {
       startedRef.current = true
-      if (startAt > 5) vlcRef.current?.seek(startAt)
+      if (startAt > 5) {
+        vlcRef.current?.seek(startAt)
+        lastSeekTarget.current = startAt
+        seekGuardUntil.current = Date.now() + 5000
+      }
     }
   }
 
   function handleProgress(data: OnProgressData) {
     if (seeking.current) return
+
+    // Después de un jumpForward/jumpBackward nativo, VLC a veces reporta un
+    // par de progress events con el tiempo "confundido" (cerca de 0) aunque
+    // el video YA esté reproduciendo desde el punto correcto — confirmado
+    // viendo el contenido real del video en un screen recording: la imagen
+    // seguía en el punto saltado mientras el contador ya decía otra cosa.
+    // Filtramos esos reportes implausibles hasta ver uno que tenga sentido.
+    if (lastSeekTarget.current != null) {
+      if (Date.now() < seekGuardUntil.current && data.currentTime < lastSeekTarget.current - 8) {
+        return
+      }
+      lastSeekTarget.current = null
+    }
+
     progressRef.current = { time: data.currentTime, duration: data.seekableDuration }
     setPosition(data.currentTime)
     if (data.seekableDuration > 0) setDuration(data.seekableDuration)
@@ -618,9 +638,12 @@ function VlcPlayer({
 
   function seekTo(time: number) {
     const clamped = Math.max(0, duration > 0 ? Math.min(duration, time) : time)
-    vlcRef.current?.seek(clamped)
+    if (!vlcRef.current) return
+    vlcRef.current.seek(clamped)
     progressRef.current = { ...progressRef.current, time: clamped }
     setPosition(clamped)
+    lastSeekTarget.current = clamped
+    seekGuardUntil.current = Date.now() + 5000
     // El seek nativo no es instantáneo — si soltamos seeking.current acá mismo,
     // un onProgress "viejo" (todavía de la posición anterior) que llegue antes
     // de que el salto termine pisa la posición recién puesta y la barra "no
@@ -638,8 +661,12 @@ function VlcPlayer({
   const showPill = hasNext && duration > 0 && remaining > 1 && remaining <= NEXT_PILL_S
 
   return (
-    <PinchGestureHandler onGestureEvent={onPinchGestureEvent} onHandlerStateChange={onPinchStateChange}>
-      <View style={styles.fill}>
+    <View style={styles.fill}>
+      {/* El pinch-to-zoom envuelve SOLO el video — si envuelve toda la
+          pantalla (controles incluidos), el gesture handler intercepta los
+          toques de un dedo antes de que lleguen a los botones (confirmado
+          con logs: el comando de seek nativo nunca se llegaba a disparar). */}
+      <PinchGestureHandler onGestureEvent={onPinchGestureEvent} onHandlerStateChange={onPinchStateChange}>
         <View style={[styles.fill, styles.vlcZoomClip]}>
           <Animated.View style={[styles.fill, { transform: [{ scale: zoomScale }] }]}>
             <VideoVLC
@@ -659,8 +686,9 @@ function VlcPlayer({
             />
           </Animated.View>
         </View>
+      </PinchGestureHandler>
 
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
+      <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
 
       {buffering && (
         <View style={[StyleSheet.absoluteFillObject, styles.vlcBufferCenter]} pointerEvents="none">
@@ -785,8 +813,7 @@ function VlcPlayer({
           </View>
         </View>
       )}
-      </View>
-    </PinchGestureHandler>
+    </View>
   )
 }
 

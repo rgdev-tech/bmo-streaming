@@ -10,6 +10,7 @@
 #import <MobileVLCKit/MobileVLCKit.h>
 #import <cstdlib>
 #import <cstring>
+#import <cmath>
 
 using namespace facebook::react;
 
@@ -267,10 +268,28 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
 
 #pragma mark - Commands
 
+// Fabric no invoca -seek: automáticamente solo porque existe el protocolo —
+// necesita que este view override -handleCommand:args: y reenvíe al helper
+// generado por el codegen. Sin esto, el comando "seek" se pierde en silencio:
+// el dispatch desde JS no tira error (no tiene forma de saber que nadie lo
+// atendió del lado nativo), simplemente no pasa nada.
+- (void)handleCommand:(const NSString *)commandName args:(const NSArray *)args
+{
+    RCTVideoVLCViewHandleCommand(self, commandName, args);
+}
+
 - (void)seek:(float)time
 {
     if (!_player) return;
-    _player.time = [VLCTime timeWithInt:(int)(time * 1000.0f)];
+    // jumpForward:/jumpBackward: no necesitan target absoluto ni duración,
+    // solo un delta desde la posición actual — se lo calculamos.
+    float currentSec = _player.time.intValue / 1000.0f;
+    int delta = (int)lroundf(time - currentSec);
+    if (delta > 0) {
+        [_player jumpForward:delta];
+    } else if (delta < 0) {
+        [_player jumpBackward:-delta];
+    }
 }
 
 #pragma mark - VLCMediaPlayerDelegate
