@@ -29,31 +29,6 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
     return [value isKindOfClass:[NSNumber class]] ? [(NSNumber *)value intValue] : -1;
 }
 
-// addPlaybackSlave no registra la pista al toque — VLC todavía tiene que bajar
-// (si es remota) y parsear el archivo, y ese tiempo varía según qué tan ocupado
-// esté el player arrancando el video principal. Un delay fijo podía no alcanzar,
-// dejando el picker de JS sin la pista nueva aunque VLC ya la tuviera cargada
-// por dentro. En vez de adivinar, reintenta cada 350ms hasta ver que el conteo
-// de subtítulos subió (o hasta un máximo de intentos, por si el archivo de
-// verdad no trae ninguna pista más).
-static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPlayer *player, NSInteger previousCount, NSInteger attemptsLeft, void (^emitBlock)(void)) {
-    if (attemptsLeft <= 0) {
-        emitBlock();
-        return;
-    }
-    __weak VideoVLCView *weakView = view;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        VideoVLCView *strongView = weakView;
-        if (!strongView) return;
-        NSInteger currentCount = (NSInteger)player.videoSubTitlesIndexes.count;
-        if (currentCount > previousCount) {
-            emitBlock();
-        } else {
-            VideoVLCPollForSubtitleTrackIncrease(strongView, player, previousCount, attemptsLeft - 1, emitBlock);
-        }
-    });
-}
-
 @interface VideoVLCView () <RCTVideoVLCViewViewProtocol, VLCMediaPlayerDelegate>
 @end
 
@@ -61,9 +36,9 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     UIView *_view;
     VLCMediaPlayer *_player;
     NSString *_currentUri;
-    NSArray<NSDictionary *> *_pendingTextTracks;
     BOOL _hasEmittedLoad;
     BOOL _isBuffering;
+    BOOL _hasSideloadedSubs;   // el source trajo subtítulo sideloadeado (:sub-file)
     BOOL _repeat;
     NSString *_resizeMode;
     float _progressUpdateIntervalMs;
@@ -71,9 +46,15 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     char *_aspectRatioBuf;
     char *_cropGeometryBuf;
     // >= 0 mientras loadSource: está corriendo por un cambio de estilo de
-    // subtítulo en caliente (no por una fuente nueva) — le dice que arranque
-    // desde acá en vez de props.src.startPosition. Se resetea a -1 al usarse.
+    // subtítulo (no por una fuente nueva) — le dice que arranque desde acá en
+    // vez de props.src.startPosition. Se resetea a -1 al usarse.
     double _liveReloadStartTime;
+    // Estilo con el que se construyó el _player actual. Las opciones freetype de
+    // libvlc son de INSTANCIA (no por-media), así que cambiar el estilo obliga a
+    // recrear el player — comparamos contra estos para saber cuándo.
+    float _builtFontScale;
+    int _builtColor;
+    int _builtBgOpacity;
 }
 
 + (ComponentDescriptorProvider)componentDescriptorProvider
@@ -92,30 +73,67 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         _view.backgroundColor = [UIColor blackColor];
         self.contentView = _view;
 
-        _player = [[VLCMediaPlayer alloc] init];
-        _player.drawable = _view;
-        _player.delegate = self;
-
-        // Además del delegate, nos suscribimos directo a las notificaciones —
-        // VLCKit expone estos nombres públicamente para esto. Es redundante con
-        // el delegate si ese camino funciona, pero si por lo que sea no llega
-        // (build/versión/timing), esto asegura que igual nos enteremos. Los
-        // handlers son idempotentes (guardados por _hasEmittedLoad/_isBuffering)
-        // así que llamadas duplicadas no rompen nada.
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                  selector:@selector(mediaPlayerStateChanged:)
-                                                      name:VLCMediaPlayerStateChanged
-                                                    object:_player];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                  selector:@selector(mediaPlayerTimeChanged:)
-                                                      name:VLCMediaPlayerTimeChanged
-                                                    object:_player];
+        // Player con estilo por defecto (sin opciones). El primer updateProps
+        // con el estilo real lo reconstruye si difiere — ver el bloque
+        // styleChanged en -updateProps:oldProps:.
+        [self buildPlayerWithFontScale:0 color:0 bgOpacity:0];
 
         _progressUpdateIntervalMs = 250;
         _resizeMode = @"contain";
     }
 
     return self;
+}
+
+// (Re)crea el VLCMediaPlayer con las opciones de subtítulo a nivel de INSTANCIA.
+// Las opciones freetype de libvlc (color/fondo/escala del texto) las lee el
+// módulo de render al inicializarse — no son por-media, por eso hay que
+// pasarlas acá y no en el VLCMedia. Cambiar el estilo obliga a recrear el
+// player (ver el bloque styleChanged en -updateProps:oldProps:).
+- (void)buildPlayerWithFontScale:(float)fontScale color:(int)color bgOpacity:(int)bgOpacity
+{
+    // Tirar abajo el player anterior si existía (cambio de estilo en caliente).
+    if (_player) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self];
+        _player.delegate = nil;
+        [_player stop];
+    }
+
+    NSMutableArray<NSString *> *opts = [NSMutableArray array];
+    if (fontScale > 0) {
+        int scalePct = (int)lround(fontScale * 100.0); // 100 = normal
+        [opts addObject:[NSString stringWithFormat:@"--sub-text-scale=%d", scalePct]];
+    }
+    if (color > 0) {
+        [opts addObject:[NSString stringWithFormat:@"--freetype-color=%d", color]];
+    }
+    if (bgOpacity > 0) {
+        [opts addObject:[NSString stringWithFormat:@"--freetype-background-opacity=%d", bgOpacity]];
+        [opts addObject:@"--freetype-background-color=0"]; // negro
+    }
+
+    _player = opts.count > 0
+        ? [[VLCMediaPlayer alloc] initWithOptions:opts]
+        : [[VLCMediaPlayer alloc] init];
+    _player.drawable = _view;
+    _player.delegate = self;
+
+    // Además del delegate, nos suscribimos directo a las notificaciones —
+    // VLCKit expone estos nombres públicamente. Redundante con el delegate si
+    // ese camino funciona, pero si por build/versión/timing no llega, esto
+    // asegura que igual nos enteremos. Los handlers son idempotentes.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                              selector:@selector(mediaPlayerStateChanged:)
+                                                  name:VLCMediaPlayerStateChanged
+                                                object:_player];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                              selector:@selector(mediaPlayerTimeChanged:)
+                                                  name:VLCMediaPlayerTimeChanged
+                                                object:_player];
+
+    _builtFontScale = fontScale;
+    _builtColor = color;
+    _builtBgOpacity = bgOpacity;
 }
 
 - (void)dealloc
@@ -132,9 +150,9 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     [super prepareForRecycle];
     [_player stop];
     _currentUri = nil;
-    _pendingTextTracks = nil;
     _hasEmittedLoad = NO;
     _isBuffering = NO;
+    _hasSideloadedSubs = NO;
 
     static const auto defaultProps = std::make_shared<const VideoVLCViewProps>();
     _props = defaultProps;
@@ -155,56 +173,25 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
 
     BOOL srcChanged = oldViewProps.src.uri != newViewProps.src.uri;
 
-    if (srcChanged) {
-        [self loadSource:newViewProps];
-    } else if (oldViewProps.src.textTracks.size() != newViewProps.src.textTracks.size()) {
-        // El track de subtítulo (bajado en JS, ver prewarmTitle/player.tsx) puede
-        // llegar en dos momentos distintos según qué tan grande/lento sea el
-        // archivo de video:
-        if (_hasEmittedLoad) {
-            // Ya arrancó a reproducir → agregarlo YA, forzado (enforce:YES) para
-            // que quede seleccionado — si no, se suma a la lista pero sigue
-            // activo lo que ya había (embebido del archivo, o ninguno) y el
-            // usuario nunca lo ve sin entrar manualmente al picker.
-            NSInteger previousCount = (NSInteger)_player.videoSubTitlesIndexes.count;
-            for (const auto &t : newViewProps.src.textTracks) {
-                NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
-                NSURL *url = uri.length > 0 ? [NSURL URLWithString:uri] : nil;
-                if (url) {
-                    [_player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
-                }
-            }
-            __weak VideoVLCView *weakSelf = self;
-            VLCMediaPlayer *player = _player;
-            VideoVLCPollForSubtitleTrackIncrease(self, player, previousCount, 12, ^{
-                [weakSelf emitLoad];
-            });
-        } else {
-            // Todavía no arrancó (archivos grandes tardan en bufferear) — si acá
-            // se ignorara el track porque _hasEmittedLoad es NO, se perdería para
-            // siempre: nada lo vuelve a pedir después. En vez de eso, lo dejamos
-            // en _pendingTextTracks (mismo mecanismo que loadSource:) para que
-            // applyPendingTextTracks lo agregue apenas el video sí arranque.
-            NSMutableArray<NSDictionary *> *pending = [NSMutableArray array];
-            for (const auto &t : newViewProps.src.textTracks) {
-                NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
-                if (uri.length > 0) {
-                    [pending addObject:@{@"uri": uri}];
-                }
-            }
-            _pendingTextTracks = pending;
+    // Estilo de subtítulos: como son opciones de INSTANCIA, cambiar cualquiera
+    // implica recrear el player. Se hace ANTES del load para que la fuente entre
+    // ya con el estilo correcto. Si había video andando, se recarga en posición.
+    float wantScale = newViewProps.subtitleFontScale;
+    int wantColor = (int)newViewProps.subtitleColor;
+    int wantBg = (int)newViewProps.subtitleBackgroundOpacity;
+    BOOL styleChanged = wantScale != _builtFontScale || wantColor != _builtColor || wantBg != _builtBgOpacity;
+    if (styleChanged) {
+        double resumeAt = _currentUri.length > 0 ? (_player.time.intValue / 1000.0) : -1;
+        [self buildPlayerWithFontScale:wantScale color:wantColor bgOpacity:wantBg];
+        // Si ya había una fuente cargada y NO es que justo cambió también la uri,
+        // recargarla en el nuevo player desde donde íbamos.
+        if (_currentUri.length > 0 && !srcChanged) {
+            _liveReloadStartTime = resumeAt;
+            [self loadSource:newViewProps];
         }
     }
 
-    // Estilo de subtítulos cambiado mientras ya había video cargado: libvlc no
-    // permite tocar el renderer de texto en caliente, así que recreamos el
-    // VLCMedia entero (mismo mecanismo que loadSource: usa siempre) arrancando
-    // desde el punto donde íbamos, en vez de perder la posición.
-    if (!srcChanged && _currentUri.length > 0 &&
-        (oldViewProps.subtitleFontScale != newViewProps.subtitleFontScale ||
-         oldViewProps.subtitleColor != newViewProps.subtitleColor ||
-         oldViewProps.subtitleBackgroundOpacity != newViewProps.subtitleBackgroundOpacity)) {
-        _liveReloadStartTime = _player.time.intValue / 1000.0;
+    if (srcChanged) {
         [self loadSource:newViewProps];
     }
 
@@ -224,11 +211,18 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         _player.audio.volume = newViewProps.volume > 0 ? newViewProps.volume : 100;
     }
 
-    if (oldViewProps.selectedAudioTrack != newViewProps.selectedAudioTrack) {
+    // Antes de _hasEmittedLoad, selectedAudioTrack/selectedTextTrack en JS son
+    // solo el placeholder inicial (-1, "todavía no sé") — no una elección real
+    // del usuario. Si se aplicaran acá, el primer updateProps (con la fuente
+    // recién cargada, -sub-file ya auto-seleccionado) pisaría esa selección con
+    // -1 y el subtítulo/audio recién cargado se perdería sin que nadie lo haya
+    // pedido. Los picks reales del usuario siempre llegan después del primer
+    // load, así que este guard no bloquea ningún caso de uso real.
+    if (_hasEmittedLoad && oldViewProps.selectedAudioTrack != newViewProps.selectedAudioTrack) {
         _player.currentAudioTrackIndex = newViewProps.selectedAudioTrack;
     }
 
-    if (oldViewProps.selectedTextTrack != newViewProps.selectedTextTrack) {
+    if (_hasEmittedLoad && oldViewProps.selectedTextTrack != newViewProps.selectedTextTrack) {
         _player.currentVideoSubTitleIndex = newViewProps.selectedTextTrack;
     }
 
@@ -257,7 +251,7 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     [_player stop];
     _hasEmittedLoad = NO;
     _isBuffering = NO;
-    _pendingTextTracks = nil;
+    _hasSideloadedSubs = NO;
 
     NSString *uriString = [NSString stringWithUTF8String:props.src.uri.c_str()];
     if (uriString.length == 0) {
@@ -294,23 +288,8 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         }
     }
 
-    // Estilo de subtítulos — libvlc no permite cambiar el renderer de texto en
-    // caliente, así que esto se aplica siempre al (re)crear el VLCMedia.
-    // sub-text-scale es un porcentaje lineal (25-500, 100=normal) — confiable.
-    // freetype-color/-background-* son menos documentados; si el valor exacto
-    // no da el resultado esperado, es lo primero a ajustar tras probar en
-    // dispositivo real (no se puede verificar sin uno).
-    if (props.subtitleFontScale > 0) {
-        int scalePct = (int)lround(props.subtitleFontScale * 100.0);
-        [media addOption:[NSString stringWithFormat:@":sub-text-scale=%d", scalePct]];
-    }
-    if (props.subtitleColor > 0) {
-        [media addOption:[NSString stringWithFormat:@":freetype-color=%d", (int)props.subtitleColor]];
-    }
-    if (props.subtitleBackgroundOpacity > 0) {
-        [media addOption:[NSString stringWithFormat:@":freetype-background-opacity=%d", (int)props.subtitleBackgroundOpacity]];
-        [media addOption:@":freetype-background-color=0"];
-    }
+    // El estilo de subtítulos NO va acá — son opciones de instancia de libvlc,
+    // se aplican al crear el player (ver -buildPlayerWithFontScale:...).
 
     double startPos = _liveReloadStartTime >= 0 ? _liveReloadStartTime : (double)props.src.startPosition;
     _liveReloadStartTime = -1;
@@ -318,14 +297,23 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         [media addOption:[NSString stringWithFormat:@":start-time=%.3f", startPos]];
     }
 
-    NSMutableArray<NSDictionary *> *pending = [NSMutableArray array];
+    // Subtítulo sideloadeado: ya está descargado a disco desde JS (ver
+    // downloadSpanishSubs en player.tsx) ANTES de montar, así que lo pasamos
+    // como opción de media :sub-file= — se carga junto con el input y queda
+    // seleccionado, sin la carrera asíncrona de addPlaybackSlave-tras-play.
+    // (`sub-file` toma una ruta de archivo, no un file:// URL → lo despojamos.)
     for (const auto &t : props.src.textTracks) {
         NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
-        if (uri.length > 0) {
-            [pending addObject:@{@"uri": uri}];
+        if (uri.length == 0) continue;
+        NSString *path = [uri hasPrefix:@"file://"]
+            ? [[NSURL URLWithString:uri] path]
+            : uri;
+        if (path.length > 0) {
+            [media addOption:[NSString stringWithFormat:@":sub-file=%@", path]];
+            _hasSideloadedSubs = YES;
+            break; // sub-file soporta un archivo; usamos el primero (español)
         }
     }
-    _pendingTextTracks = pending;
 
     _player.media = media;
 
@@ -469,37 +457,19 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
 
     if (!_hasEmittedLoad) {
         _hasEmittedLoad = YES;
-        NSInteger previousCount = (NSInteger)_player.videoSubTitlesIndexes.count;
-        BOOL hadPendingTextTracks = _pendingTextTracks.count > 0;
-        [self applyPendingTextTracks];
         [self emitLoad];
 
-        // addPlaybackSlave: no registra la pista de forma instantánea (todavía
-        // tiene que bajar y parsear el archivo) — si emitLoad corrió antes de
-        // que termine, la lista de subtítulos sale vacía en el primer aviso.
-        // Reintentamos hasta confirmar que VLC ya la registró.
-        if (hadPendingTextTracks) {
+        // El subtítulo de :sub-file se registra al abrir el input; suele estar
+        // presente ya en este emitLoad, pero por si se registra unos ms después
+        // reemitimos una sola vez para que el picker de JS lo refleje. Sin
+        // polling: el archivo es local, no hay descarga que esperar.
+        if (_hasSideloadedSubs) {
             __weak VideoVLCView *weakSelf = self;
-            VLCMediaPlayer *player = _player;
-            VideoVLCPollForSubtitleTrackIncrease(self, player, previousCount, 12, ^{
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [weakSelf emitLoad];
             });
         }
     }
-}
-
-#pragma mark - Track application
-
-- (void)applyPendingTextTracks
-{
-    if (_pendingTextTracks.count == 0) return;
-    for (NSDictionary *track in _pendingTextTracks) {
-        NSURL *url = [NSURL URLWithString:track[@"uri"]];
-        if (url) {
-            [_player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
-        }
-    }
-    _pendingTextTracks = nil;
 }
 
 #pragma mark - Event emission

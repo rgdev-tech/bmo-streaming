@@ -35,6 +35,72 @@ const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
 const NEXT_PILL_S = 50      // segundos finales en que aparece el pill "Siguiente"
 const SAVE_EVERY_MS = 5000  // throttle de guardado de progreso (evita I/O por segundo)
+const SUBS_TIMEOUT_MS = 4000 // tope de espera de subs antes de arrancar igual
+
+type SideloadTrack = { uri: string; language: string; title: string }
+
+// Descarga los subtítulos en español a disco (caché) y devuelve las pistas
+// listas para sideload en VLCKit. Se baja DESDE EL TELÉFONO (no el servidor,
+// cuya IP de datacenter bloquea Cloudflare en dl.opensubtitles.org). Se corre
+// durante la pantalla de carga, antes de montar el player, así el subtítulo ya
+// está presente cuando arranca el video — sin la carrera asíncrona de antes.
+async function downloadSpanishSubs(
+  subs: Subtitle[], type: string, id: string, season?: number, episode?: number,
+): Promise<SideloadTrack[]> {
+  const esSubs = subs.filter((s) => s.lang === 'es')
+  if (!esSubs.length) { console.log('[subs] sin candidatos en español'); return [] }
+  const dir = `${FileSystem.cacheDirectory}subs/`
+  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
+  const results: SideloadTrack[] = []
+  console.log(`[subs] ${esSubs.length} candidato(s) español para ${type}/${id} T${season}:E${episode}`)
+  for (const s of esSubs) {
+    const localPath = `${dir}${type}-${id}-${season ?? 0}-${episode ?? 0}-${s.i}.srt`
+    // No confiar solo en "existe": una descarga vieja/interrumpida puede haber
+    // dejado un archivo chico/corrupto, y quedaría cacheado para siempre.
+    const cached = await FileSystem.getInfoAsync(localPath, { size: true })
+    if (cached.exists && cached.size > 200) {
+      console.log(`[subs] caché (${cached.size}b): ${localPath}`)
+      results.push({ uri: localPath, language: s.lang, title: s.label })
+      continue
+    }
+    if (cached.exists) await FileSystem.deleteAsync(localPath, { idempotent: true })
+    for (const url of [s.url, ...s.altUrls]) {
+      try {
+        const dl = await FileSystem.downloadAsync(url, localPath)
+        console.log(`[subs] GET ${url} → ${dl.status}`)
+        if (dl.status !== 200) continue
+        // Un .srt real nunca es text/html; una página de bloqueo de Cloudflare
+        // sí. VLCKit decodifica el charset real del archivo por su cuenta.
+        const ct = Object.entries(dl.headers ?? {}).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
+        if (/text\/html/i.test(ct)) {
+          console.log(`[subs] content-type=${ct} → bloqueo, descarto`)
+          await FileSystem.deleteAsync(localPath, { idempotent: true })
+          continue
+        }
+        const info = await FileSystem.getInfoAsync(localPath, { size: true })
+        console.log(`[subs] OK (${info.exists ? info.size : '?'}b): ${localPath}`)
+        results.push({ uri: localPath, language: s.lang, title: s.label })
+        break
+      } catch (e) {
+        console.log(`[subs] excepción ${url}: ${String(e)}`)
+      }
+    }
+  }
+  console.log(`[subs] listo: ${results.length} pista(s)`)
+  return results
+}
+
+// downloadSpanishSubs acotado por timeout — nunca retrasa el arranque del video
+// más de SUBS_TIMEOUT_MS (si la descarga tarda, sigue en background y queda
+// cacheada para la próxima). El video arranca con lo que haya listo.
+function downloadSpanishSubsCapped(
+  subs: Subtitle[], type: string, id: string, season?: number, episode?: number,
+): Promise<SideloadTrack[]> {
+  return Promise.race([
+    downloadSpanishSubs(subs, type, id, season, episode).catch(() => [] as SideloadTrack[]),
+    new Promise<SideloadTrack[]>((resolve) => setTimeout(() => resolve([]), SUBS_TIMEOUT_MS)),
+  ])
+}
 
 export default function PlayerScreen() {
   const router = useRouter()
@@ -55,7 +121,6 @@ export default function PlayerScreen() {
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
   const [referer, setReferer] = useState('')
-  const [subtitles, setSubtitles] = useState<Subtitle[]>([])
   const [hasLatinoAlternative, setHasLatinoAlternative] = useState(false)
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
@@ -123,10 +188,20 @@ export default function PlayerScreen() {
 
       const info = await resolveP
       if (cancelled) return
+
+      // Para fuentes VLC (mp4/mkv), bajamos el subtítulo español ACÁ —
+      // durante el spinner, antes de montar el player — así llega presente y
+      // seleccionable sin la carrera asíncrona post-montaje de antes. Acotado
+      // por timeout para no colgar el arranque.
+      const tracks = info.type === 'file'
+        ? await downloadSpanishSubsCapped(info.subtitles ?? [], type, id, seasonN, episodeN)
+        : []
+      if (cancelled) return
+
       setStreamUrl(info.streamUrl)
       setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
-      setSubtitles(info.subtitles ?? [])
+      setVlcTextTracks(tracks)
       setHasLatinoAlternative(info.hasLatinoAlternative ?? false)
       setStartAt(pos)
       setReady(true)
@@ -159,77 +234,10 @@ export default function PlayerScreen() {
   // permite sideload/selección de subtítulos y pistas de audio sin re-resolver.
   const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
 
-  // Subtítulos para VLCKit: las fuentes "file" no traen subs embebidos casi
-  // nunca, así que los buscamos aparte (Wyzie) y los sideloadeamos. Solo el
-  // español — el resto (en/pt) no aporta acá.
-  // Los bajamos ACÁ, desde el teléfono, en vez de vía nuestro servidor:
-  // dl.opensubtitles.org bloquea por Cloudflare las IPs de datacenter (Vercel
-  // y también nuestro proxy CF Worker, probado) pero no la del propio
-  // teléfono. Se cachean en disco para no re-descargar en cada apertura.
-  const [vlcTextTracks, setVlcTextTracks] = useState<{ uri: string; language: string; title: string }[]>([])
-  useEffect(() => {
-    console.log(`[subs] efecto disparado — isVlcSource=${isVlcSource} streamType=${streamType} subtitles=${JSON.stringify(subtitles)}`)
-    if (!isVlcSource) { console.log('[subs] no es fuente VLC, corto acá'); setVlcTextTracks([]); return }
-    let cancelled = false
-    const esSubs = subtitles.filter((s) => s.lang === 'es')
-    if (!esSubs.length) { console.log('[subs] no hay candidatos en español, corto acá'); setVlcTextTracks([]); return }
-
-    async function loadSpanishSubs() {
-      const dir = `${FileSystem.cacheDirectory}subs/`
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
-      const results: { uri: string; language: string; title: string }[] = []
-      console.log(`[subs] ${esSubs.length} candidato(s) en español para ${type}/${id} T${seasonN}:E${episodeN}`)
-      for (const s of esSubs) {
-        const localPath = `${dir}${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}-${s.i}.srt`
-        // No confiar en "existe" solo: una descarga vieja/interrumpida puede haber
-        // dejado un archivo vacío o corrupto, y eso quedaría cacheado para siempre.
-        const cached = await FileSystem.getInfoAsync(localPath, { size: true })
-        if (cached.exists && cached.size > 200) {
-          console.log(`[subs] usando caché local (${cached.size} bytes): ${localPath}`)
-          results.push({ uri: localPath, language: s.lang, title: s.label })
-          continue
-        }
-        if (cached.exists) {
-          console.log(`[subs] caché sospechoso (muy chico), lo borro y reintento: ${localPath}`)
-          await FileSystem.deleteAsync(localPath, { idempotent: true })
-        }
-        let gotIt = false
-        for (const url of [s.url, ...s.altUrls]) {
-          try {
-            const dl = await FileSystem.downloadAsync(url, localPath)
-            console.log(`[subs] GET ${url} → status ${dl.status}`)
-            if (dl.status !== 200) continue
-            // No leemos el contenido como texto acá: algunos .srt de
-            // opensubtitles NO son UTF-8 real pese a que la URL lo diga
-            // (confirmado con archivos reales, vienen en Latin-1) — decodificar
-            // esos bytes como UTF-8 tira excepción y se perdía el subtítulo en
-            // silencio. Alcanza con el content-type: una página de bloqueo de
-            // Cloudflare es text/html; un subtítulo real nunca lo es. VLCKit
-            // decodifica el charset real del archivo por su cuenta al renderizar.
-            const contentType = Object.entries(dl.headers ?? {})
-              .find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
-            if (/text\/html/i.test(contentType)) {
-              console.log(`[subs] content-type=${contentType} → parece bloqueo, descarto`)
-              await FileSystem.deleteAsync(localPath, { idempotent: true })
-              continue
-            }
-            const info = await FileSystem.getInfoAsync(localPath, { size: true })
-            console.log(`[subs] OK, guardado (${info.exists ? info.size : '?'} bytes): ${localPath}`)
-            results.push({ uri: localPath, language: s.lang, title: s.label })
-            gotIt = true
-            break
-          } catch (e) {
-            console.log(`[subs] fetch de ${url} tiró excepción: ${String(e)}`)
-          }
-        }
-        if (!gotIt) console.log(`[subs] ninguna URL funcionó para "${s.label}" (i=${s.i})`)
-      }
-      console.log(`[subs] resultado final: ${results.length} pista(s) para sideload`)
-      if (!cancelled) setVlcTextTracks(results)
-    }
-    loadSpanishSubs()
-    return () => { cancelled = true }
-  }, [isVlcSource, subtitles, type, id, seasonN, episodeN])
+  // Subtítulos ya descargados en resolve() (ver downloadSpanishSubsCapped): al
+  // momento de montar el player ya están en disco y listos para sideload — sin
+  // carrera asíncrona. Solo se resetea al cambiar de episodio/idioma.
+  const [vlcTextTracks, setVlcTextTracks] = useState<SideloadTrack[]>([])
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
