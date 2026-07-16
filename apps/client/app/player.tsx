@@ -594,7 +594,16 @@ function VlcPlayer({
     setTextTracks(data.textTracks.map((t) => ({ id: t.id, label: t.title || `Subtítulo ${t.id}` })))
     const selAudio = data.audioTracks.find((t) => t.selected)
     const selText = data.textTracks.find((t) => t.selected)
-    setSelectedAudioTrack(selAudio ? selAudio.id : -1)
+    // El archivo puede traer varias pistas de audio embebidas (ej. dual audio
+    // inglés/latino) y VLCKit no siempre elige la correcta por defecto — suele
+    // quedarse en la primera. Si pedimos latino, buscamos una pista cuyo
+    // nombre lo indique y la forzamos; si el archivo no la nombra (pistas
+    // genéricas "Track 1"/"Track 2"), no hay forma de saberlo desde acá y
+    // queda el default de VLCKit.
+    const latinoTrack = audioLang === 'latino'
+      ? data.audioTracks.find((t) => /spa|esp|latino|castellano/i.test(t.title ?? ''))
+      : undefined
+    setSelectedAudioTrack(latinoTrack ? latinoTrack.id : selAudio ? selAudio.id : -1)
     setSelectedTextTrack(selText ? selText.id : -1)
     if (!startedRef.current) {
       startedRef.current = true
