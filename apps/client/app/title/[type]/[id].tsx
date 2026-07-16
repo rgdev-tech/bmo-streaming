@@ -1,14 +1,11 @@
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ScrollView,
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Dimensions,
-  Animated,
-  Easing,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -25,8 +22,6 @@ import { DownloadButton } from '@/components/DownloadButton'
 import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { TitleSkeleton } from '@/components/Skeleton'
-
-type Availability = 'checking' | 'available' | 'unavailable'
 
 export default function TitleScreen() {
   const router = useRouter()
@@ -57,16 +52,13 @@ export default function TitleScreen() {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
 
-  // Pre-chequeo: resolver el stream al abrir el título. Pre-calienta el cache
-  // (Play arranca instantáneo) Y nos dice si hay fuente disponible.
-  const [availability, setAvailability] = useState<Availability>('checking')
+  // Pre-calienta el cache de resolución al abrir el título, así Play arranca
+  // instantáneo — sin gatear el botón a su resultado: el resolver puede fallar
+  // de forma transitoria y bloquear el botón permanentemente no vale la pena
+  // (el error real, si lo hay, ya se maneja dentro del player).
   useEffect(() => {
-    let cancelled = false
-    setAvailability('checking')
     const p = isTv ? stream.resolveTv(id, 1, 1) : stream.resolveMovie(id)
-    p.then(() => !cancelled && setAvailability('available'))
-      .catch(() => !cancelled && setAvailability('unavailable'))
-    return () => { cancelled = true }
+    p.catch(() => {})
   }, [id, isTv])
 
   const [logo, setLogo] = useState<string | null>(null)
@@ -178,27 +170,10 @@ export default function TitleScreen() {
                   Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
                 </Text>
               </View>
-            ) : availability === 'unavailable' ? (
-              <View style={styles.unavailableButton}>
-                <SymbolView name="exclamationmark.triangle" tintColor="rgba(255,255,255,0.6)" style={styles.playIcon} />
-                <Text style={styles.soonText}>No disponible</Text>
-              </View>
             ) : (
-              <Touchable
-                scaleTo={0.97}
-                haptic="medium"
-                style={[styles.playButton, availability === 'checking' && styles.playButtonChecking]}
-                onPress={play}
-              >
-                {availability === 'checking' && <ShimmerSweep />}
-                {availability === 'checking' ? (
-                  <ActivityIndicator color="#000" size="small" />
-                ) : (
-                  <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
-                )}
-                <Text style={styles.playText}>
-                  {availability === 'checking' ? 'Comprobando…' : 'Reproducir'}
-                </Text>
+              <Touchable scaleTo={0.97} haptic="medium" style={styles.playButton} onPress={play}>
+                <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+                <Text style={styles.playText}>Reproducir</Text>
               </Touchable>
             ))}
 
@@ -211,7 +186,7 @@ export default function TitleScreen() {
               />
               <Text style={styles.listText}>Mi Lista</Text>
             </Touchable>
-            {!isTv && data && isReleased(data.release_date) && availability === 'available' && (
+            {!isTv && data && isReleased(data.release_date) && (
               <View style={[styles.secondaryBtn, { gap: 8 }]}>
                 <DownloadButton
                   id={Number(id)}
@@ -265,39 +240,8 @@ export default function TitleScreen() {
   )
 }
 
-// Barrido sutil de brillo sobre el botón mientras se resuelve el stream
-// ("Comprobando…") — refuerzo visual del spinner, no lo reemplaza.
-function ShimmerSweep() {
-  const x = useRef(new Animated.Value(0)).current
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(x, { toValue: 1, duration: 1200, easing: Easing.linear, useNativeDriver: true })
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [])
-
-  const translateX = x.interpolate({ inputRange: [0, 1], outputRange: [-BUTTON_W, BUTTON_W] })
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={[StyleSheet.absoluteFillObject, styles.shimmerClip, { transform: [{ translateX }] }]}
-    >
-      <LinearGradient
-        colors={['transparent', 'rgba(0,0,0,0.12)', 'transparent']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.shimmerGradient}
-      />
-    </Animated.View>
-  )
-}
-
 const { width } = Dimensions.get('window')
 const HERO_H = width * 0.95
-const BUTTON_W = width - 40 // ancho del playButton (paddingHorizontal: 20 en .body)
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
@@ -341,22 +285,11 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 8,
   },
-  playButtonChecking: { backgroundColor: 'rgba(255,255,255,0.85)' },
   soonButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 12,
-    paddingVertical: 14,
-    marginTop: 20,
-    gap: 8,
-  },
-  unavailableButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 12,
     paddingVertical: 14,
     marginTop: 20,
@@ -387,6 +320,4 @@ const styles = StyleSheet.create({
   },
   similar: { marginTop: 8, marginBottom: 24 },
   errorFill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  shimmerClip: { borderRadius: 12, overflow: 'hidden' },
-  shimmerGradient: { width: BUTTON_W * 0.5, height: '100%' },
 })

@@ -183,7 +183,7 @@ async function followResolveUrl(startUrl: string): Promise<string | null> {
 
 export const debridEnabled = !!DEBRID_KEY
 
-export type DebridResult = { url: string; label: string; language: string }
+export type DebridResult = { url: string; label: string; language: string; hasLatinoAlternative: boolean }
 
 // Más candidatos en la carrera = más chance de incluir uno ya cacheado en RD
 // (Torrentio suele adelantar los cacheados en su propio orden; si nuestro
@@ -191,10 +191,18 @@ export type DebridResult = { url: string; label: string; language: string }
 // Promise.any no espera a todos — el costo extra es mínimo.
 const MAX_TRIES = 6
 
-async function tryCandidate(c: Candidate): Promise<DebridResult> {
+// Si pedimos latino y hay candidatos latino, les damos esta ventana para
+// resolver ANTES de sumar al resto a la carrera — Promise.any no respeta
+// ranking, solo velocidad, así que sin esto un candidato peor pero ya
+// cacheado le gana por rapidez al latino aunque sea justo lo que se pidió.
+const LATINO_HEAD_START_MS = 3000
+
+type RawResult = { url: string; label: string; latino: boolean }
+
+async function tryCandidate(c: Candidate): Promise<RawResult> {
   const finalUrl = await followResolveUrl(c.resolveUrl)
   if (!finalUrl) throw new Error(`no resolvió: ${c.label}`)
-  return { url: finalUrl, label: c.label, language: c.latino ? 'Español Latino' : 'Original' }
+  return { url: finalUrl, label: c.label, latino: c.latino }
 }
 
 export async function resolveDebridStream(
@@ -218,15 +226,43 @@ export async function resolveDebridStream(
     return null
   }
 
+  const top = candidates.slice(0, MAX_TRIES)
+  const hasLatinoAlternative = candidates.some((c) => c.latino)
+  const toResult = (r: RawResult): DebridResult => ({
+    url: r.url, label: r.label, language: r.latino ? 'Español Latino' : 'Original', hasLatinoAlternative,
+  })
+
+  const tRaceStart = Date.now()
+  const latinoGroup = lang === 'latino' ? top.filter((c) => c.latino) : []
+
+  if (latinoGroup.length > 0) {
+    const latinoPromises = latinoGroup.map(tryCandidate)
+    const headStart = await Promise.race([
+      Promise.any(latinoPromises).then((r) => ({ ok: true as const, r })).catch(() => ({ ok: false as const })),
+      new Promise<{ ok: false }>((resolve) => setTimeout(() => resolve({ ok: false }), LATINO_HEAD_START_MS)),
+    ])
+    if (headStart.ok) {
+      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (latino con ventaja, ${latinoGroup.length} candidatos) → ${headStart.r.label}`)
+      return toResult(headStart.r)
+    }
+    const others = top.filter((c) => !c.latino)
+    try {
+      const winner = await Promise.any([...latinoPromises, ...others.map(tryCandidate)])
+      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (sin latino a tiempo, fallback) → ${winner.label}`)
+      return toResult(winner)
+    } catch {
+      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms — ninguno de ${top.length} candidatos resolvió`)
+      return null
+    }
+  }
+
   // Carrera en paralelo entre los mejores candidatos — el que ya está
   // cacheado en Real-Debrid resuelve casi al instante, así no esperamos
   // secuencialmente a que cada uno agote su timeout antes de probar el siguiente.
-  const top = candidates.slice(0, MAX_TRIES)
-  const tRaceStart = Date.now()
   try {
     const winner = await Promise.any(top.map(tryCandidate))
     console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (${top.length} candidatos) → ${winner.label}`)
-    return winner
+    return toResult(winner)
   } catch {
     console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms — ninguno de ${top.length} candidatos resolvió`)
     return null // AggregateError: ninguno resolvió a tiempo

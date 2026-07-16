@@ -37,6 +37,7 @@ export type StreamResult = {
   headers: Record<string, string>      // headers que el CDN espera (Referer/Origin/etc.)
   source: string
   language: string                     // etiqueta de idioma de audio inferida ("Español Latino" / "Original")
+  hasLatinoAlternative?: boolean       // solo relevante para type:'file' (realdebrid) — hay un torrent con audio latino disponible aunque no haya ganado esta vez
 }
 
 export type ProviderHealth = {
@@ -361,6 +362,7 @@ async function scrape(
             headers: {},
             source: 'realdebrid',
             language: debrid.language,
+            hasLatinoAlternative: debrid.hasLatinoAlternative,
           }
           console.error(`[resolve] OK via realdebrid (${debrid.label}) en ${Date.now() - t0}ms`)
           return result

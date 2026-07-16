@@ -43,6 +43,7 @@ function summarize(result: Awaited<ReturnType<typeof resolveStream>>) {
     source: result.source,
     language: result.language,         // etiqueta de idioma de audio ("Español Latino" / "Original")
     subtitles,
+    hasLatinoAlternative: result.hasLatinoAlternative ?? false,
   }
 }
 

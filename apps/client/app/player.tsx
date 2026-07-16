@@ -48,6 +48,7 @@ export default function PlayerScreen() {
   const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
   const [referer, setReferer] = useState('')
   const [subtitles, setSubtitles] = useState<Subtitle[]>([])
+  const [hasLatinoAlternative, setHasLatinoAlternative] = useState(false)
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
 
@@ -115,6 +116,7 @@ export default function PlayerScreen() {
       setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
       setSubtitles(info.subtitles ?? [])
+      setHasLatinoAlternative(info.hasLatinoAlternative ?? false)
       setStartAt(pos)
       setReady(true)
 
@@ -273,6 +275,9 @@ export default function PlayerScreen() {
           title={baseTitle}
           episodeLabel={isTv ? `T${seasonN ?? 1}:E${episodeN ?? 1}` : undefined}
           hasNext={hasNextEpisode}
+          audioLang={audioLang}
+          hasLatinoAlternative={hasLatinoAlternative}
+          onChangeAudioLang={changeAudioLang}
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
@@ -487,7 +492,9 @@ function NativePlayer({
 type TrackInfo = { id: number; label: string }
 
 function VlcPlayer({
-  uri, referer, sideloadTextTracks, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, referer, sideloadTextTracks, startAt, meta, hasNext,
+  audioLang, hasLatinoAlternative, onChangeAudioLang,
+  onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; referer: string; startAt: number
   sideloadTextTracks: { uri: string; language: string; title: string }[]
@@ -495,6 +502,9 @@ function VlcPlayer({
   title: string
   episodeLabel?: string
   hasNext: boolean
+  audioLang: AudioLang
+  hasLatinoAlternative: boolean
+  onChangeAudioLang: (lang: AudioLang) => void
   onClose: (watchedFraction: number) => void
   onEnded: () => void
   onPlayNext: () => void
@@ -768,6 +778,22 @@ function VlcPlayer({
             <Text style={styles.vlcPickerTitle}>
               {trackPicker === 'audio' ? 'Audio' : 'Subtítulos'}
             </Text>
+            {trackPicker === 'audio' && (audioLang === 'latino' || hasLatinoAlternative) && (
+              <Touchable
+                scaleTo={0.98}
+                haptic="selection"
+                style={styles.vlcPickerSwitchRow}
+                onPress={() => {
+                  onChangeAudioLang(audioLang === 'latino' ? 'original' : 'latino')
+                  setTrackPicker(null)
+                }}
+              >
+                <SymbolView name="arrow.triangle.2.circlepath" tintColor="#fff" style={styles.vlcIcon} />
+                <Text style={styles.vlcPickerSwitchText} numberOfLines={1}>
+                  {audioLang === 'latino' ? 'Volver a audio Original' : 'Cambiar a fuente con audio Latino'}
+                </Text>
+              </Touchable>
+            )}
             <ScrollView style={styles.vlcPickerList} showsVerticalScrollIndicator={false}>
               {trackPicker === 'text' && (
                 <Touchable
@@ -992,6 +1018,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
     paddingHorizontal: 12,
   },
+  vlcPickerSwitchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 12, paddingHorizontal: 12, marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10,
+  },
+  vlcPickerSwitchText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
   vlcPickerList: { maxHeight: 260 },
   vlcPickerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

@@ -29,6 +29,7 @@ export type ResolveInfo = {
   source: string
   language: string    // etiqueta del idioma de audio resuelto ("Español Latino" / "Original")
   subtitles: Subtitle[]
+  hasLatinoAlternative: boolean  // hay un torrent con audio latino disponible (aunque este resultado no lo sea)
 }
 
 const RESOLVE_TIMEOUT = 55_000  // 55s — el scraper puede tardar pero no más que esto
