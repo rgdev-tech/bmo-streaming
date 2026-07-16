@@ -61,6 +61,7 @@
         "react-native-screens": "~4.16.0",
         "react-native-svg": "^15.15.5",
         "react-native-video": "6",
+        "react-native-video-vlc": "file:./vendor/react-native-video-vlc",
       },
       "devDependencies": {
         "@babel/core": "^7.25.2",
@@ -1587,6 +1588,8 @@
     "@bmo/api/@p-stream/providers": ["@p-stream/providers@file:apps/api/vendor/p-stream-providers", {}],
 
     "@bmo/client/expo-screen-orientation": ["expo-screen-orientation@9.0.9", "", { "peerDependencies": { "expo": "*", "react-native": "*" } }, "sha512-UTU745XoqBvQJkZ820GTfMuOxlkppYqaeQ+x0wdu44cyrZiZugqe+egFF2+zC+SaxgAltU5EuO8GIj9xSF+YMw=="],
+
+    "@bmo/client/react-native-video-vlc": ["react-native-video-vlc@file:apps/client/vendor/react-native-video-vlc", { "peerDependencies": { "react": "*", "react-native": "*" } }],
 
     "@cspotcode/source-map-support/@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.9", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.0.3", "@jridgewell/sourcemap-codec": "^1.4.10" } }, "sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ=="],
 

@@ -125,6 +125,7 @@ PODS:
   - libwebp/sharpyuv (1.5.0)
   - libwebp/webp (1.5.0):
     - libwebp/sharpyuv
+  - MobileVLCKit (3.7.3)
   - RCTDeprecation (0.81.5)
   - RCTRequired (0.81.5)
   - RCTTypeSafety (0.81.5):
@@ -2083,6 +2084,29 @@ PODS:
   - SDWebImageWebPCoder (0.14.6):
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
+  - VideoVLC (1.0.18-bmo):
+    - hermes-engine
+    - MobileVLCKit (= 3.7.3)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2177,6 +2201,7 @@ DEPENDENCIES:
   - "RNGestureHandler (from `../../../node_modules/.bun/react-native-gesture-handler@2.28.0+567f77425daa0e2e/node_modules/react-native-gesture-handler`)"
   - "RNScreens (from `../../../node_modules/.bun/react-native-screens@4.16.0+567f77425daa0e2e/node_modules/react-native-screens`)"
   - "RNSVG (from `../../../node_modules/.bun/react-native-svg@15.15.5+567f77425daa0e2e/node_modules/react-native-svg`)"
+  - "VideoVLC (from `../../../node_modules/.bun/react-native-video-vlc@file+apps+client+vendor+react-native-video-vlc+567f77425daa0e2e/node_modules/react-native-video-vlc`)"
   - "Yoga (from `../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/yoga`)"
 
 SPEC REPOS:
@@ -2184,6 +2209,7 @@ SPEC REPOS:
     - libavif
     - libdav1d
     - libwebp
+    - MobileVLCKit
     - SDWebImage
     - SDWebImageAVIFCoder
     - SDWebImageSVGCoder
@@ -2371,6 +2397,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.bun/react-native-screens@4.16.0+567f77425daa0e2e/node_modules/react-native-screens"
   RNSVG:
     :path: "../../../node_modules/.bun/react-native-svg@15.15.5+567f77425daa0e2e/node_modules/react-native-svg"
+  VideoVLC:
+    :path: "../../../node_modules/.bun/react-native-video-vlc@file+apps+client+vendor+react-native-video-vlc+567f77425daa0e2e/node_modules/react-native-video-vlc"
   Yoga:
     :path: "../../../node_modules/.bun/react-native@0.81.5+567f77425daa0e2e/node_modules/react-native/ReactCommon/yoga"
 
@@ -2397,6 +2425,7 @@ SPEC CHECKSUMS:
   libavif: 5f8e715bea24debec477006f21ef9e95432e254d
   libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
+  MobileVLCKit: 73d7ddb52238b6885b70b0f281cae75a0a6e3ac0
   RCTDeprecation: 943572d4be82d480a48f4884f670135ae30bf990
   RCTRequired: 8f3cfc90cc25cf6e420ddb3e7caaaabc57df6043
   RCTTypeSafety: 16a4144ca3f959583ab019b57d5633df10b5e97c
@@ -2472,6 +2501,7 @@ SPEC CHECKSUMS:
   SDWebImageAVIFCoder: afe194a084e851f70228e4be35ef651df0fc5c57
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
+  VideoVLC: b5e66ced5b701ff42d3b5b89ebfcf7a549fcc186
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
 
 PODFILE CHECKSUM: 5c1517f60946dd13d73864463d9451dad6182073

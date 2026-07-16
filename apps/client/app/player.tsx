@@ -2,12 +2,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  Animated,
+  Animated, Pressable,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
+import Slider from '@react-native-community/slider'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang } from '@/lib/stream'
@@ -15,6 +16,11 @@ import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/libra
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
 import { Touchable } from '@/components/Touchable'
+import VideoVLC from '@/vendor/react-native-video-vlc/src/VideoVLC'
+import type {
+  VideoVLCRef,
+  OnLoadData, OnProgressData, OnVideoErrorData, OnBufferData,
+} from '@/vendor/react-native-video-vlc/src'
 
 const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
@@ -123,25 +129,19 @@ export default function PlayerScreen() {
     getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
   }, [id, isTv, seasonN, episodeN])
 
-  // URI final según la fuente:
+  // URI final para la vía expo-video/HLS:
   //  - local: m3u8 descargado
-  //  - file (mp4, p.ej. Real-Debrid): URL DIRECTA al CDN — proxearla por
-  //    nuestro servidor no funciona (Vercel no está pensado para relayar un
-  //    archivo de cientos de MB: agota su tiempo de ejecución a mitad de
-  //    descarga). El costo: sin subtítulos externos para estas fuentes,
-  //    expo-video no soporta sideloading de subs en mp4 progresivo.
   //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
+  // Las fuentes "file" (mp4/mkv de Real-Debrid) van por VLCKit directo al CDN
+  // (ver isVlcSource más abajo) — no pasan por esta rama.
   const masterUrl = localUri
-    ?? (streamType === 'file' && streamUrl
-      ? streamUrl
-      : (isTv
-        ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-        : stream.masterMovie(id, audioLang)))
+    ?? (isTv
+      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
+      : stream.masterMovie(id, audioLang))
 
-  // contentType: hls para playlists; para mp4 dejamos que AVPlayer auto-detecte
-  // por extensión/bytes — más tolerante que el parser HLS con headers "raros"
-  // como el application/force-download que devuelve Real-Debrid.
-  const contentType: 'hls' | 'auto' = (localUri || streamType !== 'file') ? 'hls' : 'auto'
+  // Fuentes "file" (Real-Debrid, mp4/mkv) → VLCKit: soporta mkv nativo y
+  // permite sideload/selección de subtítulos y pistas de audio sin re-resolver.
+  const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
@@ -248,11 +248,25 @@ export default function PlayerScreen() {
             </Touchable>
           </View>
         </View>
-      ) : ready && masterUrl ? (
+      ) : ready && isVlcSource && streamUrl ? (
+        <VlcPlayer
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-vlc`}
+          uri={streamUrl}
+          referer={referer}
+          startAt={startAt}
+          meta={meta}
+          title={baseTitle}
+          episodeLabel={isTv ? `T${seasonN ?? 1}:E${episodeN ?? 1}` : undefined}
+          hasNext={hasNextEpisode}
+          onClose={handleClose}
+          onEnded={handleEnded}
+          onPlayNext={playNextEpisode}
+          onError={(msg) => setError(msg || 'Player error')}
+        />
+      ) : ready && !isVlcSource && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-${contentType}`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-hls`}
           uri={masterUrl}
-          contentType={contentType}
           referer={referer}
           startAt={startAt}
           meta={meta}
@@ -342,9 +356,9 @@ function LoadingScreen({
 // ── Player a pantalla completa con controles propios ────────────────────────
 
 function NativePlayer({
-  uri, contentType, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
 }: {
-  uri: string; contentType: 'hls' | 'auto'; referer: string; startAt: number
+  uri: string; referer: string; startAt: number
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -363,7 +377,7 @@ function NativePlayer({
   const [inFullscreen, setInFullscreen] = useState(false)
 
   const player = useVideoPlayer(
-    { uri, headers: referer ? { Referer: referer } : undefined, contentType },
+    { uri, headers: referer ? { Referer: referer } : undefined, contentType: 'hls' },
     (p) => {
       p.timeUpdateEventInterval = 0.5
       p.bufferOptions = { preferredForwardBufferDuration: 30 }
@@ -449,6 +463,254 @@ function NativePlayer({
       )}
     </View>
   )
+}
+
+// ── Player VLCKit (fuentes "file" — mp4/mkv de Real-Debrid) ─────────────────
+// Sin chrome nativo de AVPlayer: controles propios, mínimos, con selector de
+// pista de audio/subtítulos (lo que expo-video no puede dar para estas fuentes).
+
+type TrackInfo = { id: number; label: string }
+
+function VlcPlayer({
+  uri, referer, startAt, meta, hasNext, onClose, onEnded, onPlayNext, onError,
+}: {
+  uri: string; referer: string; startAt: number
+  meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
+  title: string
+  episodeLabel?: string
+  hasNext: boolean
+  onClose: (watchedFraction: number) => void
+  onEnded: () => void
+  onPlayNext: () => void
+  onError: (msg: string) => void
+}) {
+  const insets = useSafeAreaInsets()
+  const vlcRef = useRef<VideoVLCRef>(null)
+  const lastSave = useRef(0)
+  const progressRef = useRef({ time: 0, duration: 0 })
+  const startedRef = useRef(false)
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const seeking = useRef(false)
+
+  const [paused, setPaused] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const [position, setPosition] = useState(0)
+  const [buffering, setBuffering] = useState(true)
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([])
+  const [textTracks, setTextTracks] = useState<TrackInfo[]>([])
+  const [selectedAudioTrack, setSelectedAudioTrack] = useState(-1)
+  const [selectedTextTrack, setSelectedTextTrack] = useState(-1)
+  const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | null>(null)
+
+  function scheduleHide() {
+    if (hideTimer.current) clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => setControlsVisible(false), 3500)
+  }
+
+  useEffect(() => {
+    scheduleHide()
+    return () => { if (hideTimer.current) clearTimeout(hideTimer.current) }
+  }, [])
+
+  function toggleControls() {
+    setControlsVisible((v) => {
+      const next = !v
+      if (next) scheduleHide()
+      return next
+    })
+  }
+
+  function handleLoad(data: OnLoadData) {
+    setBuffering(false)
+    setDuration(data.duration)
+    setAudioTracks(data.audioTracks.map((t) => ({ id: t.id, label: t.title || `Pista ${t.id}` })))
+    setTextTracks(data.textTracks.map((t) => ({ id: t.id, label: t.title || `Subtítulo ${t.id}` })))
+    const selAudio = data.audioTracks.find((t) => t.selected)
+    const selText = data.textTracks.find((t) => t.selected)
+    setSelectedAudioTrack(selAudio ? selAudio.id : -1)
+    setSelectedTextTrack(selText ? selText.id : -1)
+    if (!startedRef.current) {
+      startedRef.current = true
+      if (startAt > 5) vlcRef.current?.seek(startAt)
+    }
+  }
+
+  function handleProgress(data: OnProgressData) {
+    if (seeking.current) return
+    progressRef.current = { time: data.currentTime, duration: data.seekableDuration }
+    setPosition(data.currentTime)
+    if (data.seekableDuration > 0) setDuration(data.seekableDuration)
+    const now = Date.now()
+    if (data.seekableDuration > 0 && data.currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
+      lastSave.current = now
+      saveProgress({ ...meta, position: data.currentTime, duration: data.seekableDuration })
+    }
+  }
+
+  function handleError(data: OnVideoErrorData) {
+    onError(data.error.errorString || 'Error de reproducción')
+  }
+
+  function handleBuffer(data: OnBufferData) {
+    setBuffering(data.isBuffering)
+  }
+
+  // Al desmontar → guarda el progreso final
+  useEffect(() => {
+    return () => {
+      const { time, duration: d } = progressRef.current
+      if (d > 0) saveProgress({ ...meta, position: time, duration: d })
+    }
+  }, [])
+
+  function seekTo(time: number) {
+    vlcRef.current?.seek(time)
+    progressRef.current = { ...progressRef.current, time }
+    setPosition(time)
+  }
+
+  const remaining = Math.max(0, duration - position)
+  const showPill = hasNext && duration > 0 && remaining > 1 && remaining <= NEXT_PILL_S
+
+  return (
+    <View style={styles.fill}>
+      <VideoVLC
+        ref={vlcRef}
+        style={styles.fill}
+        initialSource={{ uri, headers: referer ? { Referer: referer } : undefined }}
+        paused={paused}
+        resizeMode="none"
+        progressUpdateInterval={500}
+        selectedAudioTrack={selectedAudioTrack}
+        selectedTextTrack={selectedTextTrack}
+        onLoad={handleLoad}
+        onProgress={handleProgress}
+        onBuffer={handleBuffer}
+        onError={handleError}
+        onEnd={onEnded}
+      />
+
+      <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
+
+      {buffering && (
+        <View style={[StyleSheet.absoluteFillObject, styles.vlcBufferCenter]} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="large" />
+        </View>
+      )}
+
+      {controlsVisible && (
+        <View style={StyleSheet.absoluteFillObject}>
+          <View style={styles.vlcScrim} pointerEvents="none" />
+
+          {/* Barra superior: cerrar + pistas */}
+          <View style={[styles.vlcTopBar, { top: insets.top + 8 }]}>
+            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => onClose(duration > 0 ? position / duration : 0)}>
+              <SymbolView name="xmark" tintColor="#fff" style={styles.vlcIcon} />
+            </Touchable>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {audioTracks.length > 1 && (
+                <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('audio')}>
+                  <SymbolView name="waveform" tintColor="#fff" style={styles.vlcIcon} />
+                </Touchable>
+              )}
+              {textTracks.length > 0 && (
+                <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('text')}>
+                  <SymbolView name="captions.bubble" tintColor="#fff" style={styles.vlcIcon} />
+                </Touchable>
+              )}
+            </View>
+          </View>
+
+          {/* Play/pause central */}
+          <View style={styles.vlcCenterControls} pointerEvents="box-none">
+            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcPlayBtn} onPress={() => setPaused((p) => !p)}>
+              <SymbolView name={paused ? 'play.fill' : 'pause.fill'} tintColor="#fff" style={styles.vlcPlayIcon} />
+            </Touchable>
+          </View>
+
+          {/* Barra inferior: scrubber + tiempos */}
+          <View style={[styles.vlcBottomBar, { bottom: insets.bottom + 12 }]}>
+            <Text style={styles.vlcTime}>{fmtTime(position)}</Text>
+            <Slider
+              style={styles.vlcSlider}
+              value={position}
+              minimumValue={0}
+              maximumValue={duration > 0 ? duration : 1}
+              minimumTrackTintColor="#fff"
+              maximumTrackTintColor="rgba(255,255,255,0.3)"
+              thumbTintColor="#fff"
+              onSlidingStart={() => { seeking.current = true }}
+              onSlidingComplete={(v) => { seeking.current = false; seekTo(v) }}
+            />
+            <Text style={styles.vlcTime}>{fmtTime(duration)}</Text>
+          </View>
+        </View>
+      )}
+
+      {showPill && (
+        <Touchable
+          scaleTo={0.95}
+          haptic="medium"
+          style={[styles.nextPill, { bottom: insets.bottom + 80, right: insets.right + 24 }]}
+          onPress={onPlayNext}
+        >
+          <SymbolView name="forward.fill" tintColor="#000" style={styles.nextPillIcon} />
+          <Text style={styles.nextPillText}>Siguiente episodio</Text>
+        </Touchable>
+      )}
+
+      {trackPicker && (
+        <View style={StyleSheet.absoluteFillObject}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setTrackPicker(null)} />
+          <View style={[styles.vlcPickerSheet, { paddingBottom: insets.bottom + 20 }]}>
+            <Text style={styles.vlcPickerTitle}>
+              {trackPicker === 'audio' ? 'Audio' : 'Subtítulos'}
+            </Text>
+            {(trackPicker === 'audio' ? audioTracks : textTracks).map((t) => {
+              const selected = trackPicker === 'audio' ? selectedAudioTrack === t.id : selectedTextTrack === t.id
+              return (
+                <Touchable
+                  key={t.id}
+                  scaleTo={0.98}
+                  haptic="selection"
+                  style={styles.vlcPickerRow}
+                  onPress={() => {
+                    if (trackPicker === 'audio') setSelectedAudioTrack(t.id)
+                    else setSelectedTextTrack(t.id)
+                    setTrackPicker(null)
+                  }}
+                >
+                  <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]}>{t.label}</Text>
+                  {selected && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                </Touchable>
+              )
+            })}
+            {trackPicker === 'text' && (
+              <Touchable
+                scaleTo={0.98}
+                haptic="selection"
+                style={styles.vlcPickerRow}
+                onPress={() => { setSelectedTextTrack(-1); setTrackPicker(null) }}
+              >
+                <Text style={[styles.vlcPickerRowText, selectedTextTrack === -1 && styles.vlcPickerRowTextActive]}>Ninguno</Text>
+                {selectedTextTrack === -1 && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+              </Touchable>
+            )}
+          </View>
+        </View>
+      )}
+    </View>
+  )
+}
+
+function fmtTime(s: number): string {
+  if (!isFinite(s) || s < 0) s = 0
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = Math.floor(s % 60)
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${m}:${String(sec).padStart(2, '0')}`
 }
 
 // ── Pantalla siguiente episodio (al terminar) ───────────────────────────────
@@ -561,6 +823,55 @@ const styles = StyleSheet.create({
   },
   nextPillIcon: { width: 15, height: 15 },
   nextPillText: { color: '#000', fontSize: 15, fontWeight: '700' },
+
+  // Player VLCKit: controles propios
+  vlcBufferCenter: { alignItems: 'center', justifyContent: 'center' },
+  vlcScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  vlcTopBar: {
+    position: 'absolute', left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  vlcIconBtn: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vlcIcon: { width: 18, height: 18 },
+  vlcCenterControls: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vlcPlayBtn: {
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vlcPlayIcon: { width: 26, height: 26 },
+  vlcBottomBar: {
+    position: 'absolute', left: 16, right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  vlcTime: { color: '#fff', fontSize: 12, fontWeight: '600', width: 48, textAlign: 'center' },
+  vlcSlider: { flex: 1, height: 32 },
+  vlcPickerSheet: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: '#1c1c1e',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    paddingTop: 16, paddingHorizontal: 20,
+  },
+  vlcPickerTitle: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 13, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8,
+  },
+  vlcPickerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.15)',
+  },
+  vlcPickerRowText: { color: 'rgba(255,255,255,0.8)', fontSize: 16 },
+  vlcPickerRowTextActive: { color: '#fff', fontWeight: '700' },
 
   errIcon: { width: 48, height: 48 },
   errText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
