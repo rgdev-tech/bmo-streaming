@@ -453,7 +453,7 @@ export async function debugSubs(
   }
   const safeUrl = u.toString().replace(WYZIE_KEY, '***')
   try {
-    const r = await fetch(u.toString(), { signal: AbortSignal.timeout(8000) })
+    const r = await fetch(u.toString(), { signal: AbortSignal.timeout(15000) })
     const body = await r.text()
     let parsed: any = null
     try { parsed = JSON.parse(body) } catch {}
