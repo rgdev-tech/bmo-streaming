@@ -62,6 +62,9 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
       volume,
       progressUpdateInterval,
       textTrackDelay,
+      subtitleFontScale,
+      subtitleColor,
+      subtitleBackgroundOpacity,
       onBuffer,
       onEnd,
       onError,
@@ -165,6 +168,9 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
           volume={volume}
           progressUpdateInterval={progressUpdateInterval}
           textTrackDelay={textTrackDelay}
+          subtitleFontScale={subtitleFontScale}
+          subtitleColor={subtitleColor}
+          subtitleBackgroundOpacity={subtitleBackgroundOpacity}
           selectedAudioTrack={selectedAudioTrack}
           selectedTextTrack={selectedTextTrack}
           onVideoEnd={onEnd}

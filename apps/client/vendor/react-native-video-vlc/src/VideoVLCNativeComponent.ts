@@ -75,16 +75,6 @@ export type OnPlaybackStateChangedData = Readonly<{
   isSeeking: boolean;
 }>;
 
-/*
-type SubtitleStyle = Readonly<{
-  fontSize?: WithDefault<Int32, 0>; // Default to 0 = auto [0 | 20 | 18 | 16 | 12 | 6]
-  color?: WithDefault<Int32, 0x00ffffff>; // Default 0x00ffffff = white
-  bold?: WithDefault<boolean, false>; // Default false
-  backgroundOpacity?: WithDefault<Int32, 0>; // Default 0, [0, 255]
-  backgroundColor?: WithDefault<Int32, 0x00000000>; // Default to 0x00000000 = black
-}>;
-*/
-
 export interface NativeProps extends ViewProps {
   src?: VideoSrc;
   repeat?: boolean;
@@ -96,6 +86,14 @@ export interface NativeProps extends ViewProps {
   volume?: Int32; // default 100
   progressUpdateInterval?: Float; // default 250
   textTrackDelay?: Int32; // delai en s i think
+
+  // Estilo de subtítulos (aplicado vía opciones freetype de libvlc). Cambiar
+  // cualquiera de estos mientras el video ya está reproduciendo fuerza un
+  // reload de VLCMedia en la posición actual — libvlc no permite cambiar el
+  // renderer de subtítulos en caliente.
+  subtitleFontScale?: Float; // 1 = normal, <1 chico, >1 grande
+  subtitleColor?: Int32; // 0xRRGGBB
+  subtitleBackgroundOpacity?: Int32; // 0-255
 
   onVideoLoad?: DirectEventHandler<OnLoadData>;
   onVideoLoadStart?: DirectEventHandler<{}>;

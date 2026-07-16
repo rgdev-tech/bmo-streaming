@@ -53,4 +53,7 @@ export interface ReactVideoVLCProps extends ReactVideoVLCEvents, ViewProps {
   volume?: number; // 0-100, default 100
   progressUpdateInterval?: number; // default 250
   textTrackDelay?: number;
+  subtitleFontScale?: number; // 1 = normal, <1 chico, >1 grande
+  subtitleColor?: number; // 0xRRGGBB
+  subtitleBackgroundOpacity?: number; // 0-255
 }

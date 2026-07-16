@@ -6,6 +6,8 @@ import {
 } from 'react-native'
 import { Image } from 'expo-image'
 import * as FileSystem from 'expo-file-system'
+import { BlurView } from 'expo-blur'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useVideoPlayer, VideoView } from 'expo-video'
 import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
@@ -14,6 +16,11 @@ import * as ScreenOrientation from 'expo-screen-orientation'
 import { GestureHandlerRootView, PinchGestureHandler, State as GHState } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
+import {
+  getSubtitleStyle, setSubtitleStyle, DEFAULT_SUBTITLE_STYLE,
+  SUBTITLE_FONT_SCALE, SUBTITLE_COLOR_HEX, SUBTITLE_BACKGROUND_OPACITY,
+  type SubtitleStyle as SubtitleStyleT, type SubtitleSize, type SubtitleColor, type SubtitleBackground,
+} from '@/lib/subtitleStyle'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
@@ -417,7 +424,7 @@ function LoadingScreen({
           visualmente con el spinner — la carga arranca sola con la preferencia guardada. */}
       {showAudioSwitch && (
         <Animated.View style={[styles.langSwitch, { bottom: insets.bottom + 40, opacity: fade }]}>
-          <View style={styles.langSegmented}>
+          <BlurView intensity={70} tint="systemChromeMaterialDark" style={styles.langSegmented}>
             {(['original', 'latino'] as const).map((opt) => (
               <Touchable
                 key={opt}
@@ -431,7 +438,7 @@ function LoadingScreen({
                 </Text>
               </Touchable>
             ))}
-          </View>
+          </BlurView>
         </Animated.View>
       )}
     </View>
@@ -617,7 +624,15 @@ function VlcPlayer({
   const [textTracks, setTextTracks] = useState<TrackInfo[]>([])
   const [selectedAudioTrack, setSelectedAudioTrack] = useState(-1)
   const [selectedTextTrack, setSelectedTextTrack] = useState(-1)
-  const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | null>(null)
+  const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | 'style' | null>(null)
+
+  const [subStyle, setSubStyleState] = useState<SubtitleStyleT>(DEFAULT_SUBTITLE_STYLE)
+  useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
+  function changeSubStyle(patch: Partial<SubtitleStyleT>) {
+    const next = { ...subStyle, ...patch }
+    setSubStyleState(next)
+    setSubtitleStyle(next)
+  }
 
   function scheduleHide() {
     if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -764,6 +779,9 @@ function VlcPlayer({
               paused={paused}
               resizeMode="none"
               progressUpdateInterval={500}
+              subtitleFontScale={SUBTITLE_FONT_SCALE[subStyle.size]}
+              subtitleColor={SUBTITLE_COLOR_HEX[subStyle.color]}
+              subtitleBackgroundOpacity={SUBTITLE_BACKGROUND_OPACITY[subStyle.background]}
               selectedAudioTrack={selectedAudioTrack}
               selectedTextTrack={selectedTextTrack}
               onLoad={handleLoad}
@@ -801,6 +819,11 @@ function VlcPlayer({
                 <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('text')}>
                   <SymbolView name="captions.bubble" tintColor="#fff" style={styles.vlcIcon} />
                 </Touchable>
+                {textTracks.length > 0 && (
+                  <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('style')}>
+                    <SymbolView name="textformat.size" tintColor="#fff" style={styles.vlcIcon} />
+                  </Touchable>
+                )}
               </View>
             )}
           </View>
@@ -852,71 +875,172 @@ function VlcPlayer({
       {trackPicker && (
         <View style={[StyleSheet.absoluteFillObject, styles.vlcPickerOverlay]}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setTrackPicker(null)} />
-          <View style={styles.vlcPickerCard}>
-            <Text style={styles.vlcPickerTitle}>
-              {trackPicker === 'audio' ? 'Audio' : 'Subtítulos'}
-            </Text>
-            {trackPicker === 'audio' && (audioLang === 'latino' || hasLatinoAlternative) && (
-              <Touchable
-                scaleTo={0.98}
-                haptic="selection"
-                style={styles.vlcPickerSwitchRow}
-                onPress={() => {
-                  onChangeAudioLang(audioLang === 'latino' ? 'original' : 'latino')
-                  setTrackPicker(null)
-                }}
-              >
-                <SymbolView name="arrow.triangle.2.circlepath" tintColor="#fff" style={styles.vlcIcon} />
-                <Text style={styles.vlcPickerSwitchText} numberOfLines={1}>
-                  {audioLang === 'latino' ? 'Volver a audio Original' : 'Cambiar a fuente con audio Latino'}
-                </Text>
-              </Touchable>
-            )}
-            <ScrollView style={styles.vlcPickerList} showsVerticalScrollIndicator={false}>
-              {trackPicker === 'text' && (
+          <View style={styles.vlcPickerCardWrap}>
+            <BlurView intensity={78} tint="systemChromeMaterialDark" style={styles.vlcPickerCard}>
+              <LinearGradient
+                colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']}
+                locations={[0, 0.6]}
+                style={styles.vlcPickerSheen}
+                pointerEvents="none"
+              />
+
+              <View style={styles.vlcPickerTabs}>
+                <Touchable
+                  scaleTo={0.94} haptic="selection"
+                  style={[styles.vlcPickerTab, trackPicker === 'audio' && styles.vlcPickerTabActive]}
+                  onPress={() => setTrackPicker('audio')}
+                >
+                  <SymbolView name="waveform" tintColor={trackPicker === 'audio' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                </Touchable>
+                <Touchable
+                  scaleTo={0.94} haptic="selection"
+                  style={[styles.vlcPickerTab, trackPicker === 'text' && styles.vlcPickerTabActive]}
+                  onPress={() => setTrackPicker('text')}
+                >
+                  <SymbolView name="captions.bubble" tintColor={trackPicker === 'text' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                </Touchable>
+                {textTracks.length > 0 && (
+                  <Touchable
+                    scaleTo={0.94} haptic="selection"
+                    style={[styles.vlcPickerTab, trackPicker === 'style' && styles.vlcPickerTabActive]}
+                    onPress={() => setTrackPicker('style')}
+                  >
+                    <SymbolView name="textformat.size" tintColor={trackPicker === 'style' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                  </Touchable>
+                )}
+              </View>
+
+              {trackPicker === 'audio' && (audioLang === 'latino' || hasLatinoAlternative) && (
                 <Touchable
                   scaleTo={0.98}
                   haptic="selection"
-                  style={styles.vlcPickerRow}
-                  onPress={() => { setSelectedTextTrack(-1); setTrackPicker(null) }}
+                  style={styles.vlcPickerSwitchRow}
+                  onPress={() => {
+                    onChangeAudioLang(audioLang === 'latino' ? 'original' : 'latino')
+                    setTrackPicker(null)
+                  }}
                 >
-                  <Text style={[styles.vlcPickerRowText, selectedTextTrack === -1 && styles.vlcPickerRowTextActive]} numberOfLines={1}>
-                    Ninguno
+                  <SymbolView name="arrow.triangle.2.circlepath" tintColor="#fff" style={styles.vlcIcon} />
+                  <Text style={styles.vlcPickerSwitchText} numberOfLines={1}>
+                    {audioLang === 'latino' ? 'Volver a audio Original' : 'Cambiar a fuente con audio Latino'}
                   </Text>
-                  {selectedTextTrack === -1 && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
                 </Touchable>
               )}
-              {(trackPicker === 'audio' ? audioTracks : textTracks).map((t) => {
-                const selected = trackPicker === 'audio' ? selectedAudioTrack === t.id : selectedTextTrack === t.id
-                return (
-                  <Touchable
-                    key={t.id}
-                    scaleTo={0.98}
-                    haptic="selection"
-                    style={styles.vlcPickerRow}
-                    onPress={() => {
-                      if (trackPicker === 'audio') setSelectedAudioTrack(t.id)
-                      else setSelectedTextTrack(t.id)
-                      setTrackPicker(null)
-                    }}
-                  >
-                    <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]} numberOfLines={1}>
-                      {t.label}
-                    </Text>
-                    {selected && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
-                  </Touchable>
-                )
-              })}
-              {trackPicker === 'audio' && audioTracks.length === 0 && (
-                <Text style={styles.vlcPickerEmpty}>Esta fuente solo trae una pista de audio</Text>
+
+              {trackPicker === 'style' ? (
+                <View style={styles.vlcStyleContent}>
+                  <SubtitleStyleRow
+                    label="Tamaño"
+                    value={subStyle.size}
+                    options={[
+                      { value: 'small', label: 'Chico' },
+                      { value: 'medium', label: 'Medio' },
+                      { value: 'large', label: 'Grande' },
+                    ]}
+                    onChange={(size) => changeSubStyle({ size })}
+                  />
+                  <SubtitleStyleRow
+                    label="Color"
+                    value={subStyle.color}
+                    options={[
+                      { value: 'white', label: 'Blanco' },
+                      { value: 'yellow', label: 'Amarillo' },
+                      { value: 'cyan', label: 'Cian' },
+                    ]}
+                    onChange={(color) => changeSubStyle({ color })}
+                  />
+                  <SubtitleStyleRow
+                    label="Fondo"
+                    value={subStyle.background}
+                    options={[
+                      { value: 'none', label: 'Ninguno' },
+                      { value: 'semi', label: 'Semitransparente' },
+                    ]}
+                    onChange={(background) => changeSubStyle({ background })}
+                  />
+                </View>
+              ) : (
+                <ScrollView style={styles.vlcPickerList} showsVerticalScrollIndicator={false}>
+                  {trackPicker === 'text' && (
+                    <Touchable
+                      scaleTo={0.98}
+                      haptic="selection"
+                      style={styles.vlcPickerRow}
+                      onPress={() => { setSelectedTextTrack(-1); setTrackPicker(null) }}
+                    >
+                      <Text style={[styles.vlcPickerRowText, selectedTextTrack === -1 && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                        Ninguno
+                      </Text>
+                      {selectedTextTrack === -1 && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                    </Touchable>
+                  )}
+                  {(trackPicker === 'audio' ? audioTracks : textTracks).map((t) => {
+                    const selected = trackPicker === 'audio' ? selectedAudioTrack === t.id : selectedTextTrack === t.id
+                    return (
+                      <Touchable
+                        key={t.id}
+                        scaleTo={0.98}
+                        haptic="selection"
+                        style={styles.vlcPickerRow}
+                        onPress={() => {
+                          if (trackPicker === 'audio') setSelectedAudioTrack(t.id)
+                          else setSelectedTextTrack(t.id)
+                          setTrackPicker(null)
+                        }}
+                      >
+                        <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                          {t.label}
+                        </Text>
+                        {selected && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                      </Touchable>
+                    )
+                  })}
+                  {trackPicker === 'audio' && audioTracks.length === 0 && (
+                    <Text style={styles.vlcPickerEmpty}>Esta fuente solo trae una pista de audio</Text>
+                  )}
+                  {trackPicker === 'text' && textTracks.length === 0 && (
+                    <Text style={styles.vlcPickerEmpty}>Esta fuente no trae subtítulos</Text>
+                  )}
+                </ScrollView>
               )}
-              {trackPicker === 'text' && textTracks.length === 0 && (
-                <Text style={styles.vlcPickerEmpty}>Esta fuente no trae subtítulos</Text>
-              )}
-            </ScrollView>
+            </BlurView>
           </View>
         </View>
       )}
+    </View>
+  )
+}
+
+// Fila de chips para el picker de "Estilo" de subtítulos (tamaño/color/fondo).
+function SubtitleStyleRow<T extends string>({
+  label, value, options, onChange,
+}: {
+  label: string
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+}) {
+  return (
+    <View style={styles.vlcStyleRow}>
+      <Text style={styles.vlcStyleLabel}>{label}</Text>
+      <View style={styles.vlcStyleChips}>
+        {options.map((opt) => {
+          const selected = opt.value === value
+          return (
+            <Touchable
+              key={opt.value}
+              scaleTo={0.95}
+              haptic="selection"
+              style={[styles.vlcStyleChip, selected && styles.vlcStyleChipActive]}
+              onPress={() => onChange(opt.value)}
+            >
+              <Text style={[styles.vlcStyleChipText, selected && styles.vlcStyleChipTextActive]} numberOfLines={1}>
+                {opt.label}
+              </Text>
+            </Touchable>
+          )
+        })}
+      </View>
     </View>
   )
 }
@@ -1014,8 +1138,10 @@ const styles = StyleSheet.create({
   // Selector de idioma de audio: flotante, discreto, abajo del todo
   langSwitch: { position: 'absolute', left: 0, right: 0, bottom: 56, alignItems: 'center' },
   langSegmented: {
-    flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 12, padding: 4, gap: 4,
+    flexDirection: 'row',
+    borderRadius: 16, padding: 4, gap: 4,
+    overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
   },
   langOption: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 9 },
   langOptionActive: { backgroundColor: '#fff' },
@@ -1082,31 +1208,48 @@ const styles = StyleSheet.create({
   vlcSlider: { flex: 1, height: 32 },
   vlcPickerOverlay: {
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  // Wrapper aparte de la sombra: BlurView necesita overflow:hidden para que el
+  // blur respete las esquinas redondeadas, pero overflow:hidden mata la
+  // sombra — por eso la sombra vive en un contenedor afuera del blur.
+  vlcPickerCardWrap: {
+    width: 300, maxHeight: '80%',
+    borderRadius: 26,
+    shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   vlcPickerCard: {
-    width: 300, maxHeight: '80%',
-    backgroundColor: '#1c1c1e',
-    borderRadius: 16,
-    paddingTop: 14, paddingHorizontal: 8, paddingBottom: 8,
-    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 8 },
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
+    paddingTop: 12, paddingHorizontal: 10, paddingBottom: 10,
   },
-  vlcPickerTitle: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
-    paddingHorizontal: 12,
+  // Brillo sutil arriba — lo que le da el aire "vidrio" en vez de "panel gris".
+  vlcPickerSheen: { ...StyleSheet.absoluteFillObject, height: '45%' },
+  vlcPickerTabs: {
+    flexDirection: 'row', gap: 6,
+    backgroundColor: 'rgba(120,120,128,0.24)',
+    borderRadius: 16, padding: 4, marginBottom: 10,
   },
+  vlcPickerTab: {
+    flex: 1, paddingVertical: 9, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vlcPickerTabActive: { backgroundColor: '#fff' },
+  vlcIconSm: { width: 16, height: 16 },
   vlcPickerSwitchRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 12, paddingHorizontal: 12, marginBottom: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 10,
+    paddingVertical: 12, paddingHorizontal: 12, marginBottom: 6,
+    backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
   vlcPickerSwitchText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
   vlcPickerList: { maxHeight: 260 },
   vlcPickerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: 12, paddingHorizontal: 12, gap: 10,
-    borderRadius: 10,
+    borderRadius: 14,
   },
   vlcPickerRowText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, flexShrink: 1 },
   vlcPickerRowTextActive: { color: '#fff', fontWeight: '700' },
@@ -1114,6 +1257,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center',
     paddingVertical: 20, paddingHorizontal: 12,
   },
+
+  // Picker de "Estilo" de subtítulos
+  vlcStyleContent: { paddingHorizontal: 4, paddingVertical: 6, gap: 16 },
+  vlcStyleRow: { gap: 8 },
+  vlcStyleLabel: {
+    color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 4,
+  },
+  vlcStyleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4 },
+  vlcStyleChip: {
+    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  vlcStyleChipActive: { backgroundColor: '#fff', borderColor: '#fff' },
+  vlcStyleChipText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  vlcStyleChipTextActive: { color: '#000', fontWeight: '700' },
 
   errIcon: { width: 48, height: 48 },
   errText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },

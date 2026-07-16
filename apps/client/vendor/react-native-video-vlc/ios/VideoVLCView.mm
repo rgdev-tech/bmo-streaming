@@ -70,6 +70,10 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     NSTimeInterval _lastProgressEmitAt;
     char *_aspectRatioBuf;
     char *_cropGeometryBuf;
+    // >= 0 mientras loadSource: está corriendo por un cambio de estilo de
+    // subtítulo en caliente (no por una fuente nueva) — le dice que arranque
+    // desde acá en vez de props.src.startPosition. Se resetea a -1 al usarse.
+    double _liveReloadStartTime;
 }
 
 + (ComponentDescriptorProvider)componentDescriptorProvider
@@ -82,6 +86,7 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
     if (self = [super initWithFrame:frame]) {
         static const auto defaultProps = std::make_shared<const VideoVLCViewProps>();
         _props = defaultProps;
+        _liveReloadStartTime = -1;
 
         _view = [[UIView alloc] init];
         _view.backgroundColor = [UIColor blackColor];
@@ -191,6 +196,18 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         }
     }
 
+    // Estilo de subtítulos cambiado mientras ya había video cargado: libvlc no
+    // permite tocar el renderer de texto en caliente, así que recreamos el
+    // VLCMedia entero (mismo mecanismo que loadSource: usa siempre) arrancando
+    // desde el punto donde íbamos, en vez de perder la posición.
+    if (!srcChanged && _currentUri.length > 0 &&
+        (oldViewProps.subtitleFontScale != newViewProps.subtitleFontScale ||
+         oldViewProps.subtitleColor != newViewProps.subtitleColor ||
+         oldViewProps.subtitleBackgroundOpacity != newViewProps.subtitleBackgroundOpacity)) {
+        _liveReloadStartTime = _player.time.intValue / 1000.0;
+        [self loadSource:newViewProps];
+    }
+
     if (oldViewProps.paused != newViewProps.paused) {
         if (newViewProps.paused) {
             [_player pause];
@@ -277,8 +294,28 @@ static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPla
         }
     }
 
-    if (props.src.startPosition > 0) {
-        [media addOption:[NSString stringWithFormat:@":start-time=%.3f", (double)props.src.startPosition]];
+    // Estilo de subtítulos — libvlc no permite cambiar el renderer de texto en
+    // caliente, así que esto se aplica siempre al (re)crear el VLCMedia.
+    // sub-text-scale es un porcentaje lineal (25-500, 100=normal) — confiable.
+    // freetype-color/-background-* son menos documentados; si el valor exacto
+    // no da el resultado esperado, es lo primero a ajustar tras probar en
+    // dispositivo real (no se puede verificar sin uno).
+    if (props.subtitleFontScale > 0) {
+        int scalePct = (int)lround(props.subtitleFontScale * 100.0);
+        [media addOption:[NSString stringWithFormat:@":sub-text-scale=%d", scalePct]];
+    }
+    if (props.subtitleColor > 0) {
+        [media addOption:[NSString stringWithFormat:@":freetype-color=%d", (int)props.subtitleColor]];
+    }
+    if (props.subtitleBackgroundOpacity > 0) {
+        [media addOption:[NSString stringWithFormat:@":freetype-background-opacity=%d", (int)props.subtitleBackgroundOpacity]];
+        [media addOption:@":freetype-background-color=0"];
+    }
+
+    double startPos = _liveReloadStartTime >= 0 ? _liveReloadStartTime : (double)props.src.startPosition;
+    _liveReloadStartTime = -1;
+    if (startPos > 0) {
+        [media addOption:[NSString stringWithFormat:@":start-time=%.3f", startPos]];
     }
 
     NSMutableArray<NSDictionary *> *pending = [NSMutableArray array];
