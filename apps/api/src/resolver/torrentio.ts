@@ -108,8 +108,11 @@ function score(s: TorrentioStream): number {
   return pts
 }
 
+// "Castellano" es español de España, no Latino — son doblajes distintos y los
+// release groups los taggean aparte justamente para diferenciarlos. Tratarlos
+// como sinónimos hacía que pidiendo latino a veces cayera un castellano.
 function hasLatinoAudio(s: TorrentioStream): boolean {
-  return /latino|castellano/i.test(fileText(s))
+  return /latino/i.test(fileText(s))
 }
 
 type Candidate = { stream: TorrentioStream; resolveUrl: string; label: string; latino: boolean }
@@ -283,12 +286,12 @@ export async function debugTorrentio(
   const playable = streams.filter(isDirectPlayFile)
   const ranked = rankCandidates(streams, 'original')
   const latinoOnes = ranked.filter((c) => c.latino)
-  // También buscamos "latino"/"castellano" en TODOS los streams crudos (no solo
-  // los .mp4/.mkv playable) — para descartar que el propio filtro de formato
-  // esté tapando releases con doblaje que vengan en otro contenedor.
-  const rawLatinoMatches = streams.filter((s) =>
-    /latino|castellano/i.test(`${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`)
-  )
+  // Diagnóstico: separa "latino" real de "castellano" (España) en TODOS los
+  // streams crudos (no solo los .mp4/.mkv playable) — para distinguir "no hay
+  // nada en español" de "hay español pero es de España, no latino".
+  const rawText = (s: TorrentioStream) => `${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`
+  const rawLatinoMatches = streams.filter((s) => /latino/i.test(rawText(s)))
+  const rawCastellanoMatches = streams.filter((s) => /castellano/i.test(rawText(s)) && !/latino/i.test(rawText(s)))
   return {
     imdbId,
     debridEnabled,
@@ -298,6 +301,8 @@ export async function debugTorrentio(
     latino: latinoOnes.slice(0, 5).map((c) => c.label),
     rawLatinoMatchesCount: rawLatinoMatches.length,
     rawLatinoMatches: rawLatinoMatches.slice(0, 5).map((s) => s.behaviorHints?.filename ?? s.title),
+    rawCastellanoMatchesCount: rawCastellanoMatches.length,
+    rawCastellanoMatches: rawCastellanoMatches.slice(0, 5).map((s) => s.behaviorHints?.filename ?? s.title),
     top: ranked.slice(0, 8).map((c) => ({ label: c.label, latino: c.latino })),
   }
 }
