@@ -3,6 +3,7 @@ import { Image } from 'expo-image'
 import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf, isUpcoming } from '@/lib/tmdb'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 
 const CARD_WIDTH = 124
@@ -30,6 +31,7 @@ export function PosterCard({
   return (
     <Pressable
       style={[styles.card, cardStyle]}
+      onPressIn={() => prewarmTitle(item.id, isTv)}
       onPress={() =>
         router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)
       }

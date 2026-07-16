@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { api, API_URL } from './api'
+import { getContinueWatching } from './library'
 
 // Idioma de audio preferido. 'original' = idioma original (con subtítulos);
 // 'latino' = prioriza fuentes con doblaje en español latino.
@@ -68,4 +69,40 @@ export const stream = {
       : api(`/resolve/movie/${id}?lang=${lang}`)
     p.catch(() => {})
   },
+}
+
+// Precalienta el título ni bien el dedo toca el póster/tarjeta — antes de que
+// termine la transición a la pantalla de detalle o de player. Usa la
+// preferencia de idioma real (si no matchea la que pide el player después, la
+// key de cache no pega y el pre-warm queda inútil). Para series sin
+// season/episode explícito (viene de una fila genérica, no de "Seguir
+// viendo"), busca si ya hay progreso guardado para no precalentar siempre S1E1.
+export function prewarmTitle(
+  id: number,
+  isTv: boolean,
+  season?: number,
+  episode?: number
+): void {
+  ;(async () => {
+    const lang = await getAudioLang()
+    if (!isTv) {
+      stream.resolveMovie(id, lang).catch(() => {})
+      return
+    }
+    let s = season
+    let e = episode
+    if (s == null || e == null) {
+      try {
+        const watching = await getContinueWatching()
+        const match = watching.find(
+          (p) => p.id === id && p.media_type === 'tv' && p.season && p.episode
+        )
+        if (match) {
+          s = match.season
+          e = match.episode
+        }
+      } catch {}
+    }
+    stream.resolveTv(id, s ?? 1, e ?? 1, lang).catch(() => {})
+  })()
 }

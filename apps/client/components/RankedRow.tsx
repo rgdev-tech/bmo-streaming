@@ -2,6 +2,7 @@ import { View, Text, FlatList, StyleSheet } from 'react-native'
 import { Image } from 'expo-image'
 import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf } from '@/lib/tmdb'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
 
@@ -18,6 +19,7 @@ function RankedCard({ item, rank }: { item: MediaItem; rank: number }) {
     <Touchable
       style={styles.card}
       haptic="light"
+      onPressIn={() => prewarmTitle(item.id, isTv)}
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       <Text style={styles.num}>{rank}</Text>

@@ -11,6 +11,7 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { type MediaItem, backdropUrl, titleOf, genreNames } from '@/lib/tmdb'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 
 const { width } = Dimensions.get('window')
@@ -29,6 +30,7 @@ function CarouselCard({ item }: { item: MediaItem }) {
       scaleTo={0.98}
       haptic="light"
       style={styles.card}
+      onPressIn={() => prewarmTitle(item.id, isTv)}
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       {/* Imagen backdrop */}

@@ -16,8 +16,8 @@ import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
 import { PosterRow } from '@/components/PosterRow'
-import { isInMyList, toggleMyList, toLibraryItem, getContinueWatching } from '@/lib/library'
-import { stream } from '@/lib/stream'
+import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
+import { prewarmTitle } from '@/lib/stream'
 import { DownloadButton } from '@/components/DownloadButton'
 import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
@@ -52,38 +52,12 @@ export default function TitleScreen() {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
 
-  // Pre-calienta el cache de resolución al abrir el título, así Play arranca
-  // instantáneo — sin gatear el botón a su resultado: el resolver puede fallar
-  // de forma transitoria y bloquear el botón permanentemente no vale la pena
-  // (el error real, si lo hay, ya se maneja dentro del player). Para series,
-  // precalienta el episodio de "seguir viendo" (el que el usuario realmente
-  // va a tocar), no siempre S1E1.
+  // Respaldo: si se llegó acá sin pasar por una tarjeta con prewarm-on-touch
+  // (deep link, back/forward), igual precalienta apenas monta la pantalla.
+  // Normalmente esto ya corrió antes, en el onPressIn de la tarjeta que trajo
+  // hasta acá — ver prewarmTitle en lib/stream.ts.
   useEffect(() => {
-    let cancelled = false
-    async function prewarm() {
-      if (!isTv) {
-        stream.resolveMovie(id).catch(() => {})
-        return
-      }
-      let season = 1
-      let episode = 1
-      try {
-        const watching = await getContinueWatching()
-        const match = watching.find(
-          (p) => p.id === Number(id) && p.media_type === 'tv' && p.season && p.episode
-        )
-        if (match) {
-          season = match.season!
-          episode = match.episode!
-        }
-      } catch {}
-      if (cancelled) return
-      stream.resolveTv(id, season, episode).catch(() => {})
-    }
-    prewarm()
-    return () => {
-      cancelled = true
-    }
+    prewarmTitle(Number(id), isTv)
   }, [id, isTv])
 
   const [logo, setLogo] = useState<string | null>(null)

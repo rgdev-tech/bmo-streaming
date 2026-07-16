@@ -14,6 +14,7 @@ import {
   genreNames,
 } from '@/lib/tmdb'
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 
 const { width, height } = Dimensions.get('window')
@@ -150,7 +151,13 @@ export function Hero({ item, active, scrollY }: { item: MediaItem; active: boole
               <Text style={styles.soonText}>Próximamente</Text>
             </View>
           ) : (
-            <Touchable scaleTo={0.95} haptic="medium" style={styles.playBtn} onPress={play}>
+            <Touchable
+              scaleTo={0.95}
+              haptic="medium"
+              style={styles.playBtn}
+              onPressIn={() => prewarmTitle(item.id, isTv)}
+              onPress={play}
+            >
               <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
               <Text style={styles.playText}>Reproducir</Text>
             </Touchable>
@@ -166,7 +173,12 @@ export function Hero({ item, active, scrollY }: { item: MediaItem; active: boole
       </View>
 
       {/* Toque en el arte → detalle */}
-      <Touchable scaleTo={1} style={styles.tapArea} onPress={open} />
+      <Touchable
+        scaleTo={1}
+        style={styles.tapArea}
+        onPressIn={() => prewarmTitle(item.id, isTv)}
+        onPress={open}
+      />
     </View>
   )
 }

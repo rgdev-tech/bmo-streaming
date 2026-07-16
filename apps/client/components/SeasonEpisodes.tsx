@@ -12,6 +12,7 @@ import { SymbolView } from 'expo-symbols'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
 import { getWatchedEpisodes, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
+import { prewarmTitle } from '@/lib/stream'
 import { DownloadButton } from './DownloadButton'
 import { Touchable } from './Touchable'
 
@@ -162,6 +163,7 @@ function EpisodeRow({
       scaleTo={0.98}
       haptic="light"
       style={[styles.epRow, !released && styles.epRowSoon]}
+      onPressIn={released ? () => prewarmTitle(Number(tvId), true, season, ep.episode_number) : undefined}
       onPress={released ? open : undefined}
       disabled={!released}
     >

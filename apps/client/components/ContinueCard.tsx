@@ -5,6 +5,7 @@ import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { backdropUrl, posterUrl } from '@/lib/tmdb'
 import { removeProgress, type Progress } from '@/lib/library'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 
 const CARD_WIDTH = 300
@@ -66,7 +67,12 @@ export function ContinueCard({
   }
 
   return (
-    <Touchable style={styles.card} haptic="light" onPress={resume}>
+    <Touchable
+      style={styles.card}
+      haptic="light"
+      onPressIn={() => prewarmTitle(item.id, item.media_type === 'tv', item.season, item.episode)}
+      onPress={resume}
+    >
       {img ? (
         <Image source={img} style={styles.thumb} contentFit="cover" transition={150} />
       ) : (

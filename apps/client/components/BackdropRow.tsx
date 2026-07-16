@@ -3,6 +3,7 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { type MediaItem, backdropUrl, titleOf } from '@/lib/tmdb'
+import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
 
@@ -19,6 +20,7 @@ function BackdropCard({ item }: { item: MediaItem }) {
     <Touchable
       style={styles.card}
       haptic="light"
+      onPressIn={() => prewarmTitle(item.id, isTv)}
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       {uri ? (
