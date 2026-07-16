@@ -437,7 +437,8 @@ export async function debugSubs(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
-  episode?: number
+  episode?: number,
+  source?: string
 ): Promise<any> {
   if (!WYZIE_KEY) return { error: 'WYZIE_API_KEY no está definida en el entorno' }
   const u = new URL('https://sub.wyzie.io/search')
@@ -445,6 +446,7 @@ export async function debugSubs(
   u.searchParams.set('language', 'es,en,pt')
   u.searchParams.set('format', 'srt')
   u.searchParams.set('key', WYZIE_KEY)
+  if (source) u.searchParams.set('source', source)
   if (type === 'tv') {
     u.searchParams.set('season', String(season ?? 1))
     u.searchParams.set('episode', String(episode ?? 1))

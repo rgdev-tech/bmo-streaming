@@ -73,13 +73,13 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   // Diagnóstico de subtítulos: fetch crudo a Wyzie
   .get(
     '/debug/subs/movie/:id',
-    ({ params }) => debugSubs('movie', Number(params.id)),
-    { params: t.Object({ id: t.String() }) }
+    ({ params, query }) => debugSubs('movie', Number(params.id), undefined, undefined, (query as { source?: string }).source),
+    { params: t.Object({ id: t.String() }), query: t.Object({ source: t.Optional(t.String()) }) }
   )
   .get(
     '/debug/subs/tv/:id/:season/:episode',
-    ({ params }) => debugSubs('tv', Number(params.id), Number(params.season), Number(params.episode)),
-    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+    ({ params, query }) => debugSubs('tv', Number(params.id), Number(params.season), Number(params.episode), (query as { source?: string }).source),
+    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }), query: t.Object({ source: t.Optional(t.String()) }) }
   )
 
   // Diagnóstico: candidatos de Torrentio (mp4 rankeados) sin resolver el link final
