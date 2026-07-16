@@ -170,16 +170,26 @@ export default function PlayerScreen() {
       const dir = `${FileSystem.cacheDirectory}subs/`
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
       const results: { uri: string; language: string; title: string }[] = []
+      console.log(`[subs] ${esSubs.length} candidato(s) en español para ${type}/${id} T${seasonN}:E${episodeN}`)
       for (const s of esSubs) {
         const localPath = `${dir}${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}-${s.i}.srt`
-        const cached = await FileSystem.getInfoAsync(localPath)
-        if (cached.exists) {
+        // No confiar en "existe" solo: una descarga vieja/interrumpida puede haber
+        // dejado un archivo vacío o corrupto, y eso quedaría cacheado para siempre.
+        const cached = await FileSystem.getInfoAsync(localPath, { size: true })
+        if (cached.exists && cached.size > 200) {
+          console.log(`[subs] usando caché local (${cached.size} bytes): ${localPath}`)
           results.push({ uri: localPath, language: s.lang, title: s.label })
           continue
         }
+        if (cached.exists) {
+          console.log(`[subs] caché sospechoso (muy chico), lo borro y reintento: ${localPath}`)
+          await FileSystem.deleteAsync(localPath, { idempotent: true })
+        }
+        let gotIt = false
         for (const url of [s.url, ...s.altUrls]) {
           try {
             const dl = await FileSystem.downloadAsync(url, localPath)
+            console.log(`[subs] GET ${url} → status ${dl.status}`)
             if (dl.status !== 200) continue
             // No leemos el contenido como texto acá: algunos .srt de
             // opensubtitles NO son UTF-8 real pese a que la URL lo diga
@@ -191,14 +201,22 @@ export default function PlayerScreen() {
             const contentType = Object.entries(dl.headers ?? {})
               .find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
             if (/text\/html/i.test(contentType)) {
+              console.log(`[subs] content-type=${contentType} → parece bloqueo, descarto`)
               await FileSystem.deleteAsync(localPath, { idempotent: true })
               continue
             }
+            const info = await FileSystem.getInfoAsync(localPath, { size: true })
+            console.log(`[subs] OK, guardado (${info.exists ? info.size : '?'} bytes): ${localPath}`)
             results.push({ uri: localPath, language: s.lang, title: s.label })
+            gotIt = true
             break
-          } catch {}
+          } catch (e) {
+            console.log(`[subs] fetch de ${url} tiró excepción: ${String(e)}`)
+          }
         }
+        if (!gotIt) console.log(`[subs] ninguna URL funcionó para "${s.label}" (i=${s.i})`)
       }
+      console.log(`[subs] resultado final: ${results.length} pista(s) para sideload`)
       if (!cancelled) setVlcTextTracks(results)
     }
     loadSpanishSubs()
