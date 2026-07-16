@@ -181,9 +181,16 @@ export default function PlayerScreen() {
           try {
             const dl = await FileSystem.downloadAsync(url, localPath)
             if (dl.status !== 200) continue
-            const text = await FileSystem.readAsStringAsync(localPath)
-            // Un srt real nunca empieza con HTML — una página de bloqueo/challenge sí.
-            if (/^\s*<(!doctype|html)/i.test(text)) {
+            // No leemos el contenido como texto acá: algunos .srt de
+            // opensubtitles NO son UTF-8 real pese a que la URL lo diga
+            // (confirmado con archivos reales, vienen en Latin-1) — decodificar
+            // esos bytes como UTF-8 tira excepción y se perdía el subtítulo en
+            // silencio. Alcanza con el content-type: una página de bloqueo de
+            // Cloudflare es text/html; un subtítulo real nunca lo es. VLCKit
+            // decodifica el charset real del archivo por su cuenta al renderizar.
+            const contentType = Object.entries(dl.headers ?? {})
+              .find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
+            if (/text\/html/i.test(contentType)) {
               await FileSystem.deleteAsync(localPath, { idempotent: true })
               continue
             }
