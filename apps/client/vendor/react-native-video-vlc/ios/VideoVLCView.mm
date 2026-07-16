@@ -127,27 +127,44 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
 
     if (srcChanged) {
         [self loadSource:newViewProps];
-    } else if (oldViewProps.src.textTracks.size() != newViewProps.src.textTracks.size() && _hasEmittedLoad) {
-        // enforce:YES — a diferencia de applyPendingTextTracks (que corre ANTES
-        // de que el video arranque), acá el track llega tarde: se agregó después
-        // de que JS terminó de bajar el subtítulo (ver prewarmTitle/player.tsx).
-        // Sin forzarlo, se suma a la lista pero sigue activo lo que ya estaba
-        // seleccionado (el embebido del archivo, o ninguno) — el usuario nunca
-        // lo ve sin entrar manualmente al picker.
-        for (const auto &t : newViewProps.src.textTracks) {
-            NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
-            NSURL *url = uri.length > 0 ? [NSURL URLWithString:uri] : nil;
-            if (url) {
-                [_player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+    } else if (oldViewProps.src.textTracks.size() != newViewProps.src.textTracks.size()) {
+        // El track de subtítulo (bajado en JS, ver prewarmTitle/player.tsx) puede
+        // llegar en dos momentos distintos según qué tan grande/lento sea el
+        // archivo de video:
+        if (_hasEmittedLoad) {
+            // Ya arrancó a reproducir → agregarlo YA, forzado (enforce:YES) para
+            // que quede seleccionado — si no, se suma a la lista pero sigue
+            // activo lo que ya había (embebido del archivo, o ninguno) y el
+            // usuario nunca lo ve sin entrar manualmente al picker.
+            for (const auto &t : newViewProps.src.textTracks) {
+                NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
+                NSURL *url = uri.length > 0 ? [NSURL URLWithString:uri] : nil;
+                if (url) {
+                    [_player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
+                }
             }
+            // addPlaybackSlave no registra la pista al toque (tiene que bajar/
+            // parsear el archivo) — reemitimos el estado un rato después para
+            // que el picker de JS refleje la pista nueva.
+            __weak VideoVLCView *weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [weakSelf emitLoad];
+            });
+        } else {
+            // Todavía no arrancó (archivos grandes tardan en bufferear) — si acá
+            // se ignorara el track porque _hasEmittedLoad es NO, se perdería para
+            // siempre: nada lo vuelve a pedir después. En vez de eso, lo dejamos
+            // en _pendingTextTracks (mismo mecanismo que loadSource:) para que
+            // applyPendingTextTracks lo agregue apenas el video sí arranque.
+            NSMutableArray<NSDictionary *> *pending = [NSMutableArray array];
+            for (const auto &t : newViewProps.src.textTracks) {
+                NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
+                if (uri.length > 0) {
+                    [pending addObject:@{@"uri": uri}];
+                }
+            }
+            _pendingTextTracks = pending;
         }
-        // addPlaybackSlave no registra la pista al toque (tiene que bajar/parsear
-        // el archivo) — reemitimos el estado un rato después para que el picker
-        // de JS refleje la pista nueva (mismo patrón que el pending-tracks inicial).
-        __weak VideoVLCView *weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [weakSelf emitLoad];
-        });
     }
 
     if (oldViewProps.paused != newViewProps.paused) {
