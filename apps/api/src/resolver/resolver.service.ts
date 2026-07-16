@@ -464,7 +464,7 @@ export async function debugSubs(
       isArray: Array.isArray(parsed),
       count: Array.isArray(parsed) ? parsed.length : undefined,
       sample: Array.isArray(parsed) ? parsed.slice(0, 3) : undefined,
-      bodyPreview: parsed ? undefined : body.slice(0, 300),
+      errorBody: Array.isArray(parsed) ? undefined : parsed ?? body.slice(0, 300),
     }
   } catch (e) {
     return { url: safeUrl, error: String((e as Error).message) }
