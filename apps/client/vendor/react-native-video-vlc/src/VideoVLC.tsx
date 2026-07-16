@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -77,6 +78,17 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
     const [nativeSource, setNativeSource] = useState<VideoSrc | undefined>(
       getNativeSource(initialSource)
     );
+
+    // El inicializador de useState de arriba solo corre en el primer render —
+    // si initialSource cambia después (p.ej. textTracks, cuando un subtítulo
+    // termina de bajar después de que el video ya arrancó), quedaba ignorado
+    // para siempre y el componente nativo nunca se enteraba. Filtramos por uri
+    // y por la referencia de textTracks (no por el objeto initialSource entero,
+    // que el caller recrea en cada render) para no re-disparar de más.
+    useEffect(() => {
+      setNativeSource(getNativeSource(initialSource));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialSource?.uri, initialSource?.textTracks]);
 
     const onVideoError = useCallback(
       (e: NativeSyntheticEvent<OnVideoErrorData>) => {
