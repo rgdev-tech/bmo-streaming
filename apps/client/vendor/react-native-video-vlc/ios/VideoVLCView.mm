@@ -29,6 +29,31 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
     return [value isKindOfClass:[NSNumber class]] ? [(NSNumber *)value intValue] : -1;
 }
 
+// addPlaybackSlave no registra la pista al toque — VLC todavía tiene que bajar
+// (si es remota) y parsear el archivo, y ese tiempo varía según qué tan ocupado
+// esté el player arrancando el video principal. Un delay fijo podía no alcanzar,
+// dejando el picker de JS sin la pista nueva aunque VLC ya la tuviera cargada
+// por dentro. En vez de adivinar, reintenta cada 350ms hasta ver que el conteo
+// de subtítulos subió (o hasta un máximo de intentos, por si el archivo de
+// verdad no trae ninguna pista más).
+static void VideoVLCPollForSubtitleTrackIncrease(VideoVLCView *view, VLCMediaPlayer *player, NSInteger previousCount, NSInteger attemptsLeft, void (^emitBlock)(void)) {
+    if (attemptsLeft <= 0) {
+        emitBlock();
+        return;
+    }
+    __weak VideoVLCView *weakView = view;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        VideoVLCView *strongView = weakView;
+        if (!strongView) return;
+        NSInteger currentCount = (NSInteger)player.videoSubTitlesIndexes.count;
+        if (currentCount > previousCount) {
+            emitBlock();
+        } else {
+            VideoVLCPollForSubtitleTrackIncrease(strongView, player, previousCount, attemptsLeft - 1, emitBlock);
+        }
+    });
+}
+
 @interface VideoVLCView () <RCTVideoVLCViewViewProtocol, VLCMediaPlayerDelegate>
 @end
 
@@ -136,6 +161,7 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
             // que quede seleccionado — si no, se suma a la lista pero sigue
             // activo lo que ya había (embebido del archivo, o ninguno) y el
             // usuario nunca lo ve sin entrar manualmente al picker.
+            NSInteger previousCount = (NSInteger)_player.videoSubTitlesIndexes.count;
             for (const auto &t : newViewProps.src.textTracks) {
                 NSString *uri = [NSString stringWithUTF8String:t.uri.c_str()];
                 NSURL *url = uri.length > 0 ? [NSURL URLWithString:uri] : nil;
@@ -143,11 +169,9 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
                     [_player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:YES];
                 }
             }
-            // addPlaybackSlave no registra la pista al toque (tiene que bajar/
-            // parsear el archivo) — reemitimos el estado un rato después para
-            // que el picker de JS refleje la pista nueva.
             __weak VideoVLCView *weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            VLCMediaPlayer *player = _player;
+            VideoVLCPollForSubtitleTrackIncrease(self, player, previousCount, 12, ^{
                 [weakSelf emitLoad];
             });
         } else {
@@ -408,6 +432,7 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
 
     if (!_hasEmittedLoad) {
         _hasEmittedLoad = YES;
+        NSInteger previousCount = (NSInteger)_player.videoSubTitlesIndexes.count;
         BOOL hadPendingTextTracks = _pendingTextTracks.count > 0;
         [self applyPendingTextTracks];
         [self emitLoad];
@@ -415,10 +440,11 @@ static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
         // addPlaybackSlave: no registra la pista de forma instantánea (todavía
         // tiene que bajar y parsear el archivo) — si emitLoad corrió antes de
         // que termine, la lista de subtítulos sale vacía en el primer aviso.
-        // Reemitimos un rato después, ya con lo que haya terminado de cargar.
+        // Reintentamos hasta confirmar que VLC ya la registró.
         if (hadPendingTextTracks) {
             __weak VideoVLCView *weakSelf = self;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            VLCMediaPlayer *player = _player;
+            VideoVLCPollForSubtitleTrackIncrease(self, player, previousCount, 12, ^{
                 [weakSelf emitLoad];
             });
         }
