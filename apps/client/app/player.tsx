@@ -161,10 +161,11 @@ export default function PlayerScreen() {
   // teléfono. Se cachean en disco para no re-descargar en cada apertura.
   const [vlcTextTracks, setVlcTextTracks] = useState<{ uri: string; language: string; title: string }[]>([])
   useEffect(() => {
-    if (!isVlcSource) { setVlcTextTracks([]); return }
+    console.log(`[subs] efecto disparado — isVlcSource=${isVlcSource} streamType=${streamType} subtitles=${JSON.stringify(subtitles)}`)
+    if (!isVlcSource) { console.log('[subs] no es fuente VLC, corto acá'); setVlcTextTracks([]); return }
     let cancelled = false
     const esSubs = subtitles.filter((s) => s.lang === 'es')
-    if (!esSubs.length) { setVlcTextTracks([]); return }
+    if (!esSubs.length) { console.log('[subs] no hay candidatos en español, corto acá'); setVlcTextTracks([]); return }
 
     async function loadSpanishSubs() {
       const dir = `${FileSystem.cacheDirectory}subs/`
@@ -574,6 +575,10 @@ function VlcPlayer({
   onPlayNext: () => void
   onError: (msg: string) => void
 }) {
+  // Canario: confirma si los console.log del dispositivo llegan a la terminal
+  // de Metro. Si esto NO aparece pero el video sí anda, los logs no se están
+  // reenviando y hay que diagnosticar por otra vía.
+  console.log('[subs] VlcPlayer montó — canario de logs')
   const insets = useSafeAreaInsets()
   const vlcRef = useRef<VideoVLCRef>(null)
   const lastSave = useRef(0)
