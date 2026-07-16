@@ -10,7 +10,7 @@ import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
 import Slider from '@react-native-community/slider'
 import * as ScreenOrientation from 'expo-screen-orientation'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { GestureHandlerRootView, PinchGestureHandler, State as GHState } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
@@ -507,6 +507,25 @@ function VlcPlayer({
   const startedRef = useRef(false)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const seeking = useRef(false)
+  const seekGraceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Zoom con pellizco: escala el video para recortar las bandas negras.
+  // Sin reanimated en este proyecto — se arma con Animated (RN) clásico.
+  const baseZoom = useRef(new Animated.Value(1)).current
+  const pinchZoom = useRef(new Animated.Value(1)).current
+  const zoomScale = useRef(Animated.multiply(baseZoom, pinchZoom)).current
+  const currentZoomRef = useRef(1)
+  const onPinchGestureEvent = useRef(
+    Animated.event([{ nativeEvent: { scale: pinchZoom } }], { useNativeDriver: true })
+  ).current
+  function onPinchStateChange(event: any) {
+    if (event.nativeEvent.oldState === GHState.ACTIVE) {
+      const next = Math.max(1, Math.min(3, currentZoomRef.current * event.nativeEvent.scale))
+      currentZoomRef.current = next
+      baseZoom.setValue(next)
+      pinchZoom.setValue(1)
+    }
+  }
 
   const [paused, setPaused] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -593,37 +612,55 @@ function VlcPlayer({
     return () => {
       const { time, duration: d } = progressRef.current
       if (d > 0) saveProgress({ ...meta, position: time, duration: d })
+      if (seekGraceTimer.current) clearTimeout(seekGraceTimer.current)
     }
   }, [])
 
   function seekTo(time: number) {
-    vlcRef.current?.seek(time)
-    progressRef.current = { ...progressRef.current, time }
-    setPosition(time)
+    const clamped = Math.max(0, duration > 0 ? Math.min(duration, time) : time)
+    vlcRef.current?.seek(clamped)
+    progressRef.current = { ...progressRef.current, time: clamped }
+    setPosition(clamped)
+    // El seek nativo no es instantáneo — si soltamos seeking.current acá mismo,
+    // un onProgress "viejo" (todavía de la posición anterior) que llegue antes
+    // de que el salto termine pisa la posición recién puesta y la barra "no
+    // hace nada" a los ojos del usuario. Lo soltamos un rato después.
+    if (seekGraceTimer.current) clearTimeout(seekGraceTimer.current)
+    seekGraceTimer.current = setTimeout(() => { seeking.current = false }, 700)
+  }
+
+  function skipBy(seconds: number) {
+    seeking.current = true
+    seekTo(position + seconds)
   }
 
   const remaining = Math.max(0, duration - position)
   const showPill = hasNext && duration > 0 && remaining > 1 && remaining <= NEXT_PILL_S
 
   return (
-    <View style={styles.fill}>
-      <VideoVLC
-        ref={vlcRef}
-        style={styles.fill}
-        initialSource={{ uri, headers: referer ? { Referer: referer } : undefined, textTracks: sideloadTextTracks }}
-        paused={paused}
-        resizeMode="none"
-        progressUpdateInterval={500}
-        selectedAudioTrack={selectedAudioTrack}
-        selectedTextTrack={selectedTextTrack}
-        onLoad={handleLoad}
-        onProgress={handleProgress}
-        onBuffer={handleBuffer}
-        onError={handleError}
-        onEnd={onEnded}
-      />
+    <PinchGestureHandler onGestureEvent={onPinchGestureEvent} onHandlerStateChange={onPinchStateChange}>
+      <View style={styles.fill}>
+        <View style={[styles.fill, styles.vlcZoomClip]}>
+          <Animated.View style={[styles.fill, { transform: [{ scale: zoomScale }] }]}>
+            <VideoVLC
+              ref={vlcRef}
+              style={styles.fill}
+              initialSource={{ uri, headers: referer ? { Referer: referer } : undefined, textTracks: sideloadTextTracks }}
+              paused={paused}
+              resizeMode="none"
+              progressUpdateInterval={500}
+              selectedAudioTrack={selectedAudioTrack}
+              selectedTextTrack={selectedTextTrack}
+              onLoad={handleLoad}
+              onProgress={handleProgress}
+              onBuffer={handleBuffer}
+              onError={handleError}
+              onEnd={onEnded}
+            />
+          </Animated.View>
+        </View>
 
-      <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
 
       {buffering && (
         <View style={[StyleSheet.absoluteFillObject, styles.vlcBufferCenter]} pointerEvents="none">
@@ -652,10 +689,16 @@ function VlcPlayer({
             )}
           </View>
 
-          {/* Play/pause central */}
-          <View style={styles.vlcCenterControls} pointerEvents="box-none">
+          {/* Play/pause + retroceder/adelantar 10s */}
+          <View style={[styles.vlcCenterControls, { flexDirection: 'row', gap: 36 }]} pointerEvents="box-none">
+            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(-10)}>
+              <SymbolView name="gobackward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
+            </Touchable>
             <Touchable scaleTo={0.9} haptic="light" style={styles.vlcPlayBtn} onPress={() => setPaused((p) => !p)}>
               <SymbolView name={paused ? 'play.fill' : 'pause.fill'} tintColor="#fff" style={styles.vlcPlayIcon} />
+            </Touchable>
+            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(10)}>
+              <SymbolView name="goforward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
             </Touchable>
           </View>
 
@@ -671,7 +714,7 @@ function VlcPlayer({
               maximumTrackTintColor="rgba(255,255,255,0.3)"
               thumbTintColor="#fff"
               onSlidingStart={() => { seeking.current = true }}
-              onSlidingComplete={(v) => { seeking.current = false; seekTo(v) }}
+              onSlidingComplete={(v) => { seekTo(v) }}
             />
             <Text style={styles.vlcTime}>{fmtTime(duration)}</Text>
           </View>
@@ -742,7 +785,8 @@ function VlcPlayer({
           </View>
         </View>
       )}
-    </View>
+      </View>
+    </PinchGestureHandler>
   )
 }
 
@@ -867,6 +911,7 @@ const styles = StyleSheet.create({
   nextPillText: { color: '#000', fontSize: 15, fontWeight: '700' },
 
   // Player VLCKit: controles propios
+  vlcZoomClip: { overflow: 'hidden' },
   vlcBufferCenter: { alignItems: 'center', justifyContent: 'center' },
   vlcScrim: {
     ...StyleSheet.absoluteFillObject,
@@ -892,6 +937,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   vlcPlayIcon: { width: 26, height: 26 },
+  vlcSkipBtn: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  vlcSkipIcon: { width: 22, height: 22 },
   vlcBottomBar: {
     position: 'absolute', left: 16, right: 16,
     flexDirection: 'row', alignItems: 'center', gap: 8,

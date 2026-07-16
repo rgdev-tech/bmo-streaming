@@ -473,7 +473,15 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       if (!cap) { set.status = 404; return 'No caption' }
 
       const referer = result.headers.Referer ?? ''
-      const raw = cap.url.startsWith('http') ? await fetchSub(cap.url, referer) : cap.url
+      let raw: string | null = null
+      if (!cap.url.startsWith('http')) {
+        raw = cap.url
+      } else {
+        for (const candidate of [cap.url, ...(cap.altUrls ?? [])]) {
+          raw = await fetchSub(candidate, referer)
+          if (raw) break
+        }
+      }
       if (!raw) { set.status = 502; return 'Subtitle fetch failed' }
 
       const vtt = raw.trimStart().startsWith('WEBVTT') ? normalizeVtt(raw) : srtToVtt(raw)

@@ -22,7 +22,11 @@ const CACHE_FILE = process.env.VERCEL
   : '.cache/streams.json'
 const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
 
-export type Caption = { language: string; url: string; type: string }
+// altUrls: candidatos de respaldo para el mismo idioma (mismo uso que el
+// fallback de fuentes de video) — algunos hosts de subtítulos (dl.opensubtitles.org)
+// bloquean fetches de servidor con un challenge de Cloudflare que ni Vercel ni
+// nuestro proxy pueden resolver; si el primero falla, /sub.vtt prueba el resto.
+export type Caption = { language: string; url: string; type: string; altUrls?: string[] }
 
 export type AudioLang = 'original' | 'latino'
 
@@ -190,16 +194,23 @@ async function fetchSubtitles(
     }
     const arr = await fetch(u.toString(), { signal: AbortSignal.timeout(6000) }).then((r) => r.json())
     if (!Array.isArray(arr)) return []
-    // Un subtítulo por idioma (el primero, que Wyzie ordena por relevancia)
-    const seen = new Set<string>()
-    const out: Caption[] = []
+    // Hasta 3 candidatos por idioma (Wyzie ordena por relevancia) — el primero
+    // es el preferido, el resto queda como respaldo si ese host está bloqueado.
+    const byLang = new Map<string, { display: string; type: string; urls: string[] }>()
     for (const s of arr) {
       const lang = (s?.language ?? '').toLowerCase()
-      if (!s?.url || !lang || seen.has(lang)) continue
-      seen.add(lang)
-      out.push({ language: s.display || s.language, url: s.url, type: s.format === 'vtt' ? 'vtt' : 'srt' })
+      if (!s?.url || !lang) continue
+      const entry = byLang.get(lang)
+      if (!entry) {
+        byLang.set(lang, { display: s.display || s.language, type: s.format === 'vtt' ? 'vtt' : 'srt', urls: [s.url] })
+      } else if (entry.urls.length < 3) {
+        entry.urls.push(s.url)
+      }
     }
-    console.error(`[subs] wyzie: ${out.map((c) => c.language).join(', ') || 'ninguno'}`)
+    const out: Caption[] = [...byLang.values()].map((e) => ({
+      language: e.display, type: e.type, url: e.urls[0], altUrls: e.urls.slice(1),
+    }))
+    console.error(`[subs] wyzie: ${out.map((c) => `${c.language}(${1 + (c.altUrls?.length ?? 0)})`).join(', ') || 'ninguno'}`)
     return out
   } catch (e) {
     console.error(`[subs] wyzie error: ${(e as Error).message}`)
