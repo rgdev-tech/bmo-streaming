@@ -78,10 +78,11 @@ function fileText(s: TorrentioStream): string {
   return `${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`
 }
 
-// mp4 reproduce nativo en iOS (AVPlayer). mkv no tiene demuxer nativo — nunca
-// reproduce, sin importar qué tan bien se resuelva el link.
-function isMp4(s: TorrentioStream): boolean {
-  return (s.behaviorHints?.filename ?? '').toLowerCase().endsWith('.mp4')
+// mp4 reproduce nativo en iOS (AVPlayer) y mkv vía VLCKit (ver VideoVLCView.mm)
+// — son los dos formatos que el player sabe reproducir directo, sin conversión.
+function isDirectPlayFile(s: TorrentioStream): boolean {
+  const name = (s.behaviorHints?.filename ?? '').toLowerCase()
+  return name.endsWith('.mp4') || name.endsWith('.mkv')
 }
 
 // Prioriza resolución; penaliza archivos gigantes (riesgo de buffering en
@@ -113,10 +114,10 @@ function hasLatinoAudio(s: TorrentioStream): boolean {
 
 type Candidate = { stream: TorrentioStream; resolveUrl: string; label: string; latino: boolean }
 
-// Solo streams .mp4 ya resueltos por Torrentio (traen `url`), ordenados por
-// idioma pedido y luego por calidad.
+// Solo streams .mp4/.mkv ya resueltos por Torrentio (traen `url`), ordenados
+// por idioma pedido y luego por calidad.
 function rankCandidates(streams: TorrentioStream[], lang: 'original' | 'latino'): Candidate[] {
-  const playable = streams.filter((s) => s.url && isMp4(s))
+  const playable = streams.filter((s) => s.url && isDirectPlayFile(s))
   const ranked = playable
     .map((s) => ({
       stream: s,
@@ -213,7 +214,7 @@ export async function resolveDebridStream(
   const tFetch = Date.now() - t0
   const candidates = rankCandidates(streams, lang)
   if (!candidates.length) {
-    console.error(`[debrid] torrentio: ${streams.length} streams (${tFetch}ms) — 0 candidatos mp4`)
+    console.error(`[debrid] torrentio: ${streams.length} streams (${tFetch}ms) — 0 candidatos mp4/mkv`)
     return null
   }
 
@@ -243,12 +244,12 @@ export async function debugTorrentio(
   if (!imdbId) return { error: 'no se pudo obtener imdb_id', debridEnabled }
 
   const streams = await fetchStreams(imdbId, type, season, episode)
-  const mp4 = streams.filter(isMp4)
+  const playable = streams.filter(isDirectPlayFile)
   return {
     imdbId,
     debridEnabled,
     totalStreams: streams.length,
-    mp4Count: mp4.length,
+    playableCount: playable.length,
     top: rankCandidates(streams, 'original')
       .slice(0, 8)
       .map((c) => ({ label: c.label, latino: c.latino })),
