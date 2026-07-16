@@ -281,13 +281,23 @@ export async function debugTorrentio(
 
   const streams = await fetchStreams(imdbId, type, season, episode)
   const playable = streams.filter(isDirectPlayFile)
+  const ranked = rankCandidates(streams, 'original')
+  const latinoOnes = ranked.filter((c) => c.latino)
+  // También buscamos "latino"/"castellano" en TODOS los streams crudos (no solo
+  // los .mp4/.mkv playable) — para descartar que el propio filtro de formato
+  // esté tapando releases con doblaje que vengan en otro contenedor.
+  const rawLatinoMatches = streams.filter((s) =>
+    /latino|castellano/i.test(`${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`)
+  )
   return {
     imdbId,
     debridEnabled,
     totalStreams: streams.length,
     playableCount: playable.length,
-    top: rankCandidates(streams, 'original')
-      .slice(0, 8)
-      .map((c) => ({ label: c.label, latino: c.latino })),
+    latinoCount: latinoOnes.length,
+    latino: latinoOnes.slice(0, 5).map((c) => c.label),
+    rawLatinoMatchesCount: rawLatinoMatches.length,
+    rawLatinoMatches: rawLatinoMatches.slice(0, 5).map((s) => s.behaviorHints?.filename ?? s.title),
+    top: ranked.slice(0, 8).map((c) => ({ label: c.label, latino: c.latino })),
   }
 }
