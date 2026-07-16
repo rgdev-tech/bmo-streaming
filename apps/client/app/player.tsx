@@ -53,7 +53,10 @@ export default function PlayerScreen() {
   const [retryCount, setRetryCount] = useState(0)
 
   // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
-  const [audioLang, setAudioLangState] = useState<AudioLang>('original')
+  // Default 'latino' — coincide con el default de getAudioLang() en lib/stream.ts,
+  // así no dispara un resolve de más con 'original' antes de que cargue la
+  // preferencia real desde AsyncStorage.
+  const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
   useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
   // No forzamos orientación: el fullscreen nativo de Apple (AVPlayerViewController)

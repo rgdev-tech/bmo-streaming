@@ -11,9 +11,11 @@ const AUDIO_LANG_KEY = 'bmo:audioLang'
 export async function getAudioLang(): Promise<AudioLang> {
   try {
     const v = await AsyncStorage.getItem(AUDIO_LANG_KEY)
-    return v === 'latino' ? 'latino' : 'original'
+    // Sin preferencia guardada todavía (primer uso) → default a latino, no a
+    // original. Solo cae a 'original' si el usuario lo eligió explícitamente.
+    return v === 'original' ? 'original' : 'latino'
   } catch {
-    return 'original'
+    return 'latino'
   }
 }
 
