@@ -16,7 +16,7 @@ import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
 import { PosterRow } from '@/components/PosterRow'
-import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
+import { isInMyList, toggleMyList, toLibraryItem, getContinueWatching } from '@/lib/library'
 import { stream } from '@/lib/stream'
 import { DownloadButton } from '@/components/DownloadButton'
 import { Touchable } from '@/components/Touchable'
@@ -55,10 +55,35 @@ export default function TitleScreen() {
   // Pre-calienta el cache de resolución al abrir el título, así Play arranca
   // instantáneo — sin gatear el botón a su resultado: el resolver puede fallar
   // de forma transitoria y bloquear el botón permanentemente no vale la pena
-  // (el error real, si lo hay, ya se maneja dentro del player).
+  // (el error real, si lo hay, ya se maneja dentro del player). Para series,
+  // precalienta el episodio de "seguir viendo" (el que el usuario realmente
+  // va a tocar), no siempre S1E1.
   useEffect(() => {
-    const p = isTv ? stream.resolveTv(id, 1, 1) : stream.resolveMovie(id)
-    p.catch(() => {})
+    let cancelled = false
+    async function prewarm() {
+      if (!isTv) {
+        stream.resolveMovie(id).catch(() => {})
+        return
+      }
+      let season = 1
+      let episode = 1
+      try {
+        const watching = await getContinueWatching()
+        const match = watching.find(
+          (p) => p.id === Number(id) && p.media_type === 'tv' && p.season && p.episode
+        )
+        if (match) {
+          season = match.season!
+          episode = match.episode!
+        }
+      } catch {}
+      if (cancelled) return
+      stream.resolveTv(id, season, episode).catch(() => {})
+    }
+    prewarm()
+    return () => {
+      cancelled = true
+    }
   }, [id, isTv])
 
   const [logo, setLogo] = useState<string | null>(null)
