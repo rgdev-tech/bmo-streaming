@@ -13,6 +13,21 @@
 
 using namespace facebook::react;
 
+// VLCKit puede poner NSNull (u otro tipo) en vez de un NSString/NSNumber real
+// para pistas sin nombre — llamar .UTF8String/.intValue directo sobre eso
+// manda un selector no reconocido y crashea. Estos helpers lo evitan.
+static NSString *VideoVLCSafeTrackName(NSArray *names, NSUInteger i) {
+    if (i >= names.count) return @"";
+    id value = names[i];
+    return [value isKindOfClass:[NSString class]] ? (NSString *)value : @"";
+}
+
+static int VideoVLCSafeTrackId(NSArray *indexes, NSUInteger i) {
+    if (i >= indexes.count) return -1;
+    id value = indexes[i];
+    return [value isKindOfClass:[NSNumber class]] ? [(NSNumber *)value intValue] : -1;
+}
+
 @interface VideoVLCView () <RCTVideoVLCViewViewProtocol, VLCMediaPlayerDelegate>
 @end
 
@@ -50,6 +65,21 @@ using namespace facebook::react;
         _player.drawable = _view;
         _player.delegate = self;
 
+        // Además del delegate, nos suscribimos directo a las notificaciones —
+        // VLCKit expone estos nombres públicamente para esto. Es redundante con
+        // el delegate si ese camino funciona, pero si por lo que sea no llega
+        // (build/versión/timing), esto asegura que igual nos enteremos. Los
+        // handlers son idempotentes (guardados por _hasEmittedLoad/_isBuffering)
+        // así que llamadas duplicadas no rompen nada.
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                  selector:@selector(mediaPlayerStateChanged:)
+                                                      name:VLCMediaPlayerStateChanged
+                                                    object:_player];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                  selector:@selector(mediaPlayerTimeChanged:)
+                                                      name:VLCMediaPlayerTimeChanged
+                                                    object:_player];
+
         _progressUpdateIntervalMs = 250;
         _resizeMode = @"contain";
     }
@@ -59,6 +89,7 @@ using namespace facebook::react;
 
 - (void)dealloc
 {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     _player.delegate = nil;
     [_player stop];
     if (_aspectRatioBuf) { free(_aspectRatioBuf); _aspectRatioBuf = NULL; }
@@ -244,7 +275,27 @@ using namespace facebook::react;
 
 #pragma mark - VLCMediaPlayerDelegate
 
+// Delegate y NSNotificationCenter pueden llamar a estos métodos desde hilos
+// distintos (y potencialmente en simultáneo, ya que nos suscribimos a ambos
+// caminos). Todo el trabajo real se serializa en el hilo principal para
+// eliminar carreras sobre los ivars compartidos y porque tocar el emitter/UI
+// desde un hilo de fondo no es seguro.
+
 - (void)mediaPlayerStateChanged:(NSNotification *)aNotification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self handleStateChanged];
+    });
+}
+
+- (void)mediaPlayerTimeChanged:(NSNotification *)aNotification
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self handleTimeChanged];
+    });
+}
+
+- (void)handleStateChanged
 {
     if (!_player) return;
     VLCMediaPlayerState state = _player.state;
@@ -258,15 +309,8 @@ using namespace facebook::react;
             }
             break;
         case VLCMediaPlayerStatePlaying:
-            if (_isBuffering) {
-                _isBuffering = NO;
-                [self emitBuffering:NO];
-            }
-            if (!_hasEmittedLoad) {
-                _hasEmittedLoad = YES;
-                [self applyPendingTextTracks];
-                [self emitLoad];
-            }
+            _isBuffering = NO;
+            [self tryEmitLoadAndClearBuffering];
             break;
         case VLCMediaPlayerStateError:
             [self emitError:@"Error de reproducción VLC" code:(int)state];
@@ -283,15 +327,53 @@ using namespace facebook::react;
     }
 }
 
-- (void)mediaPlayerTimeChanged:(NSNotification *)aNotification
+- (void)handleTimeChanged
 {
-    if (!_player || !_hasEmittedLoad) return;
+    if (!_player) return;
+
+    // No confiar en _player.state == Playing acá: para streams de red VLC puede
+    // seguir reportando Buffering aunque ya esté decodificando/mostrando cuadros.
+    // Que time-changed dispare implica que hay progreso real, así que lo tomamos
+    // como la señal de "ya está andando" — también cubre el caso en que Fabric
+    // no había entregado el eventEmitter todavía cuando llegó Playing (reintenta
+    // en cada tick hasta que el emitter exista).
+    if (!_hasEmittedLoad) {
+        [self tryEmitLoadAndClearBuffering];
+    }
+
+    if (!_hasEmittedLoad) return;
 
     NSTimeInterval now = CACurrentMediaTime() * 1000.0;
     if (now - _lastProgressEmitAt < _progressUpdateIntervalMs) return;
     _lastProgressEmitAt = now;
 
     [self emitProgress];
+}
+
+- (void)tryEmitLoadAndClearBuffering
+{
+    auto emitter = [self videoEventEmitter];
+    if (!emitter) return; // reintentará en el próximo mediaPlayerTimeChanged:
+
+    emitter->onVideoBuffer({.isBuffering = false});
+
+    if (!_hasEmittedLoad) {
+        _hasEmittedLoad = YES;
+        BOOL hadPendingTextTracks = _pendingTextTracks.count > 0;
+        [self applyPendingTextTracks];
+        [self emitLoad];
+
+        // addPlaybackSlave: no registra la pista de forma instantánea (todavía
+        // tiene que bajar y parsear el archivo) — si emitLoad corrió antes de
+        // que termine, la lista de subtítulos sale vacía en el primer aviso.
+        // Reemitimos un rato después, ya con lo que haya terminado de cargar.
+        if (hadPendingTextTracks) {
+            __weak VideoVLCView *weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [weakSelf emitLoad];
+            });
+        }
+    }
 }
 
 #pragma mark - Track application
@@ -381,9 +463,9 @@ using namespace facebook::react;
     NSArray *audioNames = _player.audioTrackNames;
     int currentAudioIdx = _player.currentAudioTrackIndex;
     for (NSUInteger i = 0; i < audioIndexes.count; i++) {
-        int trackId = [audioIndexes[i] intValue];
+        int trackId = VideoVLCSafeTrackId(audioIndexes, i);
         if (trackId < 0) continue;
-        NSString *name = i < audioNames.count ? audioNames[i] : @"";
+        NSString *name = VideoVLCSafeTrackName(audioNames, i);
         audioTracks.push_back({
             .id = trackId,
             .selected = trackId == currentAudioIdx,
@@ -397,9 +479,9 @@ using namespace facebook::react;
     NSArray *subNames = _player.videoSubTitlesNames;
     int currentSubIdx = _player.currentVideoSubTitleIndex;
     for (NSUInteger i = 0; i < subIndexes.count; i++) {
-        int trackId = [subIndexes[i] intValue];
+        int trackId = VideoVLCSafeTrackId(subIndexes, i);
         if (trackId < 0) continue;
-        NSString *name = i < subNames.count ? subNames[i] : @"";
+        NSString *name = VideoVLCSafeTrackName(subNames, i);
         textTracks.push_back({
             .id = trackId,
             .selected = trackId == currentSubIdx,
@@ -413,9 +495,9 @@ using namespace facebook::react;
     NSArray *vNames = _player.videoTrackNames;
     int currentVideoIdx = _player.currentVideoTrackIndex;
     for (NSUInteger i = 0; i < vIndexes.count; i++) {
-        int trackId = [vIndexes[i] intValue];
+        int trackId = VideoVLCSafeTrackId(vIndexes, i);
         if (trackId < 0) continue;
-        NSString *name = i < vNames.count ? vNames[i] : @"";
+        NSString *name = VideoVLCSafeTrackName(vNames, i);
         videoTracks.push_back({
             .id = trackId,
             .selected = trackId == currentVideoIdx,

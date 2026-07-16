@@ -81,6 +81,35 @@ async function fetchM3u8(url: string, headers: Record<string, string>): Promise<
   return result
 }
 
+// Descarga un subtítulo desde su URL origen.
+// 1. Intento directo
+// 2. Fallback vía CF Worker — algunos hosts de subs (p.ej. dl.opensubtitles.org)
+//    bloquean con un challenge de Cloudflare las IPs de Vercel; sin este chequeo,
+//    esa página de challenge (HTML) se servía como si fuera el subtítulo.
+async function fetchSub(url: string, referer: string): Promise<string | null> {
+  const tryFetch = async (fetchUrl: string, h: Record<string, string>) => {
+    try {
+      const r = await fetch(fetchUrl, { headers: h, signal: AbortSignal.timeout?.(8000) })
+      if (!r.ok) return null
+      const text = await r.text()
+      // Un srt/vtt real nunca empieza con HTML — un challenge/bloqueo sí.
+      if (/^\s*<(!doctype|html)/i.test(text)) return null
+      return text
+    } catch {
+      return null
+    }
+  }
+
+  const direct = await tryFetch(url, referer ? { Referer: referer } : {})
+  if (direct) return direct
+
+  if (!PROXY_URL) return null
+  const proxyH: Record<string, string> = referer ? { 'x-referer': referer } : {}
+  const result = await tryFetch(`${PROXY_URL}?destination=${encodeURIComponent(url)}`, proxyH)
+  if (!result) console.error(`[sub.vtt] fetch failed (direct+proxy) ${url.slice(-60)}`)
+  return result
+}
+
 // Reescribe todas las URLs de un m3u8 (segmentos) para pasar por nuestro servidor.
 // referer se pasa directo en la URL — no necesita lookup por segmento.
 function rewriteAllUrls(m3u8: string, baseM3u8Url: string, proxyBase: string, referer: string): string {
@@ -444,10 +473,9 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
       if (!cap) { set.status = 404; return 'No caption' }
 
       const referer = result.headers.Referer ?? ''
-      const fetchSub = (url: string) =>
-        fetch(url, { headers: referer ? { Referer: referer } : {} }).then((r) => r.text())
+      const raw = cap.url.startsWith('http') ? await fetchSub(cap.url, referer) : cap.url
+      if (!raw) { set.status = 502; return 'Subtitle fetch failed' }
 
-      const raw = cap.url.startsWith('http') ? await fetchSub(cap.url) : cap.url
       const vtt = raw.trimStart().startsWith('WEBVTT') ? normalizeVtt(raw) : srtToVtt(raw)
 
       set.headers['content-type'] = 'text/vtt'

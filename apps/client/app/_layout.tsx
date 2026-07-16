@@ -1,8 +1,16 @@
+import { useEffect } from 'react'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import * as ScreenOrientation from 'expo-screen-orientation'
 
 export default function RootLayout() {
+  // Portrait por defecto en toda la app — el player VLC (mkv) lo desbloquea
+  // a horizontal mientras está montado y restaura esto al salir.
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+  }, [])
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style="light" />
