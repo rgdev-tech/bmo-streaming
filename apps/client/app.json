@@ -11,6 +11,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.rgdev.bmostreaming",
       "deploymentTarget": "18.0",
+      "usesAppleSignIn": true,
       "icon": {
         "light": "./assets/images/ios/icon-light.png",
         "dark": "./assets/images/ios/icon-dark.png"
@@ -30,7 +31,8 @@
     "plugins": [
       "expo-router",
       "expo-video",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true
@@ -40,6 +42,6 @@
       "eas": {
         "projectId": "2e610774-117f-4285-bddc-4313a2696290"
       }
-    },
+    }
   }
 }

@@ -22,9 +22,11 @@ import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { screenTitle, rowHeading } from '@/lib/typography'
 import { getContinueWatching, type Progress } from '@/lib/library'
+import { useAuth } from '@/lib/auth'
 
 export default function HomeScreen() {
   const router = useRouter()
+  const { profile } = useAuth()
   const insets = useSafeAreaInsets()
   const scrollY = useRef(new Animated.Value(0)).current
 
@@ -136,8 +138,19 @@ export default function HomeScreen() {
         pointerEvents="box-none"
       >
         <Text style={styles.headerTitle}>Inicio</Text>
-        <Touchable scaleTo={0.9} haptic="light" style={styles.avatar}>
-          <SymbolView name="person.fill" tintColor="rgba(255,255,255,0.9)" style={styles.avatarIcon} />
+        {/* Avatar → selector de perfiles. Muestra el emoji del perfil activo
+            en vez del icono genérico cuando hay sesión. */}
+        <Touchable
+          scaleTo={0.9}
+          haptic="light"
+          style={styles.avatar}
+          onPress={() => router.push('/profiles' as never)}
+        >
+          {profile ? (
+            <Text style={styles.avatarEmoji}>{profile.avatar}</Text>
+          ) : (
+            <SymbolView name="person.fill" tintColor="rgba(255,255,255,0.9)" style={styles.avatarIcon} />
+          )}
         </Touchable>
       </Animated.View>
     </View>
@@ -176,4 +189,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarIcon: { width: 22, height: 22 },
+  avatarEmoji: { fontSize: 22 },
 })
