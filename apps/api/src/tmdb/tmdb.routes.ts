@@ -19,8 +19,14 @@ const STUDIOS: Record<
   prime: { name: 'Prime Video', type: 'movie', providerId: 9 },
   appletv: { name: 'Apple TV+', type: 'tv', providerId: 350 },
   marvel: { name: 'Marvel', type: 'movie', companyId: 420 },
+  dc: { name: 'DC', type: 'movie', companyId: 429 },
   pixar: { name: 'Pixar', type: 'movie', companyId: 3 },
   starwars: { name: 'Star Wars', type: 'movie', companyId: 1 },
+  // Paramount+ como watch-provider viene vacío en TMDB → usamos la productora.
+  paramount: { name: 'Paramount', type: 'movie', companyId: 4 },
+  warner: { name: 'Warner Bros.', type: 'movie', companyId: 174 },
+  universal: { name: 'Universal', type: 'movie', companyId: 33 },
+  dreamworks: { name: 'DreamWorks', type: 'movie', companyId: 521 },
 }
 
 async function safeGenres(

@@ -17,8 +17,13 @@ export const STUDIO_BRANDS: StudioBrand[] = [
   { key: 'prime', name: 'Prime Video', aliases: ['prime', 'prime video', 'amazon prime', 'amazon'], colors: ['#1FA2FF', '#0B5C9E'] },
   { key: 'appletv', name: 'Apple TV+', aliases: ['apple', 'apple tv', 'apple tv+', 'appletv'], colors: ['#4A4A4A', '#111111'] },
   { key: 'marvel', name: 'Marvel', aliases: ['marvel', 'mcu'], colors: ['#ED1D24', '#7A0F13'] },
+  { key: 'dc', name: 'DC', aliases: ['dc', 'dc comics', 'dceu'], colors: ['#1D6FB8', '#0A1B3D'] },
   { key: 'pixar', name: 'Pixar', aliases: ['pixar'], colors: ['#2AA5E0', '#F2C230'] },
   { key: 'starwars', name: 'Star Wars', aliases: ['star wars', 'starwars', 'lucasfilm'], colors: ['#000000', '#3A3A00'] },
+  { key: 'paramount', name: 'Paramount', aliases: ['paramount', 'paramount+', 'paramount plus'], colors: ['#0064FF', '#00317A'] },
+  { key: 'warner', name: 'Warner Bros.', aliases: ['warner', 'warner bros', 'warner brothers', 'wb'], colors: ['#123A87', '#0A1F4D'] },
+  { key: 'universal', name: 'Universal', aliases: ['universal', 'universal pictures'], colors: ['#1B4B9E', '#0A244F'] },
+  { key: 'dreamworks', name: 'DreamWorks', aliases: ['dreamworks', 'dream works'], colors: ['#1E6FCC', '#0B2E5C'] },
 ]
 
 // Coincidencia exacta contra el query completo (no substring) — así "disney"
