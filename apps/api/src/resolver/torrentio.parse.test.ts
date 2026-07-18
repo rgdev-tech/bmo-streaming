@@ -217,6 +217,55 @@ describe('rejectionOf — rechazos duros', () => {
   })
 })
 
+describe('procedencia del release', () => {
+  test('un PRE-HD "1080p" pierde contra un BluRay 1080p', () => {
+    // Caso real: en Superman (2025) ganaba este rip pre-estreno de Tamil,
+    // porque tenía 1080p y buen bitrate y nada miraba de dónde salía.
+    const ref = movieRef({ title: 'Superman', originalTitle: 'Superman', year: 2025, runtimeMin: 130 })
+    const preHd = parse('www.1TamilMV.onl - Superman (2025) HQ PRE-HD - 1080p - x264 - [Tam].mkv')
+    const bluray = parse('Superman.2025.1080p.BluRay.x264-GROUP.mkv')
+    expect(preHd.releaseKind).toBe('cam')
+    expect(scoreStream(bluray, ref, 'original').score)
+      .toBeGreaterThan(scoreStream(preHd, ref, 'original').score)
+  })
+
+  test.each(['M.2020.HDCAM.1080p.mkv', 'M.2020.TELESYNC.720p.mkv', 'M.2020.PRE-HD.1080p.mkv'])(
+    '%s se marca como cam', (name) => {
+      expect(parse(name).releaseKind).toBe('cam')
+    })
+
+  test('no confunde DTS ni la extensión .ts con telesync', () => {
+    expect(parse('M.2020.1080p.BluRay.DTS-HD.MA.x264.mkv').releaseKind).toBe('bluray')
+    expect(parse('M.2020.1080p.ts').releaseKind).toBeNull()
+  })
+
+  test('BluRay y WEB-DL no se penalizan', () => {
+    const ref = movieRef({ year: 2020 })
+    expect(scoreStream(parse('M.2020.1080p.BluRay.x264.mkv'), ref, 'original').parts.release).toBe(0)
+    expect(scoreStream(parse('M.2020.1080p.WEB-DL.x264.mkv'), ref, 'original').parts.release).toBe(0)
+  })
+})
+
+describe('not-video usa lista negra, no blanca', () => {
+  test('rechaza lo que positivamente NO es video', () => {
+    expect(rejectionOf(parse('Movie.1080p.rar'), movieRef())).toBe('not-video')
+    expect(rejectionOf(parse('Movie.1080p.iso'), movieRef())).toBe('not-video')
+  })
+
+  test('REGRESIÓN: sin extensión legible NO se rechaza', () => {
+    // Torrentio a veces no manda behaviorHints.filename y la primera línea de
+    // `title` es un nombre de display sin extensión. Con lista blanca se caía
+    // ~10% de candidatos por título, todos perfectamente válidos.
+    const p = parse('Fight Club 1999 1080p 10th Ann Edt BluRay DTS x264 D-Z0N3')
+    expect(rejectionOf(p, movieRef())).toBeNull()
+  })
+
+  test('.ts y .avi se aceptan (VLCKit los reproduce)', () => {
+    expect(rejectionOf(parse('Movie.1999.1080p.ts'), movieRef())).toBeNull()
+    expect(rejectionOf(parse('Movie.1999.1080p.avi'), movieRef())).toBeNull()
+  })
+})
+
 describe('titleOverlap', () => {
   test('reconoce el título traducido y el original', () => {
     expect(titleOverlap(FILE.fightClubUpscale, movieRef())).toBeGreaterThan(0)

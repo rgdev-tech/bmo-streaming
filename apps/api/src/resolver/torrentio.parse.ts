@@ -28,6 +28,11 @@ export type AudioTag =
   | 'latino' | 'castellano' | 'spanish'
   | 'english' | 'italian' | 'french' | 'portuguese'
 
+// Procedencia del release. Es independiente de la resolución: un "1080p" puede
+// ser una grabación de cine (CAM/PRE-HD) que se ve horrible. En estrenos
+// recientes estos rips abundan y sin esto ganaban por tener buen bitrate.
+export type ReleaseKind = 'cam' | 'screener' | 'hdtv' | 'web' | 'bluray' | null
+
 export type ParsedStream = {
   raw: TorrentioStream
   filename: string
@@ -37,6 +42,7 @@ export type ParsedStream = {
   hdr: 'none' | 'hdr10' | 'hdr10plus' | 'dv'
   isRemux: boolean
   isUpscale: boolean
+  releaseKind: ReleaseKind
   sizeGB: number | null
   seeders: number | null
   cached: CacheState
@@ -192,8 +198,26 @@ export function parseLangs(text: string): Set<AudioTag> {
   return out
 }
 
-// mp4/mkv reproducen nativo (AVPlayer y VLCKit); avi/m4v los toma VLCKit.
-const VIDEO_EXT_RE = /\.(mkv|mp4|avi|m4v)$/i
+// Lista NEGRA, no blanca: se rechaza solo ante evidencia POSITIVA de que no es
+// video (un .rar, un .iso). Con lista blanca se caían ~10% de candidatos por
+// título, porque Torrentio a veces no da `behaviorHints.filename` y la primera
+// línea de `title` es un nombre de display sin extensión — un torrent perfecto
+// que descartábamos por no poder leerle la extensión.
+const NON_VIDEO_EXT_RE = /\.(?:rar|zip|7z|iso|exe|nfo|txt|srt|sub|idx|jpe?g|png)$/i
+
+// Grabaciones de sala y pre-estrenos: se ven mal a cualquier resolución.
+// "TS" a secas no se usa: choca con DTS y con la extensión .ts.
+const CAM_RE = /\b(?:cam|hdcam|camrip|hdts|telesync|telecine|hdtc|pre[\s._-]?hd|pre[\s._-]?dvd)\b/i
+const SCREENER_RE = /\b(?:scr|screener|dvdscr|r5)\b/i
+
+function parseReleaseKind(text: string): ReleaseKind {
+  if (CAM_RE.test(text)) return 'cam'
+  if (SCREENER_RE.test(text)) return 'screener'
+  if (/\b(?:blu[\s._-]?ray|bdrip|brrip|bdremux|remux|bdmux)\b/i.test(text)) return 'bluray'
+  if (/\b(?:web[\s._-]?dl|web[\s._-]?rip|webrip|amzn|nf|dsnp|web)\b/i.test(text)) return 'web'
+  if (/\bhdtv\b/i.test(text)) return 'hdtv'
+  return null
+}
 
 export function parseStream(s: TorrentioStream): ParsedStream {
   // Torrentio omite behaviorHints.filename en algunos torrents de archivo
@@ -235,6 +259,7 @@ export function parseStream(s: TorrentioStream): ParsedStream {
     bitDepth: /\b10[\s._-]?bits?\b/i.test(text) ? 10 : /\b8[\s._-]?bits?\b/i.test(text) ? 8 : null,
     hdr,
     isRemux: /\bremux\b/i.test(text),
+    releaseKind: parseReleaseKind(text),
     // "4Kreescalado", "upscaled": 4K falso hecho a partir de un 1080p. Pesa
     // como 4K y no aporta nada de calidad.
     isUpscale: /reescalad|upscal|re[\s._-]?scaled/i.test(text),
@@ -277,7 +302,7 @@ export function titleOverlap(filename: string, m: MediaRef): number {
 // Todo lo demás (calidad, tamaño, idioma) es preferencia y va al score.
 export function rejectionOf(p: ParsedStream, m: MediaRef): Rejection | null {
   if (!p.resolveUrl) return 'no-url'
-  if (!VIDEO_EXT_RE.test(p.filename)) return 'not-video'
+  if (NON_VIDEO_EXT_RE.test(p.filename)) return 'not-video'
 
   // AV1 no tiene decodificación por hardware en iPhone salvo A17 Pro y
   // posteriores; por software un 4K AV1 es imposible en un teléfono. Reproduce
@@ -372,6 +397,15 @@ export function scoreStream(p: ParsedStream, m: MediaRef, lang: 'original' | 'la
 
   parts.upscale = p.isUpscale ? -60 : 0
   parts.remux = p.isRemux ? -40 : 0
+
+  // Procedencia. Un CAM/PRE-HD "1080p" con buen bitrate se colaba al tope
+  // (caso real: un "HQ PRE-HD" ganaba en Superman 2025) porque ningún otro
+  // término mira de dónde salió la copia.
+  parts.release =
+    p.releaseKind === 'cam' ? -120
+    : p.releaseKind === 'screener' ? -90
+    : p.releaseKind === 'hdtv' ? -10
+    : 0
 
   // Bitrate, no tamaño: 20 GB en 90 min (~30 Mbps) y 20 GB en 3 h (~15 Mbps)
   // son cosas muy distintas para una conexión móvil.
