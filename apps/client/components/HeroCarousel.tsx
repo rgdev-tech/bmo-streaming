@@ -20,10 +20,11 @@ const MAX_ITEMS = 6
 
 // Capa de fondo del pull-to-refresh: vive DETRÁS del FlatList, sin recorte
 // horizontal, mostrando solo el backdrop del slide activo. Necesita estar
-// separada del FlatList porque cada slide SÍ está recortado (overflow:hidden,
-// para no sangrar hacia el vecino) — un recorte que mataría este estiramiento
-// si viviera adentro. Al reposo (scale 1) queda tapada por el propio slide
-// encima; solo se ve en el hueco que aparece arriba al halar.
+// separada del FlatList porque el Hero SÍ se recorta a sí mismo (styles.hero,
+// overflow:hidden, para que el zoom del Ken Burns no sangre al vecino) — un
+// recorte que mataría este estiramiento si viviera adentro. Al reposo
+// (scale 1) queda tapada por el propio slide encima; solo se ve en el hueco
+// que aparece arriba al halar.
 function PullStretchBackdrop({ uri, scrollY }: { uri: string | null; scrollY?: Animated.Value }) {
   if (!uri || !scrollY) return null
 
@@ -74,7 +75,15 @@ export function HeroCarousel({
     [items]
   )
 
+  // Dos valores para el mismo scroll:
+  //  - scrollX: driver NATIVO, mueve los slides (transform/opacity). Tiene que
+  //    ser nativo sí o sí: la contra-traslación del fundido cancela el scroll
+  //    del FlatList, y si corriera en el hilo JS iría un frame atrás del scroll
+  //    nativo y la imagen "temblaría" bajo el dedo.
+  //  - scrollXDots: driver JS, solo para los dots (animan `width`, que el
+  //    driver nativo no soporta). Son diminutos, un frame de retraso no se ve.
   const scrollX = useRef(new Animated.Value(0)).current
+  const scrollXDots = useRef(new Animated.Value(0)).current
   const listRef = useRef<Animated.FlatList<MediaItem>>(null)
   const activeIdxRef = useRef(0)
   const [activeIdx, setActiveIdx] = useState(0)
@@ -125,29 +134,58 @@ export function HeroCarousel({
         onScrollBeginDrag={() => clearInterval(timerRef.current)}
         onMomentumScrollEnd={onMomentumScrollEnd}
         onScroll={Animated.event(
-          // false: los dots animan `width` (no soportado por el native driver,
-          // solo opacity/transform) — mismo patrón que FeaturedCarousel.tsx
           [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: false }
+          {
+            useNativeDriver: true,
+            // Los dots quedan fuera del driver nativo (animan `width`), así que
+            // los alimentamos aparte desde acá.
+            listener: (e: NativeSyntheticEvent<NativeScrollEvent>) =>
+              scrollXDots.setValue(e.nativeEvent.contentOffset.x),
+          }
         )}
         scrollEventThrottle={16}
-        renderItem={({ item, index }) => (
-          <View style={styles.slide}>
-            <Hero item={item} active={index === activeIdx} scrollY={scrollY} />
-          </View>
-        )}
+        renderItem={({ item, index }) => {
+          const inputRange = [(index - 1) * width, index * width, (index + 1) * width]
+          // Contra-traslación (= scrollX - index*width): cancela exactamente el
+          // desplazamiento del FlatList, así TODOS los slides quedan apilados en
+          // el centro en vez de uno al lado del otro. Con las imágenes
+          // superpuestas, la opacidad cruzada da un fundido real; sin esto solo
+          // se verían dos mitades oscureciéndose (un "fundido a negro" sucio).
+          // El swipe lo sigue manejando el FlatList: el dedo mueve el scroll y
+          // el scroll maneja el fundido.
+          const translateX = scrollX.interpolate({
+            inputRange,
+            outputRange: [-width, 0, width],
+            extrapolate: 'clamp',
+          })
+          const opacity = scrollX.interpolate({
+            inputRange,
+            outputRange: [0, 1, 0],
+            extrapolate: 'clamp',
+          })
+          return (
+            <Animated.View
+              style={[styles.slide, { transform: [{ translateX }], opacity }]}
+              // Apilados, el último del listado quedaría encima capturando los
+              // toques del Hero (Reproducir / +). Solo el activo los recibe.
+              pointerEvents={index === activeIdx ? 'auto' : 'none'}
+            >
+              <Hero item={item} active={index === activeIdx} scrollY={scrollY} />
+            </Animated.View>
+          )
+        }}
       />
 
       {/* Dots — tocables: saltan directo a ese slide y reinician el autoplay */}
       <View style={styles.dots} pointerEvents="box-none">
         {data.map((_, i) => {
           const inputRange = [(i - 1) * width, i * width, (i + 1) * width]
-          const dotWidth = scrollX.interpolate({
+          const dotWidth = scrollXDots.interpolate({
             inputRange,
             outputRange: [5, 26, 5],
             extrapolate: 'clamp',
           })
-          const opacity = scrollX.interpolate({
+          const opacity = scrollXDots.interpolate({
             inputRange,
             outputRange: [0.4, 1, 0.4],
             extrapolate: 'clamp',
@@ -166,7 +204,11 @@ export function HeroCarousel({
 const styles = StyleSheet.create({
   wrap: { width, height: HERO_H },
   pullBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1C1C1E' },
-  slide: { width, height: HERO_H, overflow: 'hidden' },
+  // Sin overflow:hidden a propósito: los slides van contra-trasladados para
+  // apilarse (ver renderItem) y este recorte los cortaría a la mitad. El Hero
+  // ya se recorta a sí mismo (styles.hero), así que el zoom del Ken Burns
+  // sigue sin sangrar al vecino.
+  slide: { width, height: HERO_H },
   dots: {
     position: 'absolute',
     bottom: 12,

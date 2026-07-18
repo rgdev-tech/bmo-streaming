@@ -160,11 +160,19 @@ export type StudioDetail = GenreDetail & {
 }
 
 export type GenreRow = { name: string; results: MediaItem[] }
+// Fila por plataforma; `key` enlaza al catálogo de marca (/studio/[key]).
+export type ProviderRow = { name: string; key: string; results: MediaItem[] }
 export type CatalogData = {
   trending: Paged<MediaItem>
   popular: Paged<MediaItem>
   topRated: Paged<MediaItem>
   genres: GenreRow[]
+  // Opcionales a propósito: el cliente puede estar desplegado antes que la API
+  // (Vercel va por su lado), y una API vieja no devuelve estos campos. Marcarlos
+  // opcionales obliga a manejar ese hueco en vez de crashear.
+  recent?: Paged<MediaItem>
+  classics?: Paged<MediaItem>
+  providers?: ProviderRow[]
 }
 
 export const tmdb = {

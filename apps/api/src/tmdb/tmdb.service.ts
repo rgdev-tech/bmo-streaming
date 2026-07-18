@@ -97,6 +97,20 @@ export const tmdbService = {
       'vote_count.gte': opts.sortBy.startsWith('vote_average') ? 100 : 40,
     }),
 
+  // Descubrir genérico ordenado, sin filtrar por género — para filas temáticas
+  // (recién estrenadas, clásicos aclamados...). `params` permite acotar por
+  // fecha o exigir más votos según el caso.
+  discoverSorted: (
+    type: 'movie' | 'tv',
+    sortBy: string,
+    params: TMDBParams = {}
+  ) =>
+    tmdb(`/discover/${type}`, {
+      sort_by: sortBy,
+      page: 1,
+      ...params,
+    }),
+
   // Detalle (videos en es+en para maximizar tráilers disponibles).
   // release_dates/content_ratings traen la clasificación por edad (ES/US) para el badge del player.
   movieDetails: (id: number) =>

@@ -44,6 +44,27 @@ async function safeGenres(
     .filter((g) => g.results.length > 0)
 }
 
+// Filas por plataforma. Devuelve además la `key` del estudio para que el
+// cliente pueda enlazar el título de la fila al catálogo de esa marca
+// (ver STUDIOS y /tmdb/studio/:key).
+async function safeProviders(
+  providers: [string, string, number][],
+  type: 'movie' | 'tv'
+): Promise<{ name: string; key: string; results: any[] }[]> {
+  const results = await Promise.allSettled(
+    providers.map(([, , id]) => tmdbService.discoverByProvider(id, type))
+  )
+  return providers
+    .map(([name, key], i) => ({
+      name,
+      key,
+      results: results[i].status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<any>).value.results ?? [] : [],
+    }))
+    .filter((p) => p.results.length > 0)
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
 export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
   // Inicio: varias filas en una sola llamada
   .get('/home', () =>
@@ -70,14 +91,37 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
         ['Animación', 16],
         ['Drama', 18],
         ['Romance', 10749],
+        ['Aventura', 12],
+        ['Suspenso', 53],
+        ['Fantasía', 14],
+        ['Crimen', 80],
+        ['Familia', 10751],
       ]
-      const [trending, popular, topRated, genres] = await Promise.all([
-        tmdbService.trendingMovies(),
-        tmdbService.popularMovies(),
-        tmdbService.topRatedMovies(),
-        safeGenres(GENRES, 'movie'),
-      ])
-      return { trending, popular, topRated, genres }
+      const PROVIDERS: [string, string, number][] = [
+        ['Netflix', 'netflix', 8],
+        ['Disney+', 'disney', 337],
+        ['Prime Video', 'prime', 9],
+        ['HBO Max', 'hbo', 1899],
+      ]
+      const [trending, popular, topRated, recent, classics, providers, genres] =
+        await Promise.all([
+          tmdbService.trendingMovies(),
+          tmdbService.popularMovies(),
+          tmdbService.topRatedMovies(),
+          // Estrenadas ya (lte hoy) — sin el tope de fecha se llenaba de
+          // títulos futuros sin pósters ni valoraciones.
+          tmdbService.discoverSorted('movie', 'primary_release_date.desc', {
+            'primary_release_date.lte': todayISO(),
+            'vote_count.gte': 30,
+          }),
+          tmdbService.discoverSorted('movie', 'vote_average.desc', {
+            'primary_release_date.lte': '2005-12-31',
+            'vote_count.gte': 1500,
+          }),
+          safeProviders(PROVIDERS, 'movie'),
+          safeGenres(GENRES, 'movie'),
+        ])
+      return { trending, popular, topRated, recent, classics, providers, genres }
     })
   )
 
@@ -92,14 +136,35 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
         ['Acción y Aventura', 10759],
         ['Animación', 16],
         ['Misterio', 9648],
+        ['Documental', 99],
+        ['Familia', 10751],
+        ['Infantil', 10762],
+        ['Reality', 10764],
+        ['Guerra y política', 10768],
       ]
-      const [trending, popular, topRated, genres] = await Promise.all([
-        tmdbService.trendingSeries(),
-        tmdbService.popularSeries(),
-        tmdbService.topRatedSeries(),
-        safeGenres(GENRES, 'tv'),
-      ])
-      return { trending, popular, topRated, genres }
+      const PROVIDERS: [string, string, number][] = [
+        ['Netflix', 'netflix', 8],
+        ['HBO Max', 'hbo', 1899],
+        ['Disney+', 'disney', 337],
+        ['Apple TV+', 'appletv', 350],
+      ]
+      const [trending, popular, topRated, recent, classics, providers, genres] =
+        await Promise.all([
+          tmdbService.trendingSeries(),
+          tmdbService.popularSeries(),
+          tmdbService.topRatedSeries(),
+          tmdbService.discoverSorted('tv', 'first_air_date.desc', {
+            'first_air_date.lte': todayISO(),
+            'vote_count.gte': 30,
+          }),
+          tmdbService.discoverSorted('tv', 'vote_average.desc', {
+            'first_air_date.lte': '2010-12-31',
+            'vote_count.gte': 800,
+          }),
+          safeProviders(PROVIDERS, 'tv'),
+          safeGenres(GENRES, 'tv'),
+        ])
+      return { trending, popular, topRated, recent, classics, providers, genres }
     })
   )
 
