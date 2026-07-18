@@ -45,7 +45,6 @@ const getNativeSource = (
     minLoadRetryCount: resolvedSource.minLoadRetryCount,
     requestHeaders: generateHeaderForNative(resolvedSource.headers),
     startPosition: resolvedSource.startPosition,
-    textTracks: resolvedSource.textTracks,
   };
 };
 
@@ -62,9 +61,6 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
       volume,
       progressUpdateInterval,
       textTrackDelay,
-      subtitleFontScale,
-      subtitleColor,
-      subtitleBackgroundOpacity,
       onBuffer,
       onEnd,
       onError,
@@ -83,15 +79,14 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
     );
 
     // El inicializador de useState de arriba solo corre en el primer render —
-    // si initialSource cambia después (p.ej. textTracks, cuando un subtítulo
-    // termina de bajar después de que el video ya arrancó), quedaba ignorado
-    // para siempre y el componente nativo nunca se enteraba. Filtramos por uri
-    // y por la referencia de textTracks (no por el objeto initialSource entero,
-    // que el caller recrea en cada render) para no re-disparar de más.
+    // si initialSource cambia después, quedaba ignorado para siempre y el
+    // componente nativo nunca se enteraba. Filtramos por uri (no por el
+    // objeto initialSource entero, que el caller recrea en cada render) para
+    // no re-disparar de más.
     useEffect(() => {
       setNativeSource(getNativeSource(initialSource));
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [initialSource?.uri, initialSource?.textTracks]);
+    }, [initialSource?.uri]);
 
     const onVideoError = useCallback(
       (e: NativeSyntheticEvent<OnVideoErrorData>) => {
@@ -168,9 +163,6 @@ const VideoVLC = forwardRef<VideoVLCRef, ReactVideoVLCProps>(
           volume={volume}
           progressUpdateInterval={progressUpdateInterval}
           textTrackDelay={textTrackDelay}
-          subtitleFontScale={subtitleFontScale}
-          subtitleColor={subtitleColor}
-          subtitleBackgroundOpacity={subtitleBackgroundOpacity}
           selectedAudioTrack={selectedAudioTrack}
           selectedTextTrack={selectedTextTrack}
           onVideoEnd={onEnd}

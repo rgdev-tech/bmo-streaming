@@ -74,6 +74,29 @@ export const tmdbService = {
       watch_monetization_types: 'flatrate',
     }),
 
+  // Catálogo de estudio/marca (Disney, HBO, Marvel...): por plataforma
+  // (watch provider) o por productora (company), con orden configurable.
+  // Un solo helper para poder pedir populares / mejor valoradas / recientes
+  // de la misma marca con distintos sort_by.
+  discoverStudio: (opts: {
+    companyId?: number
+    providerId?: number
+    type: 'movie' | 'tv'
+    sortBy: string
+    region?: string
+  }) =>
+    tmdb(`/discover/${opts.type}`, {
+      with_companies: opts.companyId,
+      with_watch_providers: opts.providerId,
+      watch_region: opts.providerId ? (opts.region ?? 'US') : undefined,
+      watch_monetization_types: opts.providerId ? 'flatrate' : undefined,
+      sort_by: opts.sortBy,
+      page: 1,
+      // Al ordenar por rating exigimos más votos para no traer rarezas con
+      // 10/10 y 12 votos; para popularidad/recientes basta un piso bajo.
+      'vote_count.gte': opts.sortBy.startsWith('vote_average') ? 100 : 40,
+    }),
+
   // Detalle (videos en es+en para maximizar tráilers disponibles).
   // release_dates/content_ratings traen la clasificación por edad (ES/US) para el badge del player.
   movieDetails: (id: number) =>

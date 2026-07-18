@@ -7,19 +7,12 @@ export type EnumValues<T extends string | number> = T extends string
   ? `${T}` | T
   : T;
 
-export type SideloadTrack = {
-  title?: string;
-  language?: string;
-  uri: string;
-};
-
 export type ReactVideoVLCSourceProperties = {
   uri?: string;
   minLoadRetryCount?: number;
   mediaOptions?: string[];
   headers?: Headers;
   startPosition?: number;
-  textTracks?: SideloadTrack[];
 };
 
 export enum VideoResizeMode {
@@ -53,7 +46,4 @@ export interface ReactVideoVLCProps extends ReactVideoVLCEvents, ViewProps {
   volume?: number; // 0-100, default 100
   progressUpdateInterval?: number; // default 250
   textTrackDelay?: number;
-  subtitleFontScale?: number; // 1 = normal, <1 chico, >1 grande
-  subtitleColor?: number; // 0xRRGGBB
-  subtitleBackgroundOpacity?: number; // 0-255
 }

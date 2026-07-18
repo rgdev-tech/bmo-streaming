@@ -1,8 +1,9 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, ActivityIndicator,
-  Animated, Pressable, ScrollView,
+  Animated, Pressable, ScrollView, useWindowDimensions,
+  type GestureResponderEvent,
 } from 'react-native'
 import { Image } from 'expo-image'
 import * as FileSystem from 'expo-file-system'
@@ -13,14 +14,15 @@ import { useEventListener } from 'expo'
 import { SymbolView } from 'expo-symbols'
 import Slider from '@react-native-community/slider'
 import * as ScreenOrientation from 'expo-screen-orientation'
-import { GestureHandlerRootView, PinchGestureHandler, State as GHState } from 'react-native-gesture-handler'
+import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
 import {
   getSubtitleStyle, setSubtitleStyle, DEFAULT_SUBTITLE_STYLE,
-  SUBTITLE_FONT_SCALE, SUBTITLE_COLOR_HEX, SUBTITLE_BACKGROUND_OPACITY,
-  type SubtitleStyle as SubtitleStyleT, type SubtitleSize, type SubtitleColor, type SubtitleBackground,
+  SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS,
+  type SubtitleStyle as SubtitleStyleT,
 } from '@/lib/subtitleStyle'
+import { decodeSrtBytes, parseSrt, findActiveCue, type SrtCue } from '@/lib/srt'
 import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
@@ -35,23 +37,23 @@ const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
 const NEXT_PILL_S = 50      // segundos finales en que aparece el pill "Siguiente"
 const SAVE_EVERY_MS = 5000  // throttle de guardado de progreso (evita I/O por segundo)
-const SUBS_TIMEOUT_MS = 4000 // tope de espera de subs antes de arrancar igual
 
-type SideloadTrack = { uri: string; language: string; title: string }
-
-// Descarga los subtítulos en español a disco (caché) y devuelve las pistas
-// listas para sideload en VLCKit. Se baja DESDE EL TELÉFONO (no el servidor,
-// cuya IP de datacenter bloquea Cloudflare en dl.opensubtitles.org). Se corre
-// durante la pantalla de carga, antes de montar el player, así el subtítulo ya
-// está presente cuando arranca el video — sin la carrera asíncrona de antes.
+// Descarga el subtítulo en español a disco (caché), lo parsea y devuelve las
+// cues listas para renderizar como overlay en JS — no va a VLCKit: el estilo
+// (tamaño/color/fondo) tiene que poder cambiar al instante, y las opciones de
+// subtítulo de libvlc son de instancia (recrear el player entero, con re-buffer
+// de red incluido, cada vez que el usuario toca "Grande"). Se baja DESDE EL
+// TELÉFONO (no el servidor, cuya IP de datacenter bloquea Cloudflare en
+// dl.opensubtitles.org). Corre en paralelo DESPUÉS de montar el player (no
+// bloquea el arranque del video) — el overlay JS solo recoge las cues cuando
+// llegan, sin ninguna carrera con el montaje nativo.
 async function downloadSpanishSubs(
   subs: Subtitle[], type: string, id: string, season?: number, episode?: number,
-): Promise<SideloadTrack[]> {
+): Promise<SrtCue[]> {
   const esSubs = subs.filter((s) => s.lang === 'es')
   if (!esSubs.length) { console.log('[subs] sin candidatos en español'); return [] }
   const dir = `${FileSystem.cacheDirectory}subs/`
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
-  const results: SideloadTrack[] = []
   console.log(`[subs] ${esSubs.length} candidato(s) español para ${type}/${id} T${season}:E${episode}`)
   for (const s of esSubs) {
     const localPath = `${dir}${type}-${id}-${season ?? 0}-${episode ?? 0}-${s.i}.srt`
@@ -60,46 +62,45 @@ async function downloadSpanishSubs(
     const cached = await FileSystem.getInfoAsync(localPath, { size: true })
     if (cached.exists && cached.size > 200) {
       console.log(`[subs] caché (${cached.size}b): ${localPath}`)
-      results.push({ uri: localPath, language: s.lang, title: s.label })
-      continue
+      const cues = await readAndParseSrt(localPath)
+      if (cues.length) return cues
+      await FileSystem.deleteAsync(localPath, { idempotent: true })
+    } else if (cached.exists) {
+      await FileSystem.deleteAsync(localPath, { idempotent: true })
     }
-    if (cached.exists) await FileSystem.deleteAsync(localPath, { idempotent: true })
     for (const url of [s.url, ...s.altUrls]) {
       try {
         const dl = await FileSystem.downloadAsync(url, localPath)
         console.log(`[subs] GET ${url} → ${dl.status}`)
         if (dl.status !== 200) continue
-        // Un .srt real nunca es text/html; una página de bloqueo de Cloudflare
-        // sí. VLCKit decodifica el charset real del archivo por su cuenta.
+        // Un .srt real nunca es text/html; una página de bloqueo de Cloudflare sí.
         const ct = Object.entries(dl.headers ?? {}).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
         if (/text\/html/i.test(ct)) {
           console.log(`[subs] content-type=${ct} → bloqueo, descarto`)
           await FileSystem.deleteAsync(localPath, { idempotent: true })
           continue
         }
-        const info = await FileSystem.getInfoAsync(localPath, { size: true })
-        console.log(`[subs] OK (${info.exists ? info.size : '?'}b): ${localPath}`)
-        results.push({ uri: localPath, language: s.lang, title: s.label })
-        break
+        const cues = await readAndParseSrt(localPath)
+        console.log(`[subs] OK: ${cues.length} cues parseadas de ${localPath}`)
+        if (cues.length) return cues
+        await FileSystem.deleteAsync(localPath, { idempotent: true })
       } catch (e) {
         console.log(`[subs] excepción ${url}: ${String(e)}`)
       }
     }
   }
-  console.log(`[subs] listo: ${results.length} pista(s)`)
-  return results
+  console.log('[subs] ningún candidato dio cues válidas')
+  return []
 }
 
-// downloadSpanishSubs acotado por timeout — nunca retrasa el arranque del video
-// más de SUBS_TIMEOUT_MS (si la descarga tarda, sigue en background y queda
-// cacheada para la próxima). El video arranca con lo que haya listo.
-function downloadSpanishSubsCapped(
-  subs: Subtitle[], type: string, id: string, season?: number, episode?: number,
-): Promise<SideloadTrack[]> {
-  return Promise.race([
-    downloadSpanishSubs(subs, type, id, season, episode).catch(() => [] as SideloadTrack[]),
-    new Promise<SideloadTrack[]>((resolve) => setTimeout(() => resolve([]), SUBS_TIMEOUT_MS)),
-  ])
+// Lee el archivo como base64 (a salvo de encoding: no interpreta bytes) y
+// decodifica/parsea. Un .srt con 0 cues parseadas normalmente es contenido
+// basura (encoding roto, formato inesperado) — se trata como fallo.
+async function readAndParseSrt(localPath: string): Promise<SrtCue[]> {
+  const b64 = await FileSystem.readAsStringAsync(localPath, { encoding: FileSystem.EncodingType.Base64 })
+  const binary = atob(b64)
+  const text = decodeSrtBytes(binary)
+  return parseSrt(text)
 }
 
 export default function PlayerScreen() {
@@ -132,10 +133,23 @@ export default function PlayerScreen() {
   const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
   useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
-  // No forzamos orientación: el fullscreen nativo de Apple (AVPlayerViewController)
-  // rota a horizontal por su cuenta y vuelve a vertical al salir, sin saltos.
-  // La vista que queda detrás permanece en portrait → no se ve ninguna rotación.
-  function exitToBack() {
+  // No forzamos orientación para NativePlayer: el fullscreen nativo de Apple
+  // (AVPlayerViewController) rota a horizontal por su cuenta y vuelve a
+  // vertical al salir, sin saltos. La vista que queda detrás permanece en
+  // portrait → no se ve ninguna rotación.
+  //
+  // Para VlcPlayer sí forzamos nosotros (VLCKit no tiene fullscreen nativo) —
+  // y ahí el cleanup del useEffect de orientación (en VlcPlayer, se dispara
+  // recién al desmontar) corría en un momento impredecible respecto a la
+  // transición de salida del modal: coincidiendo con ella se veía la
+  // pantalla "rebotar" horizontal→vertical→horizontal en vez de un giro
+  // limpio. Relockeamos portrait ACÁ, antes de navegar — el giro pasa
+  // mientras el player todavía se ve entero y la transición de salida ya
+  // arranca en portrait, sin pelearse con ninguna otra rotación.
+  async function exitToBack() {
+    if (isVlcSource) {
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+    }
     router.back()
   }
 
@@ -189,25 +203,26 @@ export default function PlayerScreen() {
       const info = await resolveP
       if (cancelled) return
 
-      // Para fuentes VLC (mp4/mkv), bajamos el subtítulo español ACÁ —
-      // durante el spinner, antes de montar el player — así llega presente y
-      // seleccionable sin la carrera asíncrona post-montaje de antes. Acotado
-      // por timeout para no colgar el arranque.
-      const tracks = info.type === 'file'
-        ? await downloadSpanishSubsCapped(info.subtitles ?? [], type, id, seasonN, episodeN)
-        : []
-      if (cancelled) return
-
       setStreamUrl(info.streamUrl)
       setStreamType(info.type ?? 'hls')
       setReferer(info.referer)
-      setVlcTextTracks(tracks)
       setHasLatinoAlternative(info.hasLatinoAlternative ?? false)
       setStartAt(pos)
       setReady(true)
 
       // Pre-resuelve el siguiente episodio en segundo plano
       if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, audioLang)
+
+      // El subtítulo en español NO bloquea el arranque — es la única espera
+      // "innecesaria" que quedaba entre resolver y ver video: se baja en
+      // paralelo, mientras el player ya está montado y bufferizando, y el
+      // overlay JS lo recoge apenas llega (es solo estado, sin carrera con
+      // el montaje nativo). Antes esto vivía ACÁ, adelante de setReady(true).
+      if (info.type === 'file') {
+        downloadSpanishSubs(info.subtitles ?? [], type, id, seasonN, episodeN)
+          .then((cues) => { if (!cancelled) setSrtCues(cues) })
+          .catch(() => {})
+      }
     }
 
     resolve().catch((e) => !cancelled && setError(String(e)))
@@ -234,10 +249,32 @@ export default function PlayerScreen() {
   // permite sideload/selección de subtítulos y pistas de audio sin re-resolver.
   const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
 
-  // Subtítulos ya descargados en resolve() (ver downloadSpanishSubsCapped): al
-  // momento de montar el player ya están en disco y listos para sideload — sin
-  // carrera asíncrona. Solo se resetea al cambiar de episodio/idioma.
-  const [vlcTextTracks, setVlcTextTracks] = useState<SideloadTrack[]>([])
+  // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer. Antes el
+  // lock landscape/portrait vivía en el useEffect de VlcPlayer (mount→landscape,
+  // unmount→portrait). Cambiar de episodio (o de idioma de audio) desmonta y
+  // vuelve a montar VlcPlayer, así que ese portrait-al-desmontar se disparaba
+  // en medio de la transición y se veía el parpadeo vertical→horizontal.
+  // Acá solo forzamos landscape cuando hay una fuente VLC activa y NO
+  // revertimos a portrait en cada cambio de isVlcSource — el portrait queda
+  // reservado para la salida real (exitToBack, antes de navegar) y para el
+  // desmontaje de la pantalla entera (cleanup de abajo). Durante la carga del
+  // siguiente episodio isVlcSource cae a false un instante pero seguimos en
+  // landscape, sin rotar.
+  useEffect(() => {
+    if (isVlcSource) {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+    }
+  }, [isVlcSource])
+
+  useEffect(() => {
+    return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP) }
+  }, [])
+
+  // Subtítulo español: descargado y parseado en segundo plano por resolve()
+  // (ver downloadSpanishSubs) — llega después de que el player ya arrancó.
+  // Se renderiza como overlay JS, no vía VLCKit — así el estilo cambia al
+  // instante (ver VlcPlayer/SubtitleOverlay más abajo).
+  const [srtCues, setSrtCues] = useState<SrtCue[]>([])
 
   // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
   function changeAudioLang(lang: AudioLang) {
@@ -349,7 +386,7 @@ export default function PlayerScreen() {
           key={`${seasonN ?? 0}-${episodeN ?? 0}-vlc`}
           uri={streamUrl}
           referer={referer}
-          sideloadTextTracks={vlcTextTracks}
+          srtCues={srtCues}
           startAt={startAt}
           meta={meta}
           title={baseTitle}
@@ -572,12 +609,12 @@ function NativePlayer({
 type TrackInfo = { id: number; label: string }
 
 function VlcPlayer({
-  uri, referer, sideloadTextTracks, startAt, meta, hasNext,
+  uri, referer, srtCues, startAt, meta, hasNext,
   audioLang, hasLatinoAlternative, onChangeAudioLang,
   onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; referer: string; startAt: number
-  sideloadTextTracks: { uri: string; language: string; title: string }[]
+  srtCues: SrtCue[]
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -590,11 +627,18 @@ function VlcPlayer({
   onPlayNext: () => void
   onError: (msg: string) => void
 }) {
-  // Canario: confirma si los console.log del dispositivo llegan a la terminal
-  // de Metro. Si esto NO aparece pero el video sí anda, los logs no se están
-  // reenviando y hay que diagnosticar por otra vía.
-  console.log('[subs] VlcPlayer montó — canario de logs')
   const insets = useSafeAreaInsets()
+  const { width: winWidth, height: winHeight } = useWindowDimensions()
+  // top fijo (no insets.top): en este landscape forzado por lockAsync (no una
+  // rotación física real) safe-area-context a veces arrastra el inset de
+  // portrait y empuja todo mucho más abajo de lo que hace falta — mismo
+  // problema ya documentado para insets.bottom en el overlay de subtítulos.
+  const topBarTop = 16
+  // Tamaño fijo del dropdown (no crece con la cantidad de pistas ni se achica
+  // con poco contenido) — clamp solo como red de seguridad en pantallas bajas
+  // para que nunca se salga del área visible ni llegue a la barra de abajo.
+  const dropdownTop = topBarTop + 44
+  const dropdownHeight = Math.min(280, winHeight - dropdownTop - 70)
   const vlcRef = useRef<VideoVLCRef>(null)
   const lastSave = useRef(0)
   const progressRef = useRef({ time: 0, duration: 0 })
@@ -605,23 +649,29 @@ function VlcPlayer({
   const lastSeekTarget = useRef<number | null>(null)
   const seekGuardUntil = useRef(0)
 
-  // Zoom con pellizco: escala el video para recortar las bandas negras.
-  // Sin reanimated en este proyecto — se arma con Animated (RN) clásico.
-  const baseZoom = useRef(new Animated.Value(1)).current
-  const pinchZoom = useRef(new Animated.Value(1)).current
-  const zoomScale = useRef(Animated.multiply(baseZoom, pinchZoom)).current
-  const currentZoomRef = useRef(1)
-  const onPinchGestureEvent = useRef(
-    Animated.event([{ nativeEvent: { scale: pinchZoom } }], { useNativeDriver: true })
-  ).current
-  function onPinchStateChange(event: any) {
-    if (event.nativeEvent.oldState === GHState.ACTIVE) {
-      const next = Math.max(1, Math.min(3, currentZoomRef.current * event.nativeEvent.scale))
-      currentZoomRef.current = next
-      baseZoom.setValue(next)
-      pinchZoom.setValue(1)
-    }
-  }
+  // "Llenar pantalla" (recorta bordes, sin barras negras) vs "Ajustar"
+  // (default, ve el frame completo) — binario, como Netflix/HBO, disparado
+  // por pellizco en vez de doble tap. VLCKit ya soporta esto nativamente vía
+  // resizeMode, no hace falta ningún transform de zoom manual en JS.
+  const [filled, setFilled] = useState(false)
+  const [fillHintVisible, setFillHintVisible] = useState(false)
+  const fillHintOpacity = useRef(new Animated.Value(0)).current
+  const fillHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Doble tap a la izquierda/derecha = retroceder/adelantar 10s (Netflix/
+  // YouTube). Va sobre el mismo Pressable que ya maneja el tap simple
+  // (mostrar/ocultar controles) — no un gesture-handler nuevo, porque
+  // Gesture.Tap() está confirmado roto en este setup (ver comentario más
+  // abajo en pinchGesture). CLAVE de UX: el tap simple alterna los controles
+  // AL INSTANTE (no espera a ver si viene un segundo tap — esa espera se
+  // sentía como un delay feo). Si resulta ser doble tap, revertimos ese
+  // toggle instantáneo y hacemos el seek — controlsBeforeTap guarda el estado
+  // previo para poder revertir.
+  const lastTap = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
+  const controlsBeforeTap = useRef(true)
+  const [seekHint, setSeekHint] = useState<'left' | 'right' | null>(null)
+  const seekHintOpacity = useRef(new Animated.Value(0)).current
+  const seekHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [paused, setPaused] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -631,8 +681,29 @@ function VlcPlayer({
   const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([])
   const [textTracks, setTextTracks] = useState<TrackInfo[]>([])
   const [selectedAudioTrack, setSelectedAudioTrack] = useState(-1)
-  const [selectedTextTrack, setSelectedTextTrack] = useState(-1)
   const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | 'style' | null>(null)
+
+  // Selección de subtítulo: 'external' = el .srt en español que bajamos y
+  // renderizamos nosotros (overlay JS); 'none' = apagado; number = id de una
+  // pista embebida en el archivo (nativa de VLCKit). Si hay español
+  // disponible arranca ahí — es la razón de todo este trabajo.
+  const [subMode, setSubMode] = useState<'external' | 'none' | number>(
+    srtCues.length > 0 ? 'external' : 'none'
+  )
+  // srtCues ya no está listo al montar (la descarga corre en paralelo, no
+  // bloquea el arranque — ver resolve() en PlayerScreen), así que el
+  // useState de arriba casi siempre inicializa en 'none'. Cuando las cues
+  // llegan tarde, este efecto activa el español automáticamente — salvo que
+  // el usuario ya haya elegido algo distinto a mano mientras tanto.
+  const subModeChosenByUser = useRef(false)
+  useEffect(() => {
+    if (srtCues.length > 0 && !subModeChosenByUser.current) setSubMode('external')
+  }, [srtCues])
+  function chooseSubMode(mode: 'external' | 'none' | number) {
+    subModeChosenByUser.current = true
+    setSubMode(mode)
+  }
+  const activeCue = subMode === 'external' ? findActiveCue(srtCues, position) : null
 
   const [subStyle, setSubStyleState] = useState<SubtitleStyleT>(DEFAULT_SUBTITLE_STYLE)
   useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
@@ -649,15 +720,29 @@ function VlcPlayer({
 
   useEffect(() => {
     scheduleHide()
-    return () => { if (hideTimer.current) clearTimeout(hideTimer.current) }
+    return () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+      if (fillHintTimer.current) clearTimeout(fillHintTimer.current)
+      if (seekHintTimer.current) clearTimeout(seekHintTimer.current)
+    }
   }, [])
 
-  // VLCKit no tiene un fullscreen nativo propio (a diferencia de AVPlayerViewController,
-  // que rota solo) — forzamos horizontal mientras este player está montado.
+  // Mientras el dropdown de audio/subtítulos/estilo está abierto, los
+  // controles (y el botón "..." que lo ancla) no se pueden esconder solos —
+  // si no, a los 3.5s desaparece la barra de arriba y el dropdown queda
+  // flotando sin nada a lo que estar anclado.
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
-    return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP) }
-  }, [])
+    if (trackPicker) {
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+      setControlsVisible(true)
+    } else {
+      scheduleHide()
+    }
+  }, [trackPicker])
+
+  // (El lock de orientación landscape/portrait ahora lo maneja PlayerScreen a
+  // nivel de pantalla — ver comentario allá. Antes vivía acá y el
+  // portrait-al-desmontar causaba el parpadeo al cambiar de episodio.)
 
   // Red de seguridad: si por lo que sea el evento nativo onLoad/onBuffer nunca
   // llega a JS, no dejar el spinner tapando el video para siempre — a los 6s
@@ -676,13 +761,102 @@ function VlcPlayer({
     })
   }
 
+  const DOUBLE_TAP_MS = 280
+
+  function showSeekHint(side: 'left' | 'right') {
+    if (seekHintTimer.current) clearTimeout(seekHintTimer.current)
+    setSeekHint(side)
+    seekHintOpacity.setValue(1)
+    seekHintTimer.current = setTimeout(() => {
+      Animated.timing(seekHintOpacity, { toValue: 0, duration: 250, useNativeDriver: true })
+        .start(() => setSeekHint(null))
+    }, 450)
+  }
+
+  // Tap simple = mostrar/ocultar controles; doble tap en la mitad
+  // izquierda/derecha = retroceder/adelantar 10s. Comparten el mismo Pressable.
+  // El tap simple actúa YA (sin esperar la ventana de doble tap → sin delay).
+  // Si el usuario sí hace doble tap, el segundo tap revierte el toggle que hizo
+  // el primero (controlsBeforeTap) y hace el seek — la visibilidad de controles
+  // queda neta igual que antes del gesto. El único costo es un parpadeo breve
+  // de los controles durante el doble tap, aceptable a cambio de que el tap
+  // simple (el 95% de los toques) sea instantáneo.
+  function handleVideoPress(e: GestureResponderEvent) {
+    const side: 'left' | 'right' = e.nativeEvent.locationX < winWidth / 2 ? 'left' : 'right'
+    const now = Date.now()
+    const last = lastTap.current
+
+    if (last && last.side === side && now - last.time < DOUBLE_TAP_MS) {
+      lastTap.current = null
+      // Revertir el toggle instantáneo del primer tap.
+      if (hideTimer.current) clearTimeout(hideTimer.current)
+      setControlsVisible(controlsBeforeTap.current)
+      if (controlsBeforeTap.current) scheduleHide()
+      skipBy(side === 'right' ? 10 : -10)
+      showSeekHint(side)
+      return
+    }
+
+    lastTap.current = { time: now, side }
+    controlsBeforeTap.current = controlsVisible
+    toggleControls()
+  }
+
+  function setFilledWithHint(next: boolean) {
+    setFilled((prev) => {
+      if (prev === next) return prev
+      // Ícono de feedback breve — sin esto el pellizco no da ninguna señal de
+      // que pasó algo (el cambio de encuadre puede ser sutil según el video).
+      if (fillHintTimer.current) clearTimeout(fillHintTimer.current)
+      setFillHintVisible(true)
+      fillHintOpacity.setValue(1)
+      fillHintTimer.current = setTimeout(() => {
+        Animated.timing(fillHintOpacity, { toValue: 0, duration: 300, useNativeDriver: true })
+          .start(() => setFillHintVisible(false))
+      }, 500)
+      return next
+    })
+  }
+
+  // Pellizco (ajustar/llenar, binario — no zoom continuo) + tap (mostrar/
+  // ocultar controles) sobre la misma vista. Gesture.Race, no Simultaneous:
+  // tap y pellizco son alternativas excluyentes (o uno o el otro, nunca de
+  // verdad "a la vez"), y Race deja que el primero en activar gane sin que
+  // el otro interfiera — con Simultaneous el tap dejó de disparar.
+  // scale > 1 = dedos separándose (pellizco "hacia afuera") → llenar.
+  // scale < 1 = dedos juntándose (pellizco "hacia adentro") → ajustar.
+  //
+  // useMemo con deps vacías: sin esto, los objetos Gesture.* se recrean en
+  // cada render y GestureDetector reconfigura el reconocedor nativo cada vez.
+  // Los callbacks usan actualizaciones funcionales de estado (setX(prev =>
+  // ...)) así que no necesitan closures frescas — son seguros de fijar una
+  // sola vez.
+  //
+  // Gesture.Tap() de la API nueva quedó descartado para el toggle de
+  // controles: con logs confirmé que se queda pegado en "begin" sin llegar
+  // NUNCA a "end" ni "finalize", de forma consistente y reproducible — un
+  // bug real de esa API en este setup, no una carrera de estado. En cambio,
+  // Pressable (RN puro, sin gesture-handler) viene funcionando bien toda la
+  // sesión para CADA OTRO botón de esta pantalla (X, play/pause, skip, filas
+  // del picker) — así que el tap-para-mostrar-controles vuelve a Pressable,
+  // ANIDADO adentro del mismo GestureDetector (no como hermano compitiendo,
+  // que fue el problema original con el pellizco).
+  const pinchGesture = useMemo(
+    () => Gesture.Pinch()
+      .runOnJS(true)
+      .onEnd((e) => {
+        if (e.scale > 1.15) setFilledWithHint(true)
+        else if (e.scale < 0.85) setFilledWithHint(false)
+      }),
+    []
+  )
+
   function handleLoad(data: OnLoadData) {
     setBuffering(false) // red de seguridad: onVideoLoad siempre llega al arrancar, aunque se pierda algún evento de buffer
     setDuration(data.duration)
     setAudioTracks(data.audioTracks.map((t) => ({ id: t.id, label: t.title || `Pista ${t.id}` })))
     setTextTracks(data.textTracks.map((t) => ({ id: t.id, label: t.title || `Subtítulo ${t.id}` })))
     const selAudio = data.audioTracks.find((t) => t.selected)
-    const selText = data.textTracks.find((t) => t.selected)
     // El archivo puede traer varias pistas de audio embebidas (ej. dual audio
     // inglés/latino) y VLCKit no siempre elige la correcta por defecto — suele
     // quedarse en la primera. Si pedimos latino, buscamos una pista cuyo
@@ -693,7 +867,6 @@ function VlcPlayer({
       ? data.audioTracks.find((t) => /spa|esp|latino|castellano/i.test(t.title ?? ''))
       : undefined
     setSelectedAudioTrack(latinoTrack ? latinoTrack.id : selAudio ? selAudio.id : -1)
-    setSelectedTextTrack(selText ? selText.id : -1)
     if (!startedRef.current) {
       startedRef.current = true
       if (startAt > 5) {
@@ -719,6 +892,12 @@ function VlcPlayer({
       }
       lastSeekTarget.current = null
     }
+
+    // Si llega un progress event es porque el video está decodificando de
+    // verdad — usamos eso como prueba definitiva de que no está bufferizando,
+    // incluso si en algún momento se perdió el aviso nativo de "ya terminé de
+    // bufferizar" (pasaba: quedaba el spinner pegado con el video ya andando).
+    if (buffering) setBuffering(false)
 
     progressRef.current = { time: data.currentTime, duration: data.seekableDuration }
     setPosition(data.currentTime)
@@ -773,36 +952,82 @@ function VlcPlayer({
 
   return (
     <View style={styles.fill}>
-      {/* El pinch-to-zoom envuelve SOLO el video — si envuelve toda la
-          pantalla (controles incluidos), el gesture handler intercepta los
-          toques de un dedo antes de que lleguen a los botones (confirmado
-          con logs: el comando de seek nativo nunca se llegaba a disparar). */}
-      <PinchGestureHandler onGestureEvent={onPinchGestureEvent} onHandlerStateChange={onPinchStateChange}>
+      {/* GestureDetector (pellizco) envuelve SOLO el video — si envolviera
+          toda la pantalla (controles incluidos), les robaría el toque a los
+          botones. El Pressable (tap → mostrar/ocultar controles) va ANIDADO
+          adentro, no como hermano compitiendo — mismo motivo. */}
+      <GestureDetector gesture={pinchGesture}>
         <View style={[styles.fill, styles.vlcZoomClip]}>
-          <Animated.View style={[styles.fill, { transform: [{ scale: zoomScale }] }]}>
-            <VideoVLC
-              ref={vlcRef}
-              style={styles.fill}
-              initialSource={{ uri, headers: referer ? { Referer: referer } : undefined, textTracks: sideloadTextTracks }}
-              paused={paused}
-              resizeMode="none"
-              progressUpdateInterval={500}
-              subtitleFontScale={SUBTITLE_FONT_SCALE[subStyle.size]}
-              subtitleColor={SUBTITLE_COLOR_HEX[subStyle.color]}
-              subtitleBackgroundOpacity={SUBTITLE_BACKGROUND_OPACITY[subStyle.background]}
-              selectedAudioTrack={selectedAudioTrack}
-              selectedTextTrack={selectedTextTrack}
-              onLoad={handleLoad}
-              onProgress={handleProgress}
-              onBuffer={handleBuffer}
-              onError={handleError}
-              onEnd={onEnded}
-            />
-          </Animated.View>
+          <Pressable style={styles.fill} onPress={handleVideoPress}>
+          <VideoVLC
+            ref={vlcRef}
+            style={styles.fill}
+            initialSource={{ uri, headers: referer ? { Referer: referer } : undefined }}
+            paused={paused}
+            resizeMode={filled ? 'cover' : 'none'}
+            progressUpdateInterval={500}
+            selectedAudioTrack={selectedAudioTrack}
+            selectedTextTrack={typeof subMode === 'number' ? subMode : -1}
+            onLoad={handleLoad}
+            onProgress={handleProgress}
+            onBuffer={handleBuffer}
+            onError={handleError}
+            onEnd={onEnded}
+          />
+          {activeCue && (
+            // bottom fijo, sin insets.bottom: en landscape forzado por
+            // lockAsync (no una rotación física real), el safe-area-context
+            // a veces no vuelve a medir bien y arrastra el inset de portrait
+            // — sumaba altura de más sin que se note por qué.
+            <View
+              pointerEvents="none"
+              style={[styles.subtitleOverlay, { bottom: 22 }]}
+            >
+              <Text
+                style={[
+                  styles.subtitleText,
+                  {
+                    fontSize: SUBTITLE_FONT_SIZE[subStyle.size],
+                    color: SUBTITLE_COLOR_CSS[subStyle.color],
+                    backgroundColor: subStyle.background === 'semi' ? 'rgba(0,0,0,0.6)' : 'transparent',
+                  },
+                ]}
+              >
+                {activeCue.text}
+              </Text>
+            </View>
+          )}
+          </Pressable>
         </View>
-      </PinchGestureHandler>
+      </GestureDetector>
 
-      <Pressable style={StyleSheet.absoluteFillObject} onPress={toggleControls} />
+      {fillHintVisible && (
+        <Animated.View style={[styles.fillHint, { opacity: fillHintOpacity }]} pointerEvents="none">
+          <SymbolView
+            name={filled ? 'arrow.down.right.and.arrow.up.left' : 'arrow.up.left.and.arrow.down.right'}
+            tintColor="#fff"
+            style={styles.fillHintIcon}
+          />
+          <Text style={styles.fillHintText}>{filled ? 'Pantalla completa' : 'Ajustar'}</Text>
+        </Animated.View>
+      )}
+
+      {seekHint && (
+        <Animated.View
+          style={[
+            styles.seekHint,
+            seekHint === 'left' ? styles.seekHintLeft : styles.seekHintRight,
+            { opacity: seekHintOpacity },
+          ]}
+          pointerEvents="none"
+        >
+          <SymbolView
+            name={seekHint === 'left' ? 'gobackward.10' : 'goforward.10'}
+            tintColor="#fff"
+            style={styles.fillHintIcon}
+          />
+        </Animated.View>
+      )}
 
       {buffering && (
         <View style={[StyleSheet.absoluteFillObject, styles.vlcBufferCenter]} pointerEvents="none">
@@ -811,43 +1036,45 @@ function VlcPlayer({
       )}
 
       {controlsVisible && (
-        <View style={StyleSheet.absoluteFillObject}>
+        // box-none: el contenedor en sí no debe interceptar toques (si no,
+        // compite con el GestureDetector del video de abajo y le cancela el
+        // tap — confirmado con logs: el primer tap and abrir controles
+        // funcionaba, el segundo para cerrarlos fallaba justo apenas esta
+        // vista se montaba). Los botones de adentro (Touchable/Slider) tienen
+        // su propio manejo de toque y siguen andando igual con box-none.
+        <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
           <View style={styles.vlcScrim} pointerEvents="none" />
 
           {/* Barra superior: cerrar + pistas */}
-          <View style={[styles.vlcTopBar, { top: insets.top + 8 }]}>
+          <View style={[styles.vlcTopBar, { top: topBarTop }]}>
             <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => onClose(duration > 0 ? position / duration : 0)}>
               <SymbolView name="xmark" tintColor="#fff" style={styles.vlcIcon} />
             </Touchable>
             {!buffering && (
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('audio')}>
-                  <SymbolView name="waveform" tintColor="#fff" style={styles.vlcIcon} />
-                </Touchable>
-                <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('text')}>
-                  <SymbolView name="captions.bubble" tintColor="#fff" style={styles.vlcIcon} />
-                </Touchable>
-                {textTracks.length > 0 && (
-                  <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => setTrackPicker('style')}>
-                    <SymbolView name="textformat.size" tintColor="#fff" style={styles.vlcIcon} />
-                  </Touchable>
-                )}
-              </View>
+              <Touchable
+                scaleTo={0.9} haptic="light" style={styles.vlcIconBtn}
+                onPress={() => setTrackPicker((p) => (p ? null : 'audio'))}
+              >
+                <SymbolView name="ellipsis" tintColor="#fff" style={styles.vlcIcon} />
+              </Touchable>
             )}
           </View>
 
-          {/* Play/pause + retroceder/adelantar 10s */}
-          <View style={[styles.vlcCenterControls, { flexDirection: 'row', gap: 36 }]} pointerEvents="box-none">
-            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(-10)}>
-              <SymbolView name="gobackward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
-            </Touchable>
-            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcPlayBtn} onPress={() => setPaused((p) => !p)}>
-              <SymbolView name={paused ? 'play.fill' : 'pause.fill'} tintColor="#fff" style={styles.vlcPlayIcon} />
-            </Touchable>
-            <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(10)}>
-              <SymbolView name="goforward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
-            </Touchable>
-          </View>
+          {/* Play/pause + retroceder/adelantar 10s — ocultos mientras buffering,
+              si no quedaban superpuestos con el spinner de carga. */}
+          {!buffering && (
+            <View style={[styles.vlcCenterControls, { flexDirection: 'row', gap: 36 }]} pointerEvents="box-none">
+              <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(-10)}>
+                <SymbolView name="gobackward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
+              </Touchable>
+              <Touchable scaleTo={0.9} haptic="light" style={styles.vlcPlayBtn} onPress={() => setPaused((p) => !p)}>
+                <SymbolView name={paused ? 'play.fill' : 'pause.fill'} tintColor="#fff" style={styles.vlcPlayIcon} />
+              </Touchable>
+              <Touchable scaleTo={0.9} haptic="light" style={styles.vlcSkipBtn} onPress={() => skipBy(10)}>
+                <SymbolView name="goforward.10" tintColor="#fff" style={styles.vlcSkipIcon} />
+              </Touchable>
+            </View>
+          )}
 
           {/* Barra inferior: scrubber + tiempos */}
           <View style={[styles.vlcBottomBar, { bottom: insets.bottom + 12 }]}>
@@ -881,9 +1108,9 @@ function VlcPlayer({
       )}
 
       {trackPicker && (
-        <View style={[StyleSheet.absoluteFillObject, styles.vlcPickerOverlay]}>
+        <View style={StyleSheet.absoluteFillObject}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setTrackPicker(null)} />
-          <View style={styles.vlcPickerCardWrap}>
+          <View style={[styles.vlcDropdownWrap, { top: dropdownTop, height: dropdownHeight }]}>
             <BlurView intensity={78} tint="systemChromeMaterialDark" style={styles.vlcPickerCard}>
               <LinearGradient
                 colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']}
@@ -893,28 +1120,40 @@ function VlcPlayer({
               />
 
               <View style={styles.vlcPickerTabs}>
-                <Touchable
-                  scaleTo={0.94} haptic="selection"
-                  style={[styles.vlcPickerTab, trackPicker === 'audio' && styles.vlcPickerTabActive]}
-                  onPress={() => setTrackPicker('audio')}
-                >
-                  <SymbolView name="waveform" tintColor={trackPicker === 'audio' ? '#000' : '#fff'} style={styles.vlcIconSm} />
-                </Touchable>
-                <Touchable
-                  scaleTo={0.94} haptic="selection"
-                  style={[styles.vlcPickerTab, trackPicker === 'text' && styles.vlcPickerTabActive]}
-                  onPress={() => setTrackPicker('text')}
-                >
-                  <SymbolView name="captions.bubble" tintColor={trackPicker === 'text' ? '#000' : '#fff'} style={styles.vlcIconSm} />
-                </Touchable>
-                {textTracks.length > 0 && (
+                {/* Touchable envuelve el style recibido en un Animated.View
+                    ANIDADO dentro de su propio Pressable — el flex:1 de
+                    vlcPickerTab nunca llegaba al ítem real de la fila (el
+                    Pressable), así que los 3 tabs colapsaban a su ancho
+                    mínimo en vez de repartirse el espacio. Por eso el
+                    flex:1 va en este wrapper, no en el Touchable. */}
+                <View style={styles.vlcPickerTabSlot}>
                   <Touchable
                     scaleTo={0.94} haptic="selection"
-                    style={[styles.vlcPickerTab, trackPicker === 'style' && styles.vlcPickerTabActive]}
-                    onPress={() => setTrackPicker('style')}
+                    style={[styles.vlcPickerTab, trackPicker === 'audio' && styles.vlcPickerTabActive]}
+                    onPress={() => setTrackPicker('audio')}
                   >
-                    <SymbolView name="textformat.size" tintColor={trackPicker === 'style' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                    <SymbolView name="waveform" tintColor={trackPicker === 'audio' ? '#000' : '#fff'} style={styles.vlcIconSm} />
                   </Touchable>
+                </View>
+                <View style={styles.vlcPickerTabSlot}>
+                  <Touchable
+                    scaleTo={0.94} haptic="selection"
+                    style={[styles.vlcPickerTab, trackPicker === 'text' && styles.vlcPickerTabActive]}
+                    onPress={() => setTrackPicker('text')}
+                  >
+                    <SymbolView name="captions.bubble" tintColor={trackPicker === 'text' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                  </Touchable>
+                </View>
+                {srtCues.length > 0 && (
+                  <View style={styles.vlcPickerTabSlot}>
+                    <Touchable
+                      scaleTo={0.94} haptic="selection"
+                      style={[styles.vlcPickerTab, trackPicker === 'style' && styles.vlcPickerTabActive]}
+                      onPress={() => setTrackPicker('style')}
+                    >
+                      <SymbolView name="textformat.size" tintColor={trackPicker === 'style' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                    </Touchable>
+                  </View>
                 )}
               </View>
 
@@ -968,33 +1207,20 @@ function VlcPlayer({
                   />
                 </View>
               ) : (
-                <ScrollView style={styles.vlcPickerList} showsVerticalScrollIndicator={false}>
-                  {trackPicker === 'text' && (
-                    <Touchable
-                      scaleTo={0.98}
-                      haptic="selection"
-                      style={styles.vlcPickerRow}
-                      onPress={() => { setSelectedTextTrack(-1); setTrackPicker(null) }}
-                    >
-                      <Text style={[styles.vlcPickerRowText, selectedTextTrack === -1 && styles.vlcPickerRowTextActive]} numberOfLines={1}>
-                        Ninguno
-                      </Text>
-                      {selectedTextTrack === -1 && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
-                    </Touchable>
-                  )}
-                  {(trackPicker === 'audio' ? audioTracks : textTracks).map((t) => {
-                    const selected = trackPicker === 'audio' ? selectedAudioTrack === t.id : selectedTextTrack === t.id
+                <ScrollView
+                  style={styles.vlcPickerList}
+                  contentContainerStyle={styles.vlcPickerListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {trackPicker === 'audio' && audioTracks.map((t) => {
+                    const selected = selectedAudioTrack === t.id
                     return (
                       <Touchable
                         key={t.id}
                         scaleTo={0.98}
                         haptic="selection"
                         style={styles.vlcPickerRow}
-                        onPress={() => {
-                          if (trackPicker === 'audio') setSelectedAudioTrack(t.id)
-                          else setSelectedTextTrack(t.id)
-                          setTrackPicker(null)
-                        }}
+                        onPress={() => { setSelectedAudioTrack(t.id); setTrackPicker(null) }}
                       >
                         <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]} numberOfLines={1}>
                           {t.label}
@@ -1006,8 +1232,54 @@ function VlcPlayer({
                   {trackPicker === 'audio' && audioTracks.length === 0 && (
                     <Text style={styles.vlcPickerEmpty}>Esta fuente solo trae una pista de audio</Text>
                   )}
-                  {trackPicker === 'text' && textTracks.length === 0 && (
-                    <Text style={styles.vlcPickerEmpty}>Esta fuente no trae subtítulos</Text>
+
+                  {trackPicker === 'text' && (
+                    <>
+                      {srtCues.length > 0 && (
+                        <Touchable
+                          scaleTo={0.98}
+                          haptic="selection"
+                          style={styles.vlcPickerRow}
+                          onPress={() => { chooseSubMode('external'); setTrackPicker(null) }}
+                        >
+                          <Text style={[styles.vlcPickerRowText, subMode === 'external' && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                            Español
+                          </Text>
+                          {subMode === 'external' && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                        </Touchable>
+                      )}
+                      <Touchable
+                        scaleTo={0.98}
+                        haptic="selection"
+                        style={styles.vlcPickerRow}
+                        onPress={() => { chooseSubMode('none'); setTrackPicker(null) }}
+                      >
+                        <Text style={[styles.vlcPickerRowText, subMode === 'none' && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                          Ninguno
+                        </Text>
+                        {subMode === 'none' && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                      </Touchable>
+                      {textTracks.map((t) => {
+                        const selected = subMode === t.id
+                        return (
+                          <Touchable
+                            key={t.id}
+                            scaleTo={0.98}
+                            haptic="selection"
+                            style={styles.vlcPickerRow}
+                            onPress={() => { chooseSubMode(t.id); setTrackPicker(null) }}
+                          >
+                            <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                              {t.label}
+                            </Text>
+                            {selected && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                          </Touchable>
+                        )
+                      })}
+                      {srtCues.length === 0 && textTracks.length === 0 && (
+                        <Text style={styles.vlcPickerEmpty}>Esta fuente no trae subtítulos</Text>
+                      )}
+                    </>
                   )}
                 </ScrollView>
               )}
@@ -1178,6 +1450,41 @@ const styles = StyleSheet.create({
   // Player VLCKit: controles propios
   vlcZoomClip: { overflow: 'hidden' },
   vlcBufferCenter: { alignItems: 'center', justifyContent: 'center' },
+  // Feedback breve al pellizco de ajustar/llenar pantalla.
+  fillHint: {
+    position: 'absolute', top: '46%', left: 0, right: 0,
+    alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  fillHintIcon: { width: 26, height: 26 },
+  fillHintText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  // Feedback breve al doble tap de retroceder/adelantar 10s — un círculo
+  // translúcido centrado en la mitad de pantalla que se tocó.
+  seekHint: {
+    position: 'absolute', top: '50%', marginTop: -34,
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  seekHintLeft: { left: '18%' },
+  seekHintRight: { right: '18%' },
+  // Overlay del subtítulo en español (renderizado en JS, no por VLCKit — ver
+  // downloadSpanishSubs/SrtCue). `bottom` se anima según si los controles
+  // están visibles para no quedar tapado por la barra de progreso.
+  subtitleOverlay: {
+    position: 'absolute', left: 20, right: 20,
+    alignItems: 'center',
+  },
+  subtitleText: {
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowRadius: 4,
+    textShadowOffset: { width: 0, height: 1 },
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
   vlcScrim: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.25)',
@@ -1214,20 +1521,17 @@ const styles = StyleSheet.create({
   },
   vlcTime: { color: '#fff', fontSize: 12, fontWeight: '600', width: 48, textAlign: 'center' },
   vlcSlider: { flex: 1, height: 32 },
-  vlcPickerOverlay: {
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  // Wrapper aparte de la sombra: BlurView necesita overflow:hidden para que el
-  // blur respete las esquinas redondeadas, pero overflow:hidden mata la
-  // sombra — por eso la sombra vive en un contenedor afuera del blur.
-  vlcPickerCardWrap: {
-    width: 300, maxHeight: '80%',
-    borderRadius: 26,
-    shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+  // Dropdown disimulado anclado al botón de "..." del top bar — no tapa la
+  // pantalla, solo la tarjeta liquid glass flota cerca del ancla.
+  vlcDropdownWrap: {
+    position: 'absolute', right: 16,
+    width: 320,
+    borderRadius: 22,
+    shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 10 },
   },
   vlcPickerCard: {
-    borderRadius: 26,
+    flex: 1,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.16)',
     overflow: 'hidden',
@@ -1240,8 +1544,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(120,120,128,0.24)',
     borderRadius: 16, padding: 4, marginBottom: 10,
   },
+  // El flex:1 real vive acá (no en vlcPickerTab) — ver comentario en el JSX.
+  vlcPickerTabSlot: { flex: 1 },
   vlcPickerTab: {
-    flex: 1, paddingVertical: 9, borderRadius: 12,
+    paddingVertical: 9, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
   },
   vlcPickerTabActive: { backgroundColor: '#fff' },
@@ -1253,7 +1559,11 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
   vlcPickerSwitchText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
-  vlcPickerList: { maxHeight: 260 },
+  // flex:1 en vez de maxHeight — llena siempre el alto fijo del dropdown
+  // (dropdownHeight, calculado en VlcPlayer), scrollea si hay más pistas de
+  // las que entran, en vez de estirar la tarjeta entera.
+  vlcPickerList: { flex: 1 },
+  vlcPickerListContent: { flexGrow: 1, justifyContent: 'center' },
   vlcPickerRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: 12, paddingHorizontal: 12, gap: 10,
@@ -1266,21 +1576,24 @@ const styles = StyleSheet.create({
     paddingVertical: 20, paddingHorizontal: 12,
   },
 
-  // Picker de "Estilo" de subtítulos
-  vlcStyleContent: { paddingHorizontal: 4, paddingVertical: 6, gap: 16 },
-  vlcStyleRow: { gap: 8 },
+  // Picker de "Estilo" de subtítulos — las etiquetas "flotan" con text-shadow
+  // sutil (sin fondo propio, como si estuvieran suspendidas sobre el vidrio).
+  // flex:1 + centrado: llena el mismo alto fijo que la lista de pistas.
+  vlcStyleContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 4, gap: 16 },
+  vlcStyleRow: { gap: 10 },
   vlcStyleLabel: {
-    color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.4, paddingHorizontal: 4,
+    color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 1.1, paddingHorizontal: 4,
+    textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
-  vlcStyleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4 },
+  vlcStyleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 4 },
   vlcStyleChip: {
     paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
   vlcStyleChipActive: { backgroundColor: '#fff', borderColor: '#fff' },
-  vlcStyleChipText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  vlcStyleChipText: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '600' },
   vlcStyleChipTextActive: { color: '#000', fontWeight: '700' },
 
   errIcon: { width: 48, height: 48 },

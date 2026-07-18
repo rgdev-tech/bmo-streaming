@@ -5,6 +5,24 @@ import { TTLCache } from '../resolver/cache'
 const CATALOG_TTL = 30 * 60_000   // 30 min
 const cache = new TTLCache<unknown>(CATALOG_TTL)
 
+// Marcas/estudios reconocidos en el buscador. `providerId` = plataforma de
+// streaming (watch provider); `companyId` = productora. `type` marca si la
+// marca se luce más con pelis o series. Las claves deben coincidir con
+// STUDIO_BRANDS del cliente (lib/studios.ts).
+const STUDIOS: Record<
+  string,
+  { name: string; type: 'movie' | 'tv'; providerId?: number; companyId?: number }
+> = {
+  disney: { name: 'Disney+', type: 'movie', providerId: 337 },
+  hbo: { name: 'HBO Max', type: 'tv', providerId: 1899 },
+  netflix: { name: 'Netflix', type: 'tv', providerId: 8 },
+  prime: { name: 'Prime Video', type: 'movie', providerId: 9 },
+  appletv: { name: 'Apple TV+', type: 'tv', providerId: 350 },
+  marvel: { name: 'Marvel', type: 'movie', companyId: 420 },
+  pixar: { name: 'Pixar', type: 'movie', companyId: 3 },
+  starwars: { name: 'Star Wars', type: 'movie', companyId: 1 },
+}
+
 async function safeGenres(
   genres: [string, number][],
   type: 'movie' | 'tv'
@@ -91,6 +109,37 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
       ])
       return { netflix, appletv, hbo, disney, prime }
     })
+  )
+
+  // Catálogo especial de un estudio / marca (Disney, HBO, Marvel...). La misma
+  // forma que /genre (hero + populares + top + recientes) para reusar el
+  // layout de catálogo en el cliente. `type` indica si la marca se representa
+  // mejor con pelis o series.
+  .get(
+    '/studio/:key',
+    ({ params }) =>
+      cache.resolve(`studio:${params.key.toLowerCase()}`, async () => {
+        const s = STUDIOS[params.key.toLowerCase()]
+        if (!s) return { name: params.key, type: 'movie', hero: null, popular: [], topRated: [], recent: [] }
+        const recentSort = s.type === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc'
+        const base = { companyId: s.companyId, providerId: s.providerId, type: s.type }
+        const [popular, topRated, recent] = await Promise.all([
+          tmdbService.discoverStudio({ ...base, sortBy: 'popularity.desc' }),
+          tmdbService.discoverStudio({ ...base, sortBy: 'vote_average.desc' }),
+          tmdbService.discoverStudio({ ...base, sortBy: recentSort }),
+        ])
+        const pop = (popular as any).results as any[]
+        const hero = pop.find((x: any) => x.backdrop_path)?.backdrop_path ?? null
+        return {
+          name: s.name,
+          type: s.type,
+          hero,
+          popular: pop,
+          topRated: (topRated as any).results,
+          recent: (recent as any).results,
+        }
+      }),
+    { params: t.Object({ key: t.String() }) }
   )
 
   // Detalle de persona (actor) con filmografía

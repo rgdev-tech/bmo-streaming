@@ -32,23 +32,19 @@ export function setSubtitleStyle(style: SubtitleStyle): void {
   AsyncStorage.setItem(KEY, JSON.stringify(style)).catch(() => {})
 }
 
-// Valores reales que le pasamos a libvlc (freetype) — separados del tipo de
-// arriba porque la escala/color en pantalla no tiene por qué mapear 1:1 con
-// los nombres que ve el usuario.
-export const SUBTITLE_FONT_SCALE: Record<SubtitleSize, number> = {
-  small: 0.75,
-  medium: 1,
-  large: 1.35,
+// El subtítulo en español se renderiza como overlay de React (ver
+// SubtitleOverlay en player.tsx), no vía VLCKit — así el estilo cambia al
+// instante: las opciones de subtítulo de libvlc son de INSTANCIA, cambiarlas
+// obligaba a recrear el reproductor entero (re-buffer de red incluido) cada
+// vez que el usuario tocaba una opción. Estos valores son puro RN Text style.
+export const SUBTITLE_FONT_SIZE: Record<SubtitleSize, number> = {
+  small: 14,
+  medium: 20,
+  large: 28,
 }
 
-// 0xRRGGBB
-export const SUBTITLE_COLOR_HEX: Record<SubtitleColor, number> = {
-  white: 0xffffff,
-  yellow: 0xffe135,
-  cyan: 0x66ffff,
-}
-
-export const SUBTITLE_BACKGROUND_OPACITY: Record<SubtitleBackground, number> = {
-  none: 0,
-  semi: 160, // 0-255
+export const SUBTITLE_COLOR_CSS: Record<SubtitleColor, string> = {
+  white: '#ffffff',
+  yellow: '#ffe135',
+  cyan: '#66ffff',
 }

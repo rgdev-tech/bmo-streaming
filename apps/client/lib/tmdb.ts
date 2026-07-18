@@ -22,6 +22,11 @@ export type MediaItem = {
   release_date?: string
   first_air_date?: string
   genre_ids?: number[]
+  // Solo presentes en resultados de tipo 'person' (búsqueda multi de TMDB).
+  profile_path?: string | null
+  known_for_department?: string
+  known_for?: MediaItem[]
+  popularity?: number
 }
 
 const GENRE_NAMES: Record<number, string> = {
@@ -147,6 +152,13 @@ export type GenreDetail = {
   recent: MediaItem[]
 }
 
+// Catálogo de estudio/marca (Disney, HBO...). Misma forma que GenreDetail más
+// el nombre y el tipo predominante de la marca.
+export type StudioDetail = GenreDetail & {
+  name: string
+  type: 'movie' | 'tv'
+}
+
 export type GenreRow = { name: string; results: MediaItem[] }
 export type CatalogData = {
   trending: Paged<MediaItem>
@@ -167,6 +179,7 @@ export const tmdb = {
     api<Paged<MediaItem>>(`/tmdb/discover/${type}/${genreId}`),
   genre: (type: 'movie' | 'tv', id: string | number) =>
     api<GenreDetail>(`/tmdb/genre/${type}/${id}`),
+  studio: (key: string) => api<StudioDetail>(`/tmdb/studio/${key}`),
   movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
   tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
   season: (id: string, season: number) =>

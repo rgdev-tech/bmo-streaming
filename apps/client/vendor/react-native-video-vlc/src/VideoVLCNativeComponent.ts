@@ -10,19 +10,10 @@ type Headers = ReadonlyArray<
   }>
 >;
 
-type SideloadTracks = ReadonlyArray<
-  Readonly<{
-    title?: string;
-    language?: string;
-    uri: string;
-  }>
->;
-
 export type VideoSrc = Readonly<{
   uri?: string;
   requestHeaders?: Headers;
   startPosition?: Float;
-  textTracks?: SideloadTracks;
   minLoadRetryCount?: Int32; // Android
   mediaOptions?: string[]; // media vlc options
 }>;
@@ -86,14 +77,6 @@ export interface NativeProps extends ViewProps {
   volume?: Int32; // default 100
   progressUpdateInterval?: Float; // default 250
   textTrackDelay?: Int32; // delai en s i think
-
-  // Estilo de subtítulos (aplicado vía opciones freetype de libvlc). Cambiar
-  // cualquiera de estos mientras el video ya está reproduciendo fuerza un
-  // reload de VLCMedia en la posición actual — libvlc no permite cambiar el
-  // renderer de subtítulos en caliente.
-  subtitleFontScale?: Float; // 1 = normal, <1 chico, >1 grande
-  subtitleColor?: Int32; // 0xRRGGBB
-  subtitleBackgroundOpacity?: Int32; // 0-255
 
   onVideoLoad?: DirectEventHandler<OnLoadData>;
   onVideoLoadStart?: DirectEventHandler<{}>;
