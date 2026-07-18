@@ -6,7 +6,15 @@
 // fetch de servidor "no-browser" — confirmado que las IPs de Vercel SÍ lo pasan
 // (probado en producción), pero por las dudas mantenemos el mismo patrón
 // directo→proxy que usa el resto del resolver.
+//
+// Este archivo es SOLO red y orquestación. Todo el criterio de selección (qué
+// se puede reproducir, qué es mejor, qué se descarta) vive en torrentio.parse.ts,
+// que es puro y está cubierto por tests.
 import { tmdbService } from '../tmdb/tmdb.service'
+import {
+  rankCandidates, selectRunnable,
+  type MediaRef, type ScoredCandidate, type TorrentioStream,
+} from './torrentio.parse'
 
 const PROXY_URL = process.env.STREAM_PROXY_URL
 const DEBRID_KEY = process.env.DEBRID_KEY
@@ -14,14 +22,7 @@ const DEBRID_KEY = process.env.DEBRID_KEY
 const TORRENTIO_BASE = 'https://torrentio.strem.fun'
 const FETCH_TIMEOUT = 12_000
 
-export type TorrentioStream = {
-  name?: string
-  title?: string
-  infoHash?: string
-  fileIdx?: number
-  url?: string
-  behaviorHints?: { filename?: string; bingeGroup?: string }
-}
+export type { TorrentioStream, MediaRef } from './torrentio.parse'
 
 async function safeFetch(url: string, init: RequestInit = {}): Promise<Response | null> {
   try {
@@ -74,77 +75,12 @@ async function fetchStreams(
   }
 }
 
-function fileText(s: TorrentioStream): string {
-  return `${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`
-}
-
-// mp4 reproduce nativo en iOS (AVPlayer) y mkv vía VLCKit (ver VideoVLCView.mm)
-// — son los dos formatos que el player sabe reproducir directo, sin conversión.
-function isDirectPlayFile(s: TorrentioStream): boolean {
-  const name = (s.behaviorHints?.filename ?? '').toLowerCase()
-  return name.endsWith('.mp4') || name.endsWith('.mkv')
-}
-
-// Prioriza resolución; penaliza archivos gigantes (riesgo de buffering en
-// móvil) y REMUX (mismo motivo, sin ganancia real de calidad percibida).
-function score(s: TorrentioStream): number {
-  const text = fileText(s)
-  let pts = 0
-  if (/2160p|4k/i.test(text)) pts += 40
-  else if (/1080p/i.test(text)) pts += 30
-  else if (/720p/i.test(text)) pts += 20
-  else pts += 5
-
-  if (/hdr|dolby.?vision|\bdv\b/i.test(text)) pts += 5
-
-  const sizeMatch = text.match(/💾\s*([\d.]+)\s*GB/i)
-  const sizeGB = sizeMatch ? parseFloat(sizeMatch[1]) : null
-  if (sizeGB != null) {
-    if (sizeGB > 25) pts -= 20
-    else if (sizeGB > 12) pts -= 6
-  }
-  if (/remux/i.test(text)) pts -= 10
-
-  return pts
-}
-
-// "Castellano" es español de España, no Latino — son doblajes distintos y los
-// release groups los taggean aparte justamente para diferenciarlos. Tratarlos
-// como sinónimos hacía que pidiendo latino a veces cayera un castellano.
-function hasLatinoAudio(s: TorrentioStream): boolean {
-  return /latino/i.test(fileText(s))
-}
-
-type Candidate = { stream: TorrentioStream; resolveUrl: string; label: string; latino: boolean }
-
-// Solo streams .mp4/.mkv ya resueltos por Torrentio (traen `url`), ordenados
-// por idioma pedido y luego por calidad.
-function rankCandidates(streams: TorrentioStream[], lang: 'original' | 'latino'): Candidate[] {
-  const playable = streams.filter((s) => s.url && isDirectPlayFile(s))
-  const ranked = playable
-    .map((s) => ({
-      stream: s,
-      resolveUrl: s.url!,
-      label: s.behaviorHints?.filename ?? s.title ?? 'stream',
-      latino: hasLatinoAudio(s),
-      sc: score(s),
-    }))
-    .sort((a, b) => {
-      if (lang === 'latino' && a.latino !== b.latino) return a.latino ? -1 : 1
-      return b.sc - a.sc
-    })
-  return ranked.map(({ stream, resolveUrl, label, latino }) => ({ stream, resolveUrl, label, latino }))
-}
-
 // El `url` que trae cada stream es el endpoint de RESOLUCIÓN de Torrentio (no
 // el link final) — visitarlo hace que Torrentio arme el link en Real-Debrid y
 // redirija a él. La cadena puede tener MÁS DE UN salto (Torrentio → arma el
 // link en RD → RD redirige a su CDN) — seguir solo el primer Location dejaba
 // una URL intermedia (no reproducible → CoreMediaErrorDomain -12646). Seguimos
 // la cadena completa nosotros mismos, sin descargar el archivo.
-// Timeout corto: si el torrent NO está cacheado en RD esto tarda mucho (o
-// nunca resuelve) — mejor descartarlo rápido y que gane otro candidato ya
-// cacheado (instantáneo).
 const RESOLVE_TIMEOUT_MS = 10_000
 const MAX_REDIRECTS = 6
 
@@ -170,6 +106,11 @@ async function followResolveUrl(startUrl: string): Promise<string | null> {
     for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
       const r = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS) })
       const loc = r.headers.get('location')
+      // Cancelar el body en CADA salto. Solo nos interesan los headers, pero en
+      // el salto final la respuesta es el video entero: sin este cancel, cada
+      // candidato deja una descarga de varios GB corriendo dentro de la función
+      // serverless hasta que expira el AbortSignal.
+      await r.body?.cancel().catch(() => {})
       if (!loc) {
         // Sin más redirects: si la respuesta fue exitosa, esta ES la URL final.
         if (r.status < 200 || r.status >= 400) return null
@@ -188,94 +129,130 @@ export const debridEnabled = !!DEBRID_KEY
 
 export type DebridResult = { url: string; label: string; language: string; hasLatinoAlternative: boolean }
 
-// Más candidatos en la carrera = más chance de incluir uno ya cacheado en RD
-// (Torrentio suele adelantar los cacheados en su propio orden; si nuestro
-// re-ranking por calidad los empuja fuera del pool, perdemos esa ventaja).
-// Promise.any no espera a todos — el costo extra es mínimo.
-const MAX_TRIES = 6
-
-// Si pedimos latino y hay candidatos latino, les damos esta ventana para
-// resolver ANTES de sumar al resto a la carrera — Promise.any no respeta
-// ranking, solo velocidad, así que sin esto un candidato peor pero ya
-// cacheado le gana por rapidez al latino aunque sea justo lo que se pidió.
-const LATINO_HEAD_START_MS = 3000
-
-type RawResult = { url: string; label: string; latino: boolean }
-
-async function tryCandidate(c: Candidate): Promise<RawResult> {
-  const finalUrl = await followResolveUrl(c.resolveUrl)
-  if (!finalUrl) throw new Error(`no resolvió: ${c.label}`)
-  return { url: finalUrl, label: c.label, latino: c.latino }
+export type DebridRequest = {
+  type: 'movie' | 'tv'
+  tmdbId: number
+  lang: 'original' | 'latino'
+  media: MediaRef
+  season?: number
+  episode?: number
 }
 
-export async function resolveDebridStream(
-  type: 'movie' | 'tv',
-  tmdbId: number,
-  lang: 'original' | 'latino',
-  season?: number,
-  episode?: number
-): Promise<DebridResult | null> {
+// Carrera por olas en vez de lanzar todos los candidatos de una.
+//
+// `Promise.any` sobre la lista entera ignora el ranking: gana el más rápido,
+// que puede ser el peor. Con olas, los mejores arrancan primero y tienen una
+// ventana para ganar; si ninguno responde a tiempo (o todos fallan), se suma
+// la siguiente tanda. Así el orden importa sin renunciar al paralelismo.
+//
+// `attempt` se inyecta para poder testear la mecánica sin tocar la red.
+export type Wave = { count: number; waitMs: number }
+const WAVES: Wave[] = [
+  { count: 2, waitMs: 4000 },
+  { count: 5, waitMs: 6000 },
+]
+
+export async function raceInWaves<C, R>(
+  candidates: C[],
+  waves: Wave[],
+  attempt: (c: C) => Promise<R>
+): Promise<R | null> {
+  // Las promesas se crean UNA sola vez por candidato y se reusan entre olas —
+  // volver a llamar a `attempt` dispararía un segundo resolve del mismo torrent.
+  const started = new Map<number, Promise<R>>()
+  const startUpTo = (n: number) => {
+    for (let i = 0; i < Math.min(n, candidates.length); i++) {
+      if (!started.has(i)) started.set(i, attempt(candidates[i]))
+    }
+    return [...started.values()]
+  }
+
+  for (let w = 0; w < waves.length; w++) {
+    const pool = startUpTo(waves[w].count)
+    if (!pool.length) return null
+    const isLast = w === waves.length - 1 || waves[w].count >= candidates.length
+
+    // Las promesas rechazadas se "absorben" para que Promise.any no explote y
+    // para no dejar unhandled rejections cuando avanzamos de ola.
+    const anyOk = Promise.any(pool).then((r) => ({ ok: true as const, r })).catch(() => ({ ok: false as const }))
+    const settled = isLast
+      ? await anyOk
+      : await Promise.race([
+          anyOk,
+          new Promise<{ ok: false }>((res) => setTimeout(() => res({ ok: false }), waves[w].waitMs)),
+        ])
+    if (settled.ok) return settled.r
+    if (isLast) return null
+  }
+  return null
+}
+
+async function tryCandidate(c: ScoredCandidate): Promise<{ url: string; c: ScoredCandidate }> {
+  const finalUrl = await followResolveUrl(c.parsed.resolveUrl!)
+  if (!finalUrl) throw new Error(`no resolvió: ${c.parsed.filename}`)
+  return { url: finalUrl, c }
+}
+
+export async function resolveDebridStream(req: DebridRequest): Promise<DebridResult | null> {
   if (!DEBRID_KEY) return null
 
   const t0 = Date.now()
-  const imdbId = await imdbIdOf(type, tmdbId)
+  const imdbId = await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return null
 
-  const streams = await fetchStreams(imdbId, type, season, episode)
+  const streams = await fetchStreams(imdbId, req.type, req.season, req.episode)
   const tFetch = Date.now() - t0
-  const candidates = rankCandidates(streams, lang)
-  if (!candidates.length) {
-    console.error(`[debrid] torrentio: ${streams.length} streams (${tFetch}ms) — 0 candidatos mp4/mkv`)
+  const r = rankCandidates(streams, req.media, req.lang)
+
+  if (r.cacheSignal === 'absent' && streams.length > 0) {
+    // Torrentio cambió el formato del marcador de cacheado: seguimos andando
+    // (sin filtrar) pero hay que arreglar parseCacheState. El endpoint
+    // /resolve/debug/debrid/... devuelve los `rawName` para poder ajustarlo.
+    console.error('[debrid] ⚠️ marcador de cacheado ilegible — revisar parseCacheState()')
+  }
+
+  const runnable = selectRunnable(r)
+  if (!runnable.length) {
+    console.error(
+      `[debrid] torrentio: ${streams.length} streams (${tFetch}ms) — 0 ejecutables ` +
+      `(cache ${r.cacheCounts.cached}/${r.cacheCounts.uncached}/${r.cacheCounts.unknown} señal=${r.cacheSignal}, ` +
+      `${r.rejected.length} rechazados)`
+    )
     return null
   }
 
-  const top = candidates.slice(0, MAX_TRIES)
-  const hasLatinoAlternative = candidates.some((c) => c.latino)
-  const toResult = (r: RawResult): DebridResult => ({
-    url: r.url, label: r.label, language: r.latino ? 'Español Latino' : 'Original', hasLatinoAlternative,
-  })
-
-  const tRaceStart = Date.now()
-  const latinoGroup = lang === 'latino' ? top.filter((c) => c.latino) : []
-
-  if (latinoGroup.length > 0) {
-    const latinoPromises = latinoGroup.map(tryCandidate)
-    const headStart = await Promise.race([
-      Promise.any(latinoPromises).then((r) => ({ ok: true as const, r })).catch(() => ({ ok: false as const })),
-      new Promise<{ ok: false }>((resolve) => setTimeout(() => resolve({ ok: false }), LATINO_HEAD_START_MS)),
-    ])
-    if (headStart.ok) {
-      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (latino con ventaja, ${latinoGroup.length} candidatos) → ${headStart.r.label}`)
-      return toResult(headStart.r)
-    }
-    const others = top.filter((c) => !c.latino)
-    try {
-      const winner = await Promise.any([...latinoPromises, ...others.map(tryCandidate)])
-      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (sin latino a tiempo, fallback) → ${winner.label}`)
-      return toResult(winner)
-    } catch {
-      console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms — ninguno de ${top.length} candidatos resolvió`)
-      return null
-    }
+  const tRace = Date.now()
+  const winner = await raceInWaves(runnable, WAVES, tryCandidate)
+  if (!winner) {
+    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRace}ms — ninguno de ${runnable.length} resolvió`)
+    return null
   }
 
-  // Carrera en paralelo entre los mejores candidatos — el que ya está
-  // cacheado en Real-Debrid resuelve casi al instante, así no esperamos
-  // secuencialmente a que cada uno agote su timeout antes de probar el siguiente.
-  try {
-    const winner = await Promise.any(top.map(tryCandidate))
-    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms (${top.length} candidatos) → ${winner.label}`)
-    return toResult(winner)
-  } catch {
-    console.error(`[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRaceStart}ms — ninguno de ${top.length} candidatos resolvió`)
-    return null // AggregateError: ninguno resolvió a tiempo
+  const p = winner.c.parsed
+  console.error(
+    `[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRace}ms ` +
+    `(${runnable.length} ejecutables de ${streams.length}) → ${p.filename} ` +
+    `[score ${Math.round(winner.c.score)} · ${p.resolution ?? '?'}p ${p.codec ?? '?'} · cached=${p.cached}]`
+  )
+  return {
+    url: winner.url,
+    label: p.filename,
+    language: p.langs.has('latino') ? 'Español Latino' : 'Original',
+    hasLatinoAlternative: r.hasLatinoAlternative,
   }
 }
 
 // Diagnóstico: lista los candidatos rankeados sin resolver el link final (rápido).
+//
+// Es el ÚNICO canal para verificar el formato del marcador de cacheado, porque
+// Torrentio solo responde a IPs de Vercel: no se puede comprobar en local ni en
+// los tests. Por eso devuelve los `rawName`/`rawTitle` crudos además del
+// veredicto — si `cacheSignal` no es 'ok', con esta misma respuesta se ajusta
+// parseCacheState() sin tener que adivinar.
 export async function debugTorrentio(
   type: 'movie' | 'tv',
   tmdbId: number,
+  media: MediaRef,
   season?: number,
   episode?: number
 ): Promise<any> {
@@ -283,26 +260,38 @@ export async function debugTorrentio(
   if (!imdbId) return { error: 'no se pudo obtener imdb_id', debridEnabled }
 
   const streams = await fetchStreams(imdbId, type, season, episode)
-  const playable = streams.filter(isDirectPlayFile)
-  const ranked = rankCandidates(streams, 'original')
-  const latinoOnes = ranked.filter((c) => c.latino)
-  // Diagnóstico: separa "latino" real de "castellano" (España) en TODOS los
-  // streams crudos (no solo los .mp4/.mkv playable) — para distinguir "no hay
-  // nada en español" de "hay español pero es de España, no latino".
-  const rawText = (s: TorrentioStream) => `${s.title ?? ''} ${s.behaviorHints?.filename ?? ''}`
-  const rawLatinoMatches = streams.filter((s) => /latino/i.test(rawText(s)))
-  const rawCastellanoMatches = streams.filter((s) => /castellano/i.test(rawText(s)) && !/latino/i.test(rawText(s)))
+  const r = rankCandidates(streams, media, 'original')
+  const runnable = selectRunnable(r)
+
   return {
     imdbId,
     debridEnabled,
+    media,
     totalStreams: streams.length,
-    playableCount: playable.length,
-    latinoCount: latinoOnes.length,
-    latino: latinoOnes.slice(0, 5).map((c) => c.label),
-    rawLatinoMatchesCount: rawLatinoMatches.length,
-    rawLatinoMatches: rawLatinoMatches.slice(0, 5).map((s) => s.behaviorHints?.filename ?? s.title),
-    rawCastellanoMatchesCount: rawCastellanoMatches.length,
-    rawCastellanoMatches: rawCastellanoMatches.slice(0, 5).map((s) => s.behaviorHints?.filename ?? s.title),
-    top: ranked.slice(0, 8).map((c) => ({ label: c.label, latino: c.latino })),
+    // Cuenta los que realmente pueden competir (con `url` y sin rechazo), no
+    // una aproximación distinta a la del ranking real.
+    candidates: r.ranked.length,
+    runnable: runnable.length,
+    cacheSignal: r.cacheSignal,
+    cacheCounts: r.cacheCounts,
+    hasLatinoAlternative: r.hasLatinoAlternative,
+    // Crudos: para verificar/ajustar parseCacheState y la detección de idioma.
+    rawSamples: streams.slice(0, 5).map((s) => ({
+      name: s.name,
+      title: s.title?.slice(0, 160),
+      filename: s.behaviorHints?.filename,
+    })),
+    top: r.ranked.slice(0, 8).map((c) => ({
+      label: c.parsed.filename.slice(0, 90),
+      score: Math.round(c.score),
+      cached: c.parsed.cached,
+      resolution: c.parsed.resolution,
+      codec: c.parsed.codec,
+      hdr: c.parsed.hdr,
+      sizeGB: c.parsed.sizeGB,
+      langs: [...c.parsed.langs],
+      parts: Object.fromEntries(Object.entries(c.parts).map(([k, v]) => [k, Math.round(v)])),
+    })),
+    rejected: r.rejected.slice(0, 15),
   }
 }

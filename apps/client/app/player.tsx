@@ -133,23 +133,17 @@ export default function PlayerScreen() {
   const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
   useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
-  // No forzamos orientación para NativePlayer: el fullscreen nativo de Apple
-  // (AVPlayerViewController) rota a horizontal por su cuenta y vuelve a
-  // vertical al salir, sin saltos. La vista que queda detrás permanece en
-  // portrait → no se ve ninguna rotación.
-  //
-  // Para VlcPlayer sí forzamos nosotros (VLCKit no tiene fullscreen nativo) —
-  // y ahí el cleanup del useEffect de orientación (en VlcPlayer, se dispara
-  // recién al desmontar) corría en un momento impredecible respecto a la
-  // transición de salida del modal: coincidiendo con ella se veía la
-  // pantalla "rebotar" horizontal→vertical→horizontal en vez de un giro
-  // limpio. Relockeamos portrait ACÁ, antes de navegar — el giro pasa
-  // mientras el player todavía se ve entero y la transición de salida ya
-  // arranca en portrait, sin pelearse con ninguna otra rotación.
+  // La pantalla entera (LoadingScreen incluida) está forzada a landscape desde
+  // el mount (ver el useEffect de abajo) — así que TODA salida, sea cual sea
+  // la fuente, tiene que revertir a portrait antes de navegar. Si dejáramos
+  // que el cleanup del useEffect de desmontaje lo haga solo, el revert se
+  // dispara en un momento impredecible respecto a la transición de salida del
+  // modal, y se ve la pantalla "rebotar" horizontal→vertical→horizontal en
+  // vez de un giro limpio. Relockeamos portrait ACÁ, antes de navegar — el
+  // giro pasa mientras el player todavía se ve entero y la transición de
+  // salida ya arranca en portrait, sin pelearse con ninguna otra rotación.
   async function exitToBack() {
-    if (isVlcSource) {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-    }
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
     router.back()
   }
 
@@ -249,22 +243,21 @@ export default function PlayerScreen() {
   // permite sideload/selección de subtítulos y pistas de audio sin re-resolver.
   const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
 
-  // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer. Antes el
-  // lock landscape/portrait vivía en el useEffect de VlcPlayer (mount→landscape,
-  // unmount→portrait). Cambiar de episodio (o de idioma de audio) desmonta y
-  // vuelve a montar VlcPlayer, así que ese portrait-al-desmontar se disparaba
-  // en medio de la transición y se veía el parpadeo vertical→horizontal.
-  // Acá solo forzamos landscape cuando hay una fuente VLC activa y NO
-  // revertimos a portrait en cada cambio de isVlcSource — el portrait queda
-  // reservado para la salida real (exitToBack, antes de navegar) y para el
-  // desmontaje de la pantalla entera (cleanup de abajo). Durante la carga del
-  // siguiente episodio isVlcSource cae a false un instante pero seguimos en
-  // landscape, sin rotar.
+  // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer ni por tipo
+  // de fuente. Se fuerza landscape UNA vez al entrar a esta pantalla (deps
+  // vacías) — así la LoadingScreen (spinner + selector de audio) ya aparece
+  // horizontal, en vez de esperar a que resuelva el stream para recién ahí
+  // rotar. Sin gating por isVlcSource: antes solo se forzaba para VLC (el
+  // NativePlayer rotaba solo, vía su propio fullscreen de Apple) — ahora que
+  // el landscape arranca desde la carga, el mismo lock sirve para los dos;
+  // el revert a portrait queda reservado para la salida real (exitToBack,
+  // antes de navegar) y para el desmontaje de la pantalla entera (cleanup de
+  // abajo). Cambiar de episodio (o de idioma de audio) desmonta y remonta el
+  // player, pero como este lock no depende de isVlcSource no se re-dispara ni
+  // parpadea en esa transición.
   useEffect(() => {
-    if (isVlcSource) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
-    }
-  }, [isVlcSource])
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+  }, [])
 
   useEffect(() => {
     return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP) }
@@ -441,7 +434,6 @@ function LoadingScreen({
   showAudioSwitch: boolean
   onChangeAudioLang: (lang: AudioLang) => void
 }) {
-  const insets = useSafeAreaInsets()
   const fade = useRef(new Animated.Value(0)).current
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 350, delay: 200, useNativeDriver: true }).start()
@@ -466,9 +458,14 @@ function LoadingScreen({
       </View>
 
       {/* Selector de audio: discreto, aparece un instante después para no competir
-          visualmente con el spinner — la carga arranca sola con la preferencia guardada. */}
+          visualmente con el spinner — la carga arranca sola con la preferencia guardada.
+          bottom fijo, sin insets.bottom: esta pantalla ahora se muestra en el landscape
+          forzado por lockAsync (ver PlayerScreen) desde el primer frame, y ese landscape
+          no es una rotación física real — el safe-area-context a veces arrastra el inset
+          de portrait ahí (mismo problema ya documentado en VlcPlayer para la barra
+          superior y el overlay de subtítulos). */}
       {showAudioSwitch && (
-        <Animated.View style={[styles.langSwitch, { bottom: insets.bottom + 40, opacity: fade }]}>
+        <Animated.View style={[styles.langSwitch, { bottom: 40, opacity: fade }]}>
           <BlurView intensity={70} tint="systemChromeMaterialDark" style={styles.langSegmented}>
             {(['original', 'latino'] as const).map((opt) => (
               <Touchable
@@ -606,7 +603,16 @@ function NativePlayer({
 // Sin chrome nativo de AVPlayer: controles propios, mínimos, con selector de
 // pista de audio/subtítulos (lo que expo-video no puede dar para estas fuentes).
 
-type TrackInfo = { id: number; label: string }
+type TrackInfo = { id: number; label: string; lang?: string }
+
+// ¿Esta pista embebida es española? VLCKit expone `language` (ISO 639) además
+// del título; antes se descartaba y solo se miraba el título, que en muchos
+// MKV viene vacío o genérico ("Track 3").
+function isSpanishTrack(t: TrackInfo): boolean {
+  const lang = (t.lang ?? '').toLowerCase()
+  if (lang.startsWith('es') || lang.startsWith('spa')) return true
+  return /\b(?:spa|esp|spanish|español|latino|castellano)\b/i.test(t.label)
+}
 
 function VlcPlayer({
   uri, referer, srtCues, startAt, meta, hasNext,
@@ -692,13 +698,24 @@ function VlcPlayer({
   )
   // srtCues ya no está listo al montar (la descarga corre en paralelo, no
   // bloquea el arranque — ver resolve() en PlayerScreen), así que el
-  // useState de arriba casi siempre inicializa en 'none'. Cuando las cues
-  // llegan tarde, este efecto activa el español automáticamente — salvo que
-  // el usuario ya haya elegido algo distinto a mano mientras tanto.
+  // useState de arriba casi siempre inicializa en 'none'. Este efecto elige
+  // solo, con precedencia explícita, y nunca pisa una elección manual:
+  //
+  //   1. El .srt externo, si llegó: lo renderizamos nosotros, así que el
+  //      estilo (tamaño/color/fondo) se puede cambiar al instante.
+  //   2. Si no hay .srt, una pista embebida en español del propio MKV.
+  //
+  // El paso 2 es nuevo: antes, si Wyzie no tenía español para ese título, el
+  // video arrancaba sin subtítulos aunque el archivo trajera pistas.
+  // Ambas dependencias en el array: cualquiera de las dos puede llegar
+  // primero (la descarga del .srt compite con el onLoad de VLCKit).
   const subModeChosenByUser = useRef(false)
   useEffect(() => {
-    if (srtCues.length > 0 && !subModeChosenByUser.current) setSubMode('external')
-  }, [srtCues])
+    if (subModeChosenByUser.current) return
+    if (srtCues.length > 0) { setSubMode('external'); return }
+    const embedded = textTracks.find(isSpanishTrack)
+    if (embedded) setSubMode(embedded.id)
+  }, [srtCues, textTracks])
   function chooseSubMode(mode: 'external' | 'none' | number) {
     subModeChosenByUser.current = true
     setSubMode(mode)
@@ -854,8 +871,14 @@ function VlcPlayer({
   function handleLoad(data: OnLoadData) {
     setBuffering(false) // red de seguridad: onVideoLoad siempre llega al arrancar, aunque se pierda algún evento de buffer
     setDuration(data.duration)
-    setAudioTracks(data.audioTracks.map((t) => ({ id: t.id, label: t.title || `Pista ${t.id}` })))
-    setTextTracks(data.textTracks.map((t) => ({ id: t.id, label: t.title || `Subtítulo ${t.id}` })))
+    setAudioTracks(data.audioTracks.map((t) => ({
+      id: t.id, label: t.title || t.language || `Pista ${t.id}`, lang: t.language,
+    })))
+    // Se conserva `language`: es lo que permite reconocer una pista española
+    // cuando el MKV no la titula (ver isSpanishTrack y el efecto de subMode).
+    setTextTracks(data.textTracks.map((t) => ({
+      id: t.id, label: t.title || t.language || `Subtítulo ${t.id}`, lang: t.language,
+    })))
     const selAudio = data.audioTracks.find((t) => t.selected)
     // El archivo puede traer varias pistas de audio embebidas (ej. dual audio
     // inglés/latino) y VLCKit no siempre elige la correcta por defecto — suele

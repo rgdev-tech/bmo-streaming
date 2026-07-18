@@ -10,6 +10,7 @@ import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
 import { resolveDebridStream, debridEnabled, debugTorrentio } from './torrentio'
+import type { MediaRef } from './torrentio.parse'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
 
@@ -98,23 +99,36 @@ function languageLabel(sourceId: string): string {
   return LATINO_SOURCES.includes(sourceId) ? 'Español Latino' : 'Original'
 }
 
-// Construye el objeto ScrapeMedia que la librería necesita (título + año + tmdbIds).
+// Construye el objeto ScrapeMedia que la librería necesita (título + año + tmdbIds)
+// y, en la misma pasada, el MediaRef que usa el ranking de Real-Debrid para
+// validar que el torrent sea el correcto. Sale todo de las MISMAS respuestas de
+// TMDB, sin llamadas extra.
 async function buildMedia(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
-): Promise<ScrapeMedia | null> {
+): Promise<{ media: ScrapeMedia; ref: MediaRef } | null> {
   try {
     if (type === 'movie') {
       const d = await tmdbService.movieDetails(tmdbId) as any
       const year = d.release_date ? Number(d.release_date.slice(0, 4)) : undefined
       if (!d.title) return null
       return {
-        type: 'movie',
-        title: d.title,
-        releaseYear: year ?? 0,
-        tmdbId: String(tmdbId),
+        media: {
+          type: 'movie',
+          title: d.title,
+          releaseYear: year ?? 0,
+          tmdbId: String(tmdbId),
+        },
+        ref: {
+          type: 'movie',
+          title: d.title,                       // localizado (la API pide es-ES)
+          originalTitle: d.original_title ?? null,
+          originalLanguage: d.original_language ?? null,
+          year: year ?? null,
+          runtimeMin: d.runtime ?? null,
+        },
       }
     }
 
@@ -127,17 +141,31 @@ async function buildMedia(
     if (!d.name || !ep) return null
     const year = d.first_air_date ? Number(d.first_air_date.slice(0, 4)) : undefined
     return {
-      type: 'show',
-      title: d.name,
-      releaseYear: year ?? 0,
-      tmdbId: String(tmdbId),
-      season: {
-        number: season ?? 1,
-        tmdbId: String(seasonData.id),
-        title: seasonData.name ?? `Season ${season ?? 1}`,
-        episodeCount: (seasonData.episodes ?? []).length || undefined,
+      media: {
+        type: 'show',
+        title: d.name,
+        releaseYear: year ?? 0,
+        tmdbId: String(tmdbId),
+        season: {
+          number: season ?? 1,
+          tmdbId: String(seasonData.id),
+          title: seasonData.name ?? `Season ${season ?? 1}`,
+          episodeCount: (seasonData.episodes ?? []).length || undefined,
+        },
+        episode: { number: episode ?? 1, tmdbId: String(ep.id) },
       },
-      episode: { number: episode ?? 1, tmdbId: String(ep.id) },
+      ref: {
+        type: 'tv',
+        title: d.name,
+        originalTitle: d.original_name ?? null,
+        originalLanguage: d.original_language ?? null,
+        // Año del EPISODIO, no de la serie: los archivos de temporadas tardías
+        // llevan su año de emisión, que difiere años del de estreno de la serie.
+        year: ep.air_date ? Number(String(ep.air_date).slice(0, 4)) : null,
+        runtimeMin: ep.runtime ?? null,
+        season: season ?? 1,
+        episode: episode ?? 1,
+      },
     }
   } catch (e) {
     console.error('[resolve] buildMedia error:', (e as Error).message)
@@ -335,11 +363,12 @@ async function scrape(
   episode?: number,
   exclude: string[] = []
 ): Promise<StreamResult | null> {
-  const media = await buildMedia(type, tmdbId, season, episode)
-  if (!media) {
+  const built = await buildMedia(type, tmdbId, season, episode)
+  if (!built) {
     console.error(`[resolve] no se pudo construir media para ${type}/${tmdbId}`)
     return null
   }
+  const { media, ref } = built
 
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}${exclude.length ? ` excl=${exclude.join(',')}` : ''}`)
   const t0 = Date.now()
@@ -353,7 +382,7 @@ async function scrape(
     // mecanismo de exclude del cliente.
     if (debridEnabled && !exclude.includes('realdebrid')) {
       try {
-        const debrid = await resolveDebridStream(type, tmdbId, lang, season, episode)
+        const debrid = await resolveDebridStream({ type, tmdbId, lang, media: ref, season, episode })
         if (debrid) {
           const result: StreamResult = {
             url: debrid.url,
@@ -473,6 +502,19 @@ export async function debugSubs(
   }
 }
 
+// Diagnóstico de Real-Debrid. Vive acá y no en las rutas porque necesita el
+// MediaRef que arma buildMedia (el ranking valida año/temporada contra TMDB).
+export async function debugDebrid(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<any> {
+  const built = await buildMedia(type, tmdbId, season, episode)
+  if (!built) return { error: 'buildMedia falló (¿TMDB_API_KEY?)' }
+  return debugTorrentio(type, tmdbId, built.ref, season, episode)
+}
+
 // Diagnóstico detallado: corre runAll capturando el resultado de CADA source.
 // Sirve para saber si los sources fallan por bloqueo de IP, CORS, o están muertos.
 export async function debugScrape(
@@ -481,8 +523,9 @@ export async function debugScrape(
   season?: number,
   episode?: number
 ): Promise<any> {
-  const media = await buildMedia(type, tmdbId, season, episode)
-  if (!media) return { error: 'buildMedia falló (¿TMDB_API_KEY?)', media: null }
+  const built = await buildMedia(type, tmdbId, season, episode)
+  if (!built) return { error: 'buildMedia falló (¿TMDB_API_KEY?)', media: null }
+  const { media } = built
 
   const events: any[] = []
   let sourceIds: string[] = []

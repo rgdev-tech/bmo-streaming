@@ -31,6 +31,9 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
+      - name: Test
+        run: bun test src
+
   deploy-preview:
     name: Deploy — Preview
     runs-on: ubuntu-latest
