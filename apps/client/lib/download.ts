@@ -118,6 +118,19 @@ function bufToBase64(buf: ArrayBuffer): string {
   return btoa(binary)
 }
 
+// AbortSignal.timeout() NO existe en el runtime de React Native (Hermes): usarlo
+// lanzaba "AbortSignal.timeout is not a function" en el primer fetch, así que
+// ninguna descarga llegaba a arrancar. Mismo patrón manual que lib/api.ts.
+async function fetchWithTimeout(url: string, ms: number, init: RequestInit = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // Map de descargas activas (para pausar/cancelar)
 const _active = new Map<string, { cancelled: boolean }>()
 // Descargas de archivo único en curso: hay que poder pausarlas de verdad, no
@@ -220,7 +233,7 @@ async function _runDownload(
       ? `${API_URL}/download/tv/${id}/${season}/${episode}`
       : `${API_URL}/download/movie/${id}`
 
-    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(90_000) })
+    const resp = await fetchWithTimeout(apiUrl, 90_000)
     if (!resp.ok) {
       const body = await resp.text().catch(() => '')
       throw new Error(`API ${resp.status}${body ? `: ${body.slice(0, 80)}` : ''}`)
@@ -302,9 +315,8 @@ async function _runDownload(
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         if (ctrl.cancelled) throw new Error('cancelled')
         try {
-          const resp = await fetch(seg.url, {
+          const resp = await fetchWithTimeout(seg.url, 20_000, {
             headers: referer ? { Referer: referer } : {},
-            signal: AbortSignal.timeout(20_000),
           })
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
           const buf = await resp.arrayBuffer()
