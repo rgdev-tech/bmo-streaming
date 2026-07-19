@@ -18,7 +18,7 @@ import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-g
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle, type SourceOption } from '@/lib/stream'
 import {
-  getSubtitleStyle, setSubtitleStyle, DEFAULT_SUBTITLE_STYLE,
+  getSubtitleStyle, setSubtitleStyle, getSubtitleOffset, setSubtitleOffset, DEFAULT_SUBTITLE_STYLE,
   SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS,
   type SubtitleStyle as SubtitleStyleT,
 } from '@/lib/subtitleStyle'
@@ -445,6 +445,7 @@ export default function PlayerScreen() {
           // Sin fuentes alternativas no se ofrece la pestaña (descarga local).
           onPickSource={localIsFile ? undefined : pickSource}
           onPosition={(t) => { lastPositionRef.current = t }}
+          offsetKey={`${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
@@ -716,13 +717,25 @@ type TrackInfo = { id: number; label: string; lang?: string }
 function isSpanishTrack(t: TrackInfo): boolean {
   const lang = (t.lang ?? '').toLowerCase()
   if (lang.startsWith('es') || lang.startsWith('spa')) return true
-  return /\b(?:spa|esp|spanish|español|latino|castellano)\b/i.test(t.label)
+  return /\b(?:spa|esp|spanish|español|castellano)\b/i.test(t.label) || isLatinTrack(t)
+}
+
+// Español LATINO específicamente, no castellano. Se usa para preferirlo cuando
+// el archivo trae los dos doblajes: pedir "latino" y recibir el de España es
+// exactamente el error que se busca evitar.
+// `es-419` es el código ISO estándar para español de Latinoamérica; `es-MX`,
+// `es-AR` etc. también aparecen en archivos reales.
+function isLatinTrack(t: TrackInfo): boolean {
+  const lang = (t.lang ?? '').toLowerCase()
+  if (/^(?:es|spa)[-_](?:419|mx|ar|co|cl|pe|ve|la)/.test(lang)) return true
+  return /\b(?:latino|latinoamerican[oa]|lat|mex|419)\b/i.test(t.label)
 }
 
 function VlcPlayer({
   uri, referer, srtCues, startAt, meta, hasNext, title, episodeLabel,
   audioLang, hasLatinoAlternative, onChangeAudioLang,
   sources, sourcesLoading, activeSourceIndex, onPickSource, onPosition,
+  offsetKey,
   onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; referer: string; startAt: number
@@ -741,6 +754,8 @@ function VlcPlayer({
   activeSourceIndex: number | null
   onPickSource?: (i: number) => void
   onPosition?: (t: number) => void
+  // Clave de persistencia del desfase de subtítulos (por título/episodio).
+  offsetKey: string
   onClose: (watchedFraction: number) => void
   onEnded: () => void
   onPlayNext: () => void
@@ -833,7 +848,18 @@ function VlcPlayer({
     subModeChosenByUser.current = true
     setSubMode(mode)
   }
-  const activeCue = subMode === 'external' ? findActiveCue(srtCues, position) : null
+  // Desfase de subtítulos. Se RESTA de la posición: con offset positivo hay que
+  // "mirar más atrás" en las cues, o sea que el texto aparece más tarde.
+  const [subOffset, setSubOffsetState] = useState(0)
+  useEffect(() => { getSubtitleOffset(offsetKey).then(setSubOffsetState) }, [offsetKey])
+  function bumpOffset(delta: number) {
+    // Tope: más de ±30s ya no es desincronización, es el subtítulo equivocado.
+    const next = Math.round(Math.min(30, Math.max(-30, subOffset + delta)) * 10) / 10
+    setSubOffsetState(next)
+    setSubtitleOffset(offsetKey, next)
+  }
+
+  const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
 
   const [subStyle, setSubStyleState] = useState<SubtitleStyleT>(DEFAULT_SUBTITLE_STYLE)
   useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
@@ -999,8 +1025,16 @@ function VlcPlayer({
     // nombre lo indique y la forzamos; si el archivo no la nombra (pistas
     // genéricas "Track 1"/"Track 2"), no hay forma de saberlo desde acá y
     // queda el default de VLCKit.
+    // Se mira el título Y el código de idioma (`language`, ISO 639): muchos MKV
+    // no titulan las pistas pero sí las etiquetan, y antes esas se perdían.
+    // Además se prefiere LATINO sobre castellano cuando el archivo trae las
+    // dos — son doblajes distintos y pedir "latino" y recibir el de España es
+    // justo lo que se quiere evitar.
+    const asTrack = (t: { id: number; title?: string; language?: string }) =>
+      ({ id: t.id, label: t.title ?? '', lang: t.language })
     const latinoTrack = audioLang === 'latino'
-      ? data.audioTracks.find((t) => /spa|esp|latino|castellano/i.test(t.title ?? ''))
+      ? (data.audioTracks.find((t) => isLatinTrack(asTrack(t)))
+        ?? data.audioTracks.find((t) => isSpanishTrack(asTrack(t))))
       : undefined
     setSelectedAudioTrack(latinoTrack ? latinoTrack.id : selAudio ? selAudio.id : -1)
     if (!startedRef.current) {
@@ -1318,25 +1352,59 @@ function VlcPlayer({
                 )}
               </View>
 
-              {trackPicker === 'audio' && (audioLang === 'latino' || hasLatinoAlternative) && (
-                <Touchable
-                  scaleTo={0.98}
-                  haptic="selection"
-                  style={styles.vlcPickerSwitchRow}
-                  onPress={() => {
-                    onChangeAudioLang(audioLang === 'latino' ? 'original' : 'latino')
-                    setTrackPicker(null)
-                  }}
-                >
-                  <SymbolView name="arrow.triangle.2.circlepath" tintColor="#fff" style={styles.vlcIcon} />
-                  <Text style={styles.vlcPickerSwitchText} numberOfLines={1}>
-                    {audioLang === 'latino' ? 'Volver a audio Original' : 'Cambiar a fuente con audio Latino'}
-                  </Text>
-                </Touchable>
+              {/* La fila se muestra SIEMPRE. Antes dependía de
+                  hasLatinoAlternative, que el servidor deduce del nombre de
+                  archivo — si el release no dice "latino" en el título pero sí
+                  trae el doblaje, la opción desaparecía y no había forma de
+                  intentarlo. Es preferible ofrecerla y avisar si no se
+                  encontró, a esconderla por una corazonada. */}
+              {trackPicker === 'audio' && (
+                <>
+                  <Touchable
+                    scaleTo={0.98}
+                    haptic="selection"
+                    style={styles.vlcPickerSwitchRow}
+                    onPress={() => {
+                      onChangeAudioLang(audioLang === 'latino' ? 'original' : 'latino')
+                      setTrackPicker(null)
+                    }}
+                  >
+                    <SymbolView name="arrow.triangle.2.circlepath" tintColor="#fff" style={styles.vlcIcon} />
+                    {/* hasLatinoAlternative ya no decide si la fila se ve, pero
+                        sigue sirviendo para el texto: cuando el servidor SÍ
+                        detectó una versión latina se promete algo concreto en
+                        vez de un "buscar" que puede no encontrar nada. */}
+                    <Text style={styles.vlcPickerSwitchText} numberOfLines={1}>
+                      {audioLang === 'latino'
+                        ? 'Volver a audio Original'
+                        : hasLatinoAlternative
+                          ? 'Cambiar a fuente con audio Latino'
+                          : 'Buscar fuente con audio Latino'}
+                    </Text>
+                  </Touchable>
+
+                  {/* Aviso honesto: se pidió latino pero el archivo que llegó
+                      no trae ninguna pista en español. Sin esto el usuario
+                      creía que había cambiado y seguía escuchando inglés. */}
+                  {audioLang === 'latino' && audioTracks.length > 0
+                    && !audioTracks.some(isSpanishTrack) && (
+                    <Text style={styles.vlcPickerNotice}>
+                      Esta fuente no trae audio en español. Prueba con otra en la pestaña de calidad.
+                    </Text>
+                  )}
+                </>
               )}
 
               {trackPicker === 'style' ? (
-                <View style={styles.vlcStyleContent}>
+                // ScrollView y no un View centrado: la tarjeta tiene alto fijo
+                // (dropdownHeight) y con `justifyContent: center` el contenido
+                // que no entraba desbordaba hacia ARRIBA y abajo a la vez,
+                // montándose sobre las pestañas.
+                <ScrollView
+                  style={styles.vlcPickerList}
+                  contentContainerStyle={styles.vlcStyleContent}
+                  showsVerticalScrollIndicator={false}
+                >
                   <SubtitleStyleRow
                     label="Tamaño"
                     value={subStyle.size}
@@ -1366,7 +1434,56 @@ function VlcPlayer({
                     ]}
                     onChange={(background) => changeSubStyle({ background })}
                   />
-                </View>
+
+                  {/* Sincronía. Los .srt vienen cronometrados para otro release
+                      que el archivo que sirve Real-Debrid, así que casi siempre
+                      hay un desfase; suelen ir adelantados. Se guarda por
+                      título/episodio porque depende del archivo concreto. */}
+                  <View style={styles.vlcSyncRow}>
+                    <Text style={styles.vlcStyleLabel}>Sincronía</Text>
+                    <View style={styles.vlcSyncControls}>
+                      <Touchable
+                        scaleTo={0.9} haptic="selection"
+                        style={styles.vlcSyncBtn}
+                        onPress={() => bumpOffset(-0.5)}
+                      >
+                        <Text style={styles.vlcSyncBtnText}>−0,5s</Text>
+                      </Touchable>
+                      <Touchable
+                        scaleTo={0.92} haptic="light"
+                        style={styles.vlcSyncValue}
+                        onPress={() => bumpOffset(-subOffset)}
+                      >
+                        <Text style={styles.vlcSyncValueText}>
+                          {subOffset === 0 ? '0s' : `${subOffset > 0 ? '+' : ''}${subOffset.toFixed(1)}s`}
+                        </Text>
+                      </Touchable>
+                      <Touchable
+                        scaleTo={0.9} haptic="selection"
+                        style={styles.vlcSyncBtn}
+                        onPress={() => bumpOffset(0.5)}
+                      >
+                        <Text style={styles.vlcSyncBtnText}>+0,5s</Text>
+                      </Touchable>
+                    </View>
+                  </View>
+                  <Text style={styles.vlcSyncHint}>
+                    Si el texto va adelantado, sube el valor. Toca el número para volver a 0.
+                  </Text>
+
+                  {/* El estilo (y la sincronía) solo afectan al subtítulo que
+                      descargamos y dibujamos nosotros. Las pistas incrustadas
+                      en el archivo las renderiza VLCKit por dentro y no expone
+                      control de apariencia — ver el comentario de
+                      lib/subtitleStyle.ts. Se avisa en vez de dejar que el
+                      usuario mueva controles que no hacen nada. */}
+                  {typeof subMode === 'number' && (
+                    <Text style={styles.vlcPickerNotice}>
+                      Estás viendo una pista incrustada en el archivo: estos ajustes solo
+                      se aplican al subtítulo en español que descargamos.
+                    </Text>
+                  )}
+                </ScrollView>
               ) : (
                 <ScrollView
                   style={styles.vlcPickerList}
@@ -1789,6 +1906,10 @@ const styles = StyleSheet.create({
   },
   vlcPickerRowText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, flexShrink: 1 },
   vlcPickerRowTextActive: { color: '#fff', fontWeight: '700' },
+  vlcPickerNotice: {
+    color: '#FFD60A', fontSize: 12.5, lineHeight: 17,
+    paddingHorizontal: 14, paddingBottom: 10, paddingTop: 2,
+  },
   vlcPickerEmpty: {
     color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center',
     paddingVertical: 20, paddingHorizontal: 12,
@@ -1797,8 +1918,25 @@ const styles = StyleSheet.create({
   // Picker de "Estilo" de subtítulos — las etiquetas "flotan" con text-shadow
   // sutil (sin fondo propio, como si estuvieran suspendidas sobre el vidrio).
   // flex:1 + centrado: llena el mismo alto fijo que la lista de pistas.
-  vlcStyleContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 4, gap: 16 },
+  // Sin flex ni justifyContent: es el contentContainer de un ScrollView, así
+  // que crece con el contenido y scrollea si no entra.
+  vlcStyleContent: { paddingHorizontal: 4, paddingVertical: 14, gap: 16 },
   vlcStyleRow: { gap: 10 },
+  vlcSyncRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginTop: 4,
+  },
+  vlcSyncControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  vlcSyncBtn: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  vlcSyncBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  vlcSyncValue: { minWidth: 58, alignItems: 'center', paddingVertical: 7 },
+  vlcSyncValueText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  vlcSyncHint: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 11.5, marginTop: 8, lineHeight: 16,
+  },
   vlcStyleLabel: {
     color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '600',
     textTransform: 'uppercase', letterSpacing: 1.1, paddingHorizontal: 4,

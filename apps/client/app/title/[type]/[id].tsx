@@ -1,5 +1,5 @@
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from 'expo-router'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ScrollView,
   View,
@@ -16,7 +16,7 @@ import { useAsync } from '@/lib/useAsync'
 import { SeasonEpisodes } from '@/components/SeasonEpisodes'
 import { CastRow } from '@/components/CastRow'
 import { PosterRow } from '@/components/PosterRow'
-import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
+import { isInMyList, toggleMyList, toLibraryItem, getResumePoint } from '@/lib/library'
 import { prewarmTitle } from '@/lib/stream'
 import { DownloadButton } from '@/components/DownloadButton'
 import { Touchable } from '@/components/Touchable'
@@ -51,6 +51,37 @@ export default function TitleScreen() {
   useEffect(() => {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
+
+  // Punto de retomar de la serie. Se recalcula al volver a esta pantalla
+  // (useFocusEffect) porque lo normal es llegar acá justo después de ver algo.
+  const [resume, setResume] = useState<{ season: number; episode: number; fresh: boolean } | null>(null)
+  useFocusEffect(useCallback(() => {
+    if (!isTv) return
+    let alive = true
+    getResumePoint(Number(id)).then((p) => {
+      if (!alive) return
+      // Sin historial se ofrece el primer episodio: el botón debe existir
+      // igual, si no la serie no tiene forma obvia de empezar.
+      setResume(p ?? { season: 1, episode: 1, fresh: true })
+    })
+    return () => { alive = false }
+  }, [id, isTv]))
+
+  function playResume() {
+    if (!resume) return
+    router.push({
+      pathname: '/player',
+      params: {
+        type: 'tv',
+        id,
+        season: String(resume.season),
+        episode: String(resume.episode),
+        title: `${data ? titleOf(data) : ''} · T${resume.season}:E${resume.episode}`,
+        poster: data?.poster_path ?? '',
+        backdrop: data?.backdrop_path ?? '',
+      },
+    })
+  }
 
   // Respaldo: si se llegó acá sin pasar por una tarjeta con prewarm-on-touch
   // (deep link, back/forward), igual precalienta apenas monta la pantalla.
@@ -175,6 +206,18 @@ export default function TitleScreen() {
                 <Text style={styles.playText}>Reproducir</Text>
               </Touchable>
             ))}
+
+          {/* Series: retomar donde iba. Se muestra siempre —con "Ver T1:E1" si
+              nunca vio nada— para que exista un punto de entrada obvio sin
+              tener que bajar hasta la lista de episodios y elegir a mano. */}
+          {isTv && resume && (
+            <Touchable scaleTo={0.97} haptic="medium" style={styles.playButton} onPress={playResume}>
+              <SymbolView name="play.fill" tintColor="#000" style={styles.playIcon} />
+              <Text style={styles.playText}>
+                {resume.fresh ? 'Ver' : 'Continuar'} T{resume.season}:E{resume.episode}
+              </Text>
+            </Touchable>
+          )}
 
           {/* Cada botón va dentro de un "slot" con flex:1 y NO con el flex en
               el propio Touchable: Touchable aplica su `style` a un

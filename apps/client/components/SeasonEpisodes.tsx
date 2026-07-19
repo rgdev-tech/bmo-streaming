@@ -11,7 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router'
 import { SymbolView } from 'expo-symbols'
 import { tmdb, stillUrl, isReleased, type Season, type Episode } from '@/lib/tmdb'
 import { useAsync } from '@/lib/useAsync'
-import { getWatchedEpisodes, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
+import { getWatchedEpisodes, getEpisodeProgress, toggleEpisodeWatched, setSeasonWatched } from '@/lib/library'
 import { prewarmTitle } from '@/lib/stream'
 import { DownloadButton } from './DownloadButton'
 import { Touchable } from './Touchable'
@@ -38,8 +38,11 @@ export function SeasonEpisodes({
 
   // Episodios vistos de esta serie ("season:episode")
   const [watched, setWatched] = useState<Set<string>>(new Set())
+  // Y los empezados a medias, para la barra de progreso de cada miniatura.
+  const [progress, setProgress] = useState<Map<string, number>>(new Map())
   const reloadWatched = useCallback(() => {
     getWatchedEpisodes(tvId).then(setWatched)
+    getEpisodeProgress(tvId).then(setProgress)
   }, [tvId])
   useFocusEffect(reloadWatched)
 
@@ -113,6 +116,7 @@ export function SeasonEpisodes({
           poster={poster}
           backdrop={backdrop}
           watched={watched.has(`${selected}:${ep.episode_number}`)}
+          progress={progress.get(`${selected}:${ep.episode_number}`) ?? 0}
           onToggleWatched={() => toggle(selected, ep.episode_number)}
         />
       ))}
@@ -128,6 +132,7 @@ function EpisodeRow({
   poster,
   backdrop,
   watched,
+  progress,
   onToggleWatched,
 }: {
   tvId: string
@@ -137,6 +142,7 @@ function EpisodeRow({
   poster: string | null
   backdrop: string | null
   watched: boolean
+  progress: number // 0–1; 0 = sin empezar
   onToggleWatched: () => void
 }) {
   const router = useRouter()
@@ -186,6 +192,13 @@ function EpisodeRow({
             style={styles.playBadgeIcon}
           />
         </View>
+        {/* Hasta dónde se vio. Solo en los empezados y no terminados: al pasar
+            del 92% el episodio se marca como visto y muestra el check. */}
+        {progress > 0 && !watched && (
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+          </View>
+        )}
       </View>
 
       <View style={styles.epInfo}>
@@ -265,6 +278,12 @@ const styles = StyleSheet.create({
   thumbWrap: { position: 'relative' },
   thumb: { width: 130, height: 74, borderRadius: 8, backgroundColor: '#1C1C1E' },
   thumbEmpty: { backgroundColor: '#1C1C1E' },
+  progressTrack: {
+    position: 'absolute', left: 0, right: 0, bottom: 0, height: 3,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderBottomLeftRadius: 8, borderBottomRightRadius: 8, overflow: 'hidden',
+  },
+  progressFill: { height: '100%', backgroundColor: '#fff' },
   watchedOverlay: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: 8,

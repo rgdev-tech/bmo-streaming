@@ -310,6 +310,56 @@ export async function getProgress(
   return found?.position ?? 0
 }
 
+// Progreso por episodio de UNA serie, para dibujar la barra en cada miniatura.
+// Clave "temporada:episodio". Solo trae los empezados y no terminados: al
+// superar el 92% saveProgress borra la fila y marca el episodio como visto.
+export async function getEpisodeProgress(
+  tvId: number | string
+): Promise<Map<string, number>> {
+  const all = await read<Progress>(LEGACY_PROGRESS)
+  const out = new Map<string, number>()
+  for (const p of all) {
+    if (p.media_type !== 'tv' || String(p.id) !== String(tvId)) continue
+    if (!p.duration || p.season == null || p.episode == null) continue
+    out.set(`${p.season}:${p.episode}`, Math.min(1, p.position / p.duration))
+  }
+  return out
+}
+
+// Dónde retomar una serie. Prioridad:
+//   1. El episodio empezado más reciente (hay fila de progreso) → seguir ahí.
+//   2. Si no, el siguiente al último visto.
+//   3. Si nunca se vio nada, null — el llamador ofrece empezar por el principio.
+//
+// `fresh` distingue los dos casos para que la UI diga "Continuar" o "Ver
+// T1:E1", que no es lo mismo para el usuario.
+export async function getResumePoint(
+  tvId: number | string
+): Promise<{ season: number; episode: number; fresh: boolean } | null> {
+  const all = await read<Progress>(LEGACY_PROGRESS)
+  const started = all
+    .filter((p) => p.media_type === 'tv' && String(p.id) === String(tvId) && p.season != null && p.episode != null)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  if (started) {
+    return { season: started.season!, episode: started.episode!, fresh: false }
+  }
+
+  // Sin nada empezado: se busca el visto más avanzado y se ofrece el siguiente.
+  const watchedKeys = await read<string>(LEGACY_WATCHED)
+  const prefix = `${tvId}:`
+  let best: { season: number; episode: number } | null = null
+  for (const k of watchedKeys) {
+    if (!k.startsWith(prefix)) continue
+    const [, s, e] = k.split(':').map(Number)
+    if (!Number.isFinite(s) || !Number.isFinite(e)) continue
+    if (!best || s > best.season || (s === best.season && e > best.episode)) {
+      best = { season: s, episode: e }
+    }
+  }
+  if (!best) return null
+  return { season: best.season, episode: best.episode + 1, fresh: true }
+}
+
 export async function removeProgress(id: number, type: 'movie' | 'tv') {
   const all = await read<Progress>(LEGACY_PROGRESS)
   await write(
@@ -471,9 +521,14 @@ export async function syncLibrary(): Promise<void> {
 
   try {
     const [list, progress, watched] = await Promise.all([
-      supabase.from('list_items').select('*').order('added_at', { ascending: false }),
-      supabase.from('progress').select('*').order('updated_at', { ascending: false }),
-      supabase.from('watched_episodes').select('tmdb_id, season, episode'),
+      // El .eq('profile_id') es OBLIGATORIO, no una optimización: el RLS
+      // autoriza al dueño de la cuenta a ver las filas de TODOS sus perfiles
+      // (es su cuenta, tiene que poder administrarlos). Sin este filtro el
+      // pull traía lo de los demás perfiles y lo escribía en el caché del
+      // activo — por eso lo que veías en un perfil aparecía en el otro.
+      supabase.from('list_items').select('*').eq('profile_id', profileId).order('added_at', { ascending: false }),
+      supabase.from('progress').select('*').eq('profile_id', profileId).order('updated_at', { ascending: false }),
+      supabase.from('watched_episodes').select('tmdb_id, season, episode').eq('profile_id', profileId),
     ])
 
     if (!list.error && list.data) {
