@@ -16,7 +16,7 @@ import Slider from '@react-native-community/slider'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle } from '@/lib/stream'
+import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle, type SourceOption } from '@/lib/stream'
 import {
   getSubtitleStyle, setSubtitleStyle, DEFAULT_SUBTITLE_STYLE,
   SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS,
@@ -271,6 +271,46 @@ export default function PlayerScreen() {
     return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP) }
   }, [])
 
+  // ── Selector de calidad ──
+  // Las fuentes se piden una sola vez, en segundo plano y DESPUÉS de que el
+  // video ya arrancó: es información para un menú que quizá nunca se abra, y
+  // no debe competir con el arranque de la reproducción.
+  const [sources, setSources] = useState<SourceOption[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [pickedSource, setPickedSource] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!ready || !isVlcSource || localIsFile) return
+    let cancelled = false
+    setSourcesLoading(true)
+    stream.sources(isTv ? 'tv' : 'movie', id, seasonN, episodeN, audioLang)
+      .then((list) => { if (!cancelled) setSources(list) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setSourcesLoading(false) })
+    return () => { cancelled = true }
+  }, [ready, isVlcSource, localIsFile, id, seasonN, episodeN, audioLang])
+
+  // Última posición conocida, para conservarla al cambiar de fuente.
+  const lastPositionRef = useRef(0)
+
+  // Cambiar de fuente re-resuelve y remonta el player desde la posición actual.
+  async function pickSource(i: number) {
+    setPickedSource(i)
+    setReady(false)
+    try {
+      const info = await stream.pickSource(isTv ? 'tv' : 'movie', id, i, seasonN, episodeN, audioLang)
+      setStreamUrl(info.streamUrl)
+      setStreamType(info.type ?? 'file')
+      setReferer(info.referer)
+      // Se retoma donde iba, no desde cero: cambiar de calidad no debería
+      // costar el progreso.
+      setStartAt(lastPositionRef.current)
+      setReady(true)
+    } catch {
+      setError('No se pudo abrir esa fuente')
+    }
+  }
+
   // Subtítulo español: descargado y parseado en segundo plano por resolve()
   // (ver downloadSpanishSubs) — llega después de que el player ya arrancó.
   // Se renderiza como overlay JS, no vía VLCKit — así el estilo cambia al
@@ -384,7 +424,9 @@ export default function PlayerScreen() {
         </View>
       ) : ready && isVlcSource && vlcUri ? (
         <VlcPlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-vlc`}
+          // La fuente entra en la key: al cambiar de calidad hay que remontar
+          // el player, no solo cambiarle la uri.
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${pickedSource ?? 'auto'}-vlc`}
           uri={vlcUri}
           // Un archivo local no necesita Referer (y pasárselo confunde a VLC).
           referer={localIsFile ? '' : referer}
@@ -397,6 +439,12 @@ export default function PlayerScreen() {
           audioLang={audioLang}
           hasLatinoAlternative={hasLatinoAlternative}
           onChangeAudioLang={changeAudioLang}
+          sources={sources}
+          sourcesLoading={sourcesLoading}
+          activeSourceIndex={pickedSource}
+          // Sin fuentes alternativas no se ofrece la pestaña (descarga local).
+          onPickSource={localIsFile ? undefined : pickSource}
+          onPosition={(t) => { lastPositionRef.current = t }}
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
@@ -425,16 +473,34 @@ export default function PlayerScreen() {
           audioLang={audioLang}
           showAudioSwitch={!localUri}
           onChangeAudioLang={changeAudioLang}
+          onClose={exitToBack}
         />
       )}
     </GestureHandlerRootView>
   )
 }
 
+// Etiqueta legible de una fuente: "4K · HDR · HEVC · 12.4 GB". El nombre de
+// archivo crudo va debajo como línea secundaria — sirve para distinguir dos
+// opciones parecidas, pero no es lo que el usuario lee primero.
+function describeSource(s: SourceOption): string {
+  const parts: string[] = []
+  parts.push(
+    s.resolution === 2160 ? '4K'
+    : s.resolution ? `${s.resolution}p`
+    : 'Calidad desconocida'
+  )
+  if (s.hdr && s.hdr !== 'none') parts.push(s.hdr === 'dv' ? 'Dolby Vision' : 'HDR')
+  if (s.codec) parts.push(s.codec === 'hevc' ? 'HEVC' : s.codec === 'h264' ? 'H.264' : s.codec.toUpperCase())
+  if (s.langs.includes('latino')) parts.push('Latino')
+  if (s.sizeGB != null) parts.push(s.sizeGB >= 1 ? `${s.sizeGB.toFixed(1)} GB` : `${Math.round(s.sizeGB * 1024)} MB`)
+  return parts.join('  ·  ')
+}
+
 // ── Pantalla de carga: mínima, rápida, con selector de audio discreto ───────
 
 function LoadingScreen({
-  title, episodeLabel, backdrop, audioLang, showAudioSwitch, onChangeAudioLang,
+  title, episodeLabel, backdrop, audioLang, showAudioSwitch, onChangeAudioLang, onClose,
 }: {
   title: string
   episodeLabel?: string
@@ -442,20 +508,50 @@ function LoadingScreen({
   audioLang: AudioLang
   showAudioSwitch: boolean
   onChangeAudioLang: (lang: AudioLang) => void
+  onClose: () => void
 }) {
   const fade = useRef(new Animated.Value(0)).current
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 350, delay: 200, useNativeDriver: true }).start()
   }, [])
 
+  // El bloqueo a horizontal se aplica en un efecto, o sea DESPUÉS del primer
+  // render: se alcanzaba a pintar un frame en vertical y el layout reacomodaba
+  // a la vista, que es el "salta de vertical a horizontal" feo. Mientras no
+  // haya girado se muestra solo negro; el contenido entra con un fundido una
+  // vez que la orientación se asentó.
+  const { width: winW, height: winH } = useWindowDimensions()
+  const isLandscape = winW > winH
+  const settle = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    if (!isLandscape) return
+    Animated.timing(settle, { toValue: 1, duration: 220, useNativeDriver: true }).start()
+  }, [isLandscape])
+
   const backdropUri = backdropUrl(backdrop, 'w780')
 
+  if (!isLandscape) return <View style={styles.loadingRoot} />
+
   return (
-    <View style={styles.loadingRoot}>
+    <Animated.View style={[styles.loadingRoot, { opacity: settle }]}>
       {backdropUri && (
         <Image source={backdropUri} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={30} />
       )}
       <View style={styles.loadingScrim} />
+
+      {/* Salida: sin esto, un título que tarda en resolver dejaba al usuario
+          encerrado hasta que fallara o terminara. */}
+      <Touchable
+        scaleTo={0.88}
+        haptic="light"
+        style={styles.loadingClose}
+        onPress={onClose}
+        hitSlop={12}
+      >
+        <BlurView intensity={55} tint="dark" style={styles.loadingCloseBlur}>
+          <SymbolView name="xmark" tintColor="#fff" style={styles.loadingCloseIcon} />
+        </BlurView>
+      </Touchable>
 
       <View style={styles.loadingCenter}>
         <ActivityIndicator color="#fff" size="small" />
@@ -492,7 +588,7 @@ function LoadingScreen({
           </BlurView>
         </Animated.View>
       )}
-    </View>
+    </Animated.View>
   )
 }
 
@@ -624,8 +720,9 @@ function isSpanishTrack(t: TrackInfo): boolean {
 }
 
 function VlcPlayer({
-  uri, referer, srtCues, startAt, meta, hasNext,
+  uri, referer, srtCues, startAt, meta, hasNext, title, episodeLabel,
   audioLang, hasLatinoAlternative, onChangeAudioLang,
+  sources, sourcesLoading, activeSourceIndex, onPickSource, onPosition,
   onClose, onEnded, onPlayNext, onError,
 }: {
   uri: string; referer: string; startAt: number
@@ -637,6 +734,13 @@ function VlcPlayer({
   audioLang: AudioLang
   hasLatinoAlternative: boolean
   onChangeAudioLang: (lang: AudioLang) => void
+  // Selector de calidad. `onPickSource` ausente = la pestaña no se muestra
+  // (p. ej. reproduciendo una descarga local, donde no hay otras fuentes).
+  sources: SourceOption[]
+  sourcesLoading: boolean
+  activeSourceIndex: number | null
+  onPickSource?: (i: number) => void
+  onPosition?: (t: number) => void
   onClose: (watchedFraction: number) => void
   onEnded: () => void
   onPlayNext: () => void
@@ -696,7 +800,7 @@ function VlcPlayer({
   const [audioTracks, setAudioTracks] = useState<TrackInfo[]>([])
   const [textTracks, setTextTracks] = useState<TrackInfo[]>([])
   const [selectedAudioTrack, setSelectedAudioTrack] = useState(-1)
-  const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | 'style' | null>(null)
+  const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | 'style' | 'quality' | null>(null)
 
   // Selección de subtítulo: 'external' = el .srt en español que bajamos y
   // renderizamos nosotros (overlay JS); 'none' = apagado; number = id de una
@@ -932,6 +1036,10 @@ function VlcPlayer({
     if (buffering) setBuffering(false)
 
     progressRef.current = { time: data.currentTime, duration: data.seekableDuration }
+    // La pantalla necesita la posición en vivo para poder retomarla al cambiar
+    // de fuente; el progreso guardado va throttleado a 5s y serviría un valor
+    // viejo.
+    onPosition?.(data.currentTime)
     setPosition(data.currentTime)
     if (data.seekableDuration > 0) setDuration(data.seekableDuration)
     const now = Date.now()
@@ -1108,6 +1216,16 @@ function VlcPlayer({
             </View>
           )}
 
+          {/* Título sobre la barra, alineado a la izquierda con el scrubber.
+              En series se muestra la temporada y el episodio en una segunda
+              línea, más apagada, para que el título siga siendo lo dominante. */}
+          <View style={[styles.vlcTitleBlock, { bottom: insets.bottom + 58 }]} pointerEvents="none">
+            <Text style={styles.vlcTitleText} numberOfLines={1}>{title}</Text>
+            {!!episodeLabel && (
+              <Text style={styles.vlcEpisodeText} numberOfLines={1}>{episodeLabel}</Text>
+            )}
+          </View>
+
           {/* Barra inferior: scrubber + tiempos */}
           <View style={[styles.vlcBottomBar, { bottom: insets.bottom + 12 }]}>
             <Text style={styles.vlcTime}>{fmtTime(position)}</Text>
@@ -1187,6 +1305,17 @@ function VlcPlayer({
                     </Touchable>
                   </View>
                 )}
+                {onPickSource && (
+                  <View style={styles.vlcPickerTabSlot}>
+                    <Touchable
+                      scaleTo={0.94} haptic="selection"
+                      style={[styles.vlcPickerTab, trackPicker === 'quality' && styles.vlcPickerTabActive]}
+                      onPress={() => setTrackPicker('quality')}
+                    >
+                      <SymbolView name="4k.tv" tintColor={trackPicker === 'quality' ? '#000' : '#fff'} style={styles.vlcIconSm} />
+                    </Touchable>
+                  </View>
+                )}
               </View>
 
               {trackPicker === 'audio' && (audioLang === 'latino' || hasLatinoAlternative) && (
@@ -1263,6 +1392,35 @@ function VlcPlayer({
                   })}
                   {trackPicker === 'audio' && audioTracks.length === 0 && (
                     <Text style={styles.vlcPickerEmpty}>Esta fuente solo trae una pista de audio</Text>
+                  )}
+
+                  {trackPicker === 'quality' && (
+                    sourcesLoading ? (
+                      <ActivityIndicator color="#fff" style={styles.vlcPickerLoading} />
+                    ) : sources.length === 0 ? (
+                      <Text style={styles.vlcPickerEmpty}>No hay otras fuentes disponibles</Text>
+                    ) : (
+                      sources.map((s) => {
+                        const active = s.i === activeSourceIndex
+                        return (
+                          <Touchable
+                            key={s.i}
+                            scaleTo={0.98}
+                            haptic="selection"
+                            style={styles.vlcPickerRow}
+                            onPress={() => { onPickSource?.(s.i); setTrackPicker(null) }}
+                          >
+                            <View style={styles.vlcQualityInfo}>
+                              <Text style={[styles.vlcPickerRowText, active && styles.vlcPickerRowTextActive]} numberOfLines={1}>
+                                {describeSource(s)}
+                              </Text>
+                              <Text style={styles.vlcQualitySub} numberOfLines={1}>{s.label}</Text>
+                            </View>
+                            {active && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
+                          </Touchable>
+                        )
+                      })
+                    )
                   )}
 
                   {trackPicker === 'text' && (
@@ -1446,6 +1604,16 @@ const styles = StyleSheet.create({
     flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40,
   },
   loadingTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  // top/right fijos y no insets: en el landscape forzado por lockAsync el
+  // safe-area-context a veces arrastra los insets de portrait (mismo problema
+  // ya documentado para la barra superior del VlcPlayer).
+  loadingClose: {
+    position: 'absolute', top: 16, right: 20,
+    width: 34, height: 34, borderRadius: 17, overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.22)',
+  },
+  loadingCloseBlur: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  loadingCloseIcon: { width: 13, height: 13 },
 
   // Selector de idioma de audio: flotante, discreto, abajo del todo
   langSwitch: { position: 'absolute', left: 0, right: 0, bottom: 56, alignItems: 'center' },
@@ -1552,6 +1720,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
   },
   vlcTime: { color: '#fff', fontSize: 12, fontWeight: '600', width: 48, textAlign: 'center' },
+  // left: 16 (margen de la barra) + 48 (ancho del tiempo) → arranca donde
+  // arranca el scrubber, no donde arranca el "1:26:04". Así queda ópticamente
+  // alineado con la barra y no con el borde.
+  vlcTitleBlock: { position: 'absolute', left: 64, right: 64 },
+  vlcTitleText: {
+    color: '#fff', fontSize: 17, fontWeight: '700', letterSpacing: -0.3,
+    // Sombra: el título va sobre el video, y sin ella desaparece en escenas claras.
+    textShadowColor: 'rgba(0,0,0,0.65)', textShadowRadius: 6,
+  },
+  vlcEpisodeText: {
+    color: 'rgba(255,255,255,0.7)', fontSize: 13.5, fontWeight: '500', marginTop: 2,
+    textShadowColor: 'rgba(0,0,0,0.65)', textShadowRadius: 6,
+  },
   vlcSlider: { flex: 1, height: 32 },
   // Dropdown disimulado anclado al botón de "..." del top bar — no tapa la
   // pantalla, solo la tarjeta liquid glass flota cerca del ancla.
@@ -1578,6 +1759,11 @@ const styles = StyleSheet.create({
   },
   // El flex:1 real vive acá (no en vlcPickerTab) — ver comentario en el JSX.
   vlcPickerTabSlot: { flex: 1 },
+  vlcPickerLoading: { paddingVertical: 26 },
+  // La fila de calidad lleva dos líneas, así que el texto necesita su propia
+  // columna para no empujar al checkmark fuera de la tarjeta.
+  vlcQualityInfo: { flex: 1, gap: 2 },
+  vlcQualitySub: { color: 'rgba(255,255,255,0.38)', fontSize: 11.5 },
   vlcPickerTab: {
     paddingVertical: 9, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',

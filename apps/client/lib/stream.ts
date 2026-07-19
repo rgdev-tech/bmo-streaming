@@ -25,6 +25,19 @@ export function setAudioLang(lang: AudioLang): void {
 
 export type Subtitle = { i: number; label: string; lang: string; url: string; altUrls: string[] }
 
+// Una fuente ofrecida en el selector de calidad. Sin URL a propósito: se elige
+// por `i` y resuelve el servidor.
+export type SourceOption = {
+  i: number
+  label: string
+  resolution: number | null
+  codec: string | null
+  hdr: string
+  sizeGB: number | null
+  cached: boolean | null
+  langs: string[]
+}
+
 export type ResolveInfo = {
   streamUrl: string   // URL directa del CDN
   type: 'hls' | 'file'  // hls → master proxeado; file → mp4 directo
@@ -46,6 +59,24 @@ export const stream = {
     api<ResolveInfo>(`/resolve/movie/${id}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
   resolveTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original', exclude?: string[]) =>
     api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
+
+  // Selector de calidad: se listan las fuentes disponibles y se elige por
+  // ÍNDICE. El servidor no expone las URLs de Torrentio porque llevan la clave
+  // de Real-Debrid embebida en el path.
+  sources: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number, lang: AudioLang = 'original') =>
+    api<SourceOption[]>(
+      type === 'tv'
+        ? `/resolve/sources/tv/${id}/${season ?? 1}/${episode ?? 1}?lang=${lang}`
+        : `/resolve/sources/movie/${id}?lang=${lang}`,
+      RESOLVE_TIMEOUT
+    ),
+  pickSource: (type: 'movie' | 'tv', id: string | number, i: number, season?: number, episode?: number, lang: AudioLang = 'original') =>
+    api<ResolveInfo>(
+      type === 'tv'
+        ? `/resolve/pick/tv/${id}/${season ?? 1}/${episode ?? 1}?i=${i}&lang=${lang}`
+        : `/resolve/pick/movie/${id}?i=${i}&lang=${lang}`,
+      RESOLVE_TIMEOUT
+    ),
 
   // Master HLS proxeado por nuestro servidor (variantes + segmentos + subs)
   masterMovie: (id: string | number, lang: AudioLang = 'original', exclude?: string[]) =>

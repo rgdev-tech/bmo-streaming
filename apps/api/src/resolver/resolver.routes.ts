@@ -1,5 +1,8 @@
 import { Elysia, t } from 'elysia'
-import { resolveStream, checkProviders, debugScrape, debugSubs, debugDebrid, type AudioLang } from './resolver.service'
+import {
+  resolveStream, checkProviders, debugScrape, debugSubs, debugDebrid,
+  listSources, resolvePickedSource, type AudioLang,
+} from './resolver.service'
 import { langCode } from './hls'
 
 function parseLang(v?: string): AudioLang {
@@ -95,6 +98,50 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     '/debug/debrid/tv/:id/:season/:episode',
     ({ params }) => debugDebrid('tv', Number(params.id), Number(params.season), Number(params.episode)),
     { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+  )
+
+  // ── Selector de calidad ──
+  // Lista de fuentes disponibles. No devuelve URLs: el cliente elige por
+  // índice y el servidor resuelve (la URL de Torrentio lleva la clave de
+  // Real-Debrid en el path).
+  .get(
+    '/sources/movie/:id',
+    ({ params, query }) => listSources('movie', Number(params.id), undefined, undefined, parseLang(query.lang)),
+    { params: t.Object({ id: t.String() }), query: t.Object({ lang: t.Optional(t.String()) }) }
+  )
+  .get(
+    '/sources/tv/:id/:season/:episode',
+    ({ params, query }) => listSources('tv', Number(params.id), Number(params.season), Number(params.episode), parseLang(query.lang)),
+    {
+      params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }),
+      query: t.Object({ lang: t.Optional(t.String()) }),
+    }
+  )
+  .get(
+    '/pick/movie/:id',
+    async ({ params, query, set }) => {
+      const result = await resolvePickedSource('movie', Number(params.id), Number(query.i), undefined, undefined, parseLang(query.lang))
+      const summary = summarize(result)
+      if (!summary) { set.status = 404; return { error: 'Esa fuente no se pudo abrir' } }
+      return summary
+    },
+    {
+      params: t.Object({ id: t.String() }),
+      query: t.Object({ i: t.String(), lang: t.Optional(t.String()) }),
+    }
+  )
+  .get(
+    '/pick/tv/:id/:season/:episode',
+    async ({ params, query, set }) => {
+      const result = await resolvePickedSource('tv', Number(params.id), Number(query.i), Number(params.season), Number(params.episode), parseLang(query.lang))
+      const summary = summarize(result)
+      if (!summary) { set.status = 404; return { error: 'Esa fuente no se pudo abrir' } }
+      return summary
+    },
+    {
+      params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }),
+      query: t.Object({ i: t.String(), lang: t.Optional(t.String()) }),
+    }
   )
 
   .get(

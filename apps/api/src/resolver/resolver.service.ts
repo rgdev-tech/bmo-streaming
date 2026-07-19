@@ -9,7 +9,7 @@ import {
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
-import { resolveDebridStream, debridEnabled, debugTorrentio } from './torrentio'
+import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio } from './torrentio'
 import type { MediaRef } from './torrentio.parse'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
@@ -499,6 +499,47 @@ export async function debugSubs(
     }
   } catch (e) {
     return { url: safeUrl, error: String((e as Error).message) }
+  }
+}
+
+// ── Selector de calidad ─────────────────────────────────────────────────────
+// Viven acá y no en las rutas porque necesitan el MediaRef de buildMedia.
+
+export async function listSources(
+  type: 'movie' | 'tv', tmdbId: number,
+  season?: number, episode?: number, lang: AudioLang = 'original'
+) {
+  const built = await buildMedia(type, tmdbId, season, episode)
+  if (!built) return []
+  return listDebridSources({ type, tmdbId, lang, media: built.ref, season, episode })
+}
+
+// Resuelve UNA fuente concreta elegida por el usuario. No pasa por el caché de
+// resolveStream: ese guarda el ganador automático por (título, idioma), y
+// pisarlo con una elección manual haría que la siguiente reproducción normal
+// arrancara con esa fuente sin que nadie la haya pedido.
+export async function resolvePickedSource(
+  type: 'movie' | 'tv', tmdbId: number, pick: number,
+  season?: number, episode?: number, lang: AudioLang = 'original'
+): Promise<StreamResult | null> {
+  const built = await buildMedia(type, tmdbId, season, episode)
+  if (!built) return null
+
+  const subsP = fetchSubtitles(type, tmdbId, season, episode)
+  const debrid = await resolveDebridStream(
+    { type, tmdbId, lang, media: built.ref, season, episode },
+    pick
+  )
+  if (!debrid) return null
+
+  return {
+    url: debrid.url,
+    type: 'file',
+    captions: await subsP,
+    headers: {},
+    source: 'realdebrid',
+    language: debrid.language,
+    hasLatinoAlternative: debrid.hasLatinoAlternative,
   }
 }
 

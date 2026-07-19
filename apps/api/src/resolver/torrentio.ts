@@ -11,6 +11,7 @@
 // se puede reproducir, qué es mejor, qué se descarta) vive en torrentio.parse.ts,
 // que es puro y está cubierto por tests.
 import { tmdbService } from '../tmdb/tmdb.service'
+import { TTLCache } from './cache'
 import {
   rankCandidates, selectRunnable,
   type MediaRef, type ScoredCandidate, type TorrentioStream,
@@ -56,6 +57,24 @@ function buildStreamUrl(imdbId: string, type: 'movie' | 'tv', season?: number, e
   const kind = type === 'tv' ? 'series' : 'movie'
   const id = type === 'tv' ? `${imdbId}:${season ?? 1}:${episode ?? 1}` : imdbId
   return `${TORRENTIO_BASE}/${config}stream/${kind}/${id}.json`
+}
+
+// Cachea la respuesta cruda de Torrentio. Dos motivos:
+//  - El selector de calidad hace dos llamadas (listar y luego elegir) y sin
+//    esto Torrentio se consultaría dos veces.
+//  - Sobre todo: mantiene ESTABLES los índices de la lista. El cliente elige
+//    "la opción 3"; si entre listar y elegir cambiara el orden, reproduciría
+//    otra cosa distinta de la que tocó.
+const streamsCache = new TTLCache<TorrentioStream[]>(10 * 60_000)
+
+function fetchStreamsCached(
+  imdbId: string,
+  type: 'movie' | 'tv',
+  season?: number,
+  episode?: number
+): Promise<TorrentioStream[]> {
+  const key = type === 'tv' ? `${imdbId}:${season}:${episode}` : imdbId
+  return streamsCache.resolve(key, () => fetchStreams(imdbId, type, season, episode))
 }
 
 async function fetchStreams(
@@ -193,14 +212,58 @@ async function tryCandidate(c: ScoredCandidate): Promise<{ url: string; c: Score
   return { url: finalUrl, c }
 }
 
-export async function resolveDebridStream(req: DebridRequest): Promise<DebridResult | null> {
+// Una fuente ofrecida al usuario en el selector de calidad. Deliberadamente NO
+// incluye la URL de resolución: esa lleva la clave de Real-Debrid embebida en
+// el path y no puede salir del servidor. El cliente elige por índice.
+export type SourceOption = {
+  i: number
+  label: string
+  resolution: number | null
+  codec: string | null
+  hdr: string
+  sizeGB: number | null
+  cached: boolean | null
+  langs: string[]
+}
+
+// Lista de fuentes ejecutables, en el mismo orden que usa el resolver — el
+// índice de esta lista es el que después acepta resolveDebridStream({ pick }).
+export async function listDebridSources(req: DebridRequest): Promise<SourceOption[]> {
+  const runnable = await rankRunnable(req)
+  return runnable.map((c, i) => ({
+    i,
+    label: c.parsed.filename,
+    resolution: c.parsed.resolution,
+    codec: c.parsed.codec,
+    hdr: c.parsed.hdr,
+    sizeGB: c.parsed.sizeGB,
+    cached: c.parsed.cached,
+    langs: [...c.parsed.langs],
+  }))
+}
+
+// Paso común de listar y resolver: pedir a Torrentio, rankear y filtrar.
+async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
+  if (!DEBRID_KEY) return []
+  const imdbId = await imdbIdOf(req.type, req.tmdbId)
+  if (!imdbId) return []
+  const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
+  return selectRunnable(rankCandidates(streams, req.media, req.lang))
+}
+
+export async function resolveDebridStream(
+  req: DebridRequest,
+  // Índice dentro de listDebridSources(). Cuando viene, se resuelve ESA fuente
+  // en vez de correr la carrera — es el selector de calidad del reproductor.
+  pick?: number
+): Promise<DebridResult | null> {
   if (!DEBRID_KEY) return null
 
   const t0 = Date.now()
   const imdbId = await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return null
 
-  const streams = await fetchStreams(imdbId, req.type, req.season, req.episode)
+  const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
   const tFetch = Date.now() - t0
   const r = rankCandidates(streams, req.media, req.lang)
 
@@ -219,6 +282,28 @@ export async function resolveDebridStream(req: DebridRequest): Promise<DebridRes
       `${r.rejected.length} rechazados)`
     )
     return null
+  }
+
+  // Elección explícita del usuario: se resuelve solo esa, sin carrera. Si falla
+  // se devuelve null en vez de caer a otra — el usuario pidió ESA calidad y
+  // darle otra en silencio sería peor que avisarle.
+  if (pick != null) {
+    const chosen = runnable[pick]
+    if (!chosen) return null
+    try {
+      const out = await tryCandidate(chosen)
+      const cp = out.c.parsed
+      console.error(`[debrid] fuente elegida #${pick} → ${cp.filename}`)
+      return {
+        url: out.url,
+        label: cp.filename,
+        language: cp.langs.has('latino') ? 'Español Latino' : 'Original',
+        hasLatinoAlternative: r.hasLatinoAlternative,
+      }
+    } catch {
+      console.error(`[debrid] la fuente elegida #${pick} no resolvió`)
+      return null
+    }
   }
 
   const tRace = Date.now()

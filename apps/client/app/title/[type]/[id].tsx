@@ -176,33 +176,46 @@ export default function TitleScreen() {
               </Touchable>
             ))}
 
+          {/* Cada botón va dentro de un "slot" con flex:1 y NO con el flex en
+              el propio Touchable: Touchable aplica su `style` a un
+              Animated.View interno, así que el flex caía en el nieto y el
+              Pressable se dimensionaba por su contenido. Resultado: los tres
+              no repartían el ancho y "Tráiler" se salía de la pantalla.
+              (Se notaba en que "Descargar" sí funcionaba: ese es un View
+              normal, no un Touchable.) */}
           <View style={styles.secondaryRow}>
-            <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={onToggleList}>
-              <SymbolView
-                name={inList ? 'checkmark' : 'plus'}
-                tintColor="#fff"
-                style={styles.listIcon}
-              />
-              <Text style={styles.listText}>Mi Lista</Text>
-            </Touchable>
-            {!isTv && data && isReleased(data.release_date) && (
-              <View style={[styles.secondaryBtn, { gap: 8 }]}>
-                <DownloadButton
-                  id={Number(id)}
-                  media_type="movie"
-                  title={titleOf(data)}
-                  poster_path={data.poster_path}
-                  backdrop_path={data.backdrop_path}
-                  size={20}
+            <View style={styles.secondarySlot}>
+              <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={onToggleList}>
+                <SymbolView
+                  name={inList ? 'checkmark' : 'plus'}
+                  tintColor="#fff"
+                  style={styles.listIcon}
                 />
-                <Text style={styles.listText}>Descargar</Text>
+                <Text style={styles.listText} numberOfLines={1}>Mi Lista</Text>
+              </Touchable>
+            </View>
+            {!isTv && data && isReleased(data.release_date) && (
+              <View style={styles.secondarySlot}>
+                <View style={styles.secondaryBtn}>
+                  <DownloadButton
+                    id={Number(id)}
+                    media_type="movie"
+                    title={titleOf(data)}
+                    poster_path={data.poster_path}
+                    backdrop_path={data.backdrop_path}
+                    size={19}
+                  />
+                  <Text style={styles.listText} numberOfLines={1}>Descargar</Text>
+                </View>
               </View>
             )}
             {trailer && (
-              <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={openTrailer}>
-                <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />
-                <Text style={styles.listText}>Tráiler</Text>
-              </Touchable>
+              <View style={styles.secondarySlot}>
+                <Touchable scaleTo={0.95} haptic="light" style={styles.secondaryBtn} onPress={openTrailer}>
+                  <SymbolView name="play.rectangle" tintColor="#fff" style={styles.listIcon} />
+                  <Text style={styles.listText} numberOfLines={1}>Tráiler</Text>
+                </Touchable>
+              </View>
             )}
           </View>
 
@@ -297,19 +310,23 @@ const styles = StyleSheet.create({
   soonText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
   playIcon: { width: 16, height: 16 },
   playText: { color: '#000', fontSize: 16, fontWeight: '700' },
-  secondaryRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  secondaryRow: { flexDirection: 'row', gap: 9, marginTop: 12 },
+  // El reparto del ancho vive acá, no en secondaryBtn (ver el comentario del JSX).
+  secondarySlot: { flex: 1 },
   secondaryBtn: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     paddingVertical: 12,
+    paddingHorizontal: 6,
     borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  listIcon: { width: 18, height: 18 },
-  listText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  listIcon: { width: 17, height: 17 },
+  // 14 y no 15: con tres botones e icono, "Descargar" quedaba al filo en
+  // pantallas de 390pt.
+  listText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   genres: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 20 },
   overview: {
     color: 'rgba(255,255,255,0.8)',

@@ -54,11 +54,17 @@ export function PosterCard({
           </View>
         )}
 
-        {/* Botón quitar (Mi Lista) */}
+        {/* Botón quitar (Mi Lista).
+            El posicionamiento va en este View y NO en el Touchable: Touchable
+            aplica su `style` a un Animated.View interno, así que un
+            `position:absolute` ahí no mueve al Pressable — quedaba fluyendo
+            bajo el póster, encima del título. */}
         {onRemove && (
-          <Touchable style={styles.removeBtn} scaleTo={0.85} haptic="light" onPress={onRemove} hitSlop={8}>
-            <SymbolView name="xmark" tintColor="#fff" style={styles.removeIcon} />
-          </Touchable>
+          <View style={styles.removeSlot}>
+            <Touchable style={styles.removeBtn} scaleTo={0.85} haptic="light" onPress={onRemove} hitSlop={10}>
+              <SymbolView name="xmark" tintColor="#fff" style={styles.removeIcon} />
+            </Touchable>
+          </View>
         )}
       </View>
 
@@ -107,16 +113,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.4,
   },
+  removeSlot: { position: 'absolute', top: 6, right: 6 },
   removeBtn: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
+    // Aro tenue: sobre un póster oscuro el círculo negro se perdía.
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
   },
   removeIcon: { width: 11, height: 11 },
   title: {

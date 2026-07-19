@@ -43,7 +43,8 @@ export function ContinueRow({
 }
 
 const styles = StyleSheet.create({
-  section: { marginBottom: 24 },
+  // 30 para igualar el ritmo del resto de secciones (ver library.tsx).
+  section: { marginBottom: 30 },
   headingRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -59,14 +59,25 @@ export function toLibraryItem(item: MediaItem): LibraryItem {
 
 // ── Almacenamiento local ────────────────────────────────────────────────────
 
-function keyFor(base: string): string {
+// Devuelve null cuando hay cuentas configuradas pero el perfil todavía no se
+// resolvió (la ventana de arranque en la que AuthProvider aún consulta la
+// sesión).
+//
+// NO se puede caer a la clave legacy en ese caso: esa clave guarda la foto de
+// antes de las cuentas y ya no se actualiza —los borrados escriben en la clave
+// del perfil—, así que leerla hacía reaparecer en cada arranque todo lo que el
+// usuario había eliminado de Mi Lista y de Seguir viendo.
+function keyFor(base: string): string | null {
   const pid = getActiveProfileId()
-  return pid ? `${base}:${pid}` : base
+  if (pid) return `${base}:${pid}`
+  return supabaseConfigured ? null : base
 }
 
 async function read<T>(base: string): Promise<T[]> {
+  const key = keyFor(base)
+  if (!key) return []
   try {
-    const raw = await AsyncStorage.getItem(keyFor(base))
+    const raw = await AsyncStorage.getItem(key)
     return raw ? (JSON.parse(raw) as T[]) : []
   } catch {
     return []
@@ -74,7 +85,11 @@ async function read<T>(base: string): Promise<T[]> {
 }
 
 async function write<T>(base: string, value: T[]) {
-  await AsyncStorage.setItem(keyFor(base), JSON.stringify(value))
+  const key = keyFor(base)
+  // Sin perfil resuelto no se escribe: iría a parar a la clave equivocada y se
+  // perdería (o contaminaría a otro perfil) en cuanto el perfil llegue.
+  if (!key) return
+  await AsyncStorage.setItem(key, JSON.stringify(value))
 }
 
 // ── Outbox: escrituras que no llegaron al servidor ──────────────────────────
@@ -197,6 +212,20 @@ export async function getMyList(): Promise<LibraryItem[]> {
 export async function isInMyList(id: number, type: 'movie' | 'tv') {
   const list = await getMyList()
   return list.some((i) => i.id === id && i.media_type === type)
+}
+
+// Eliminación EXPLÍCITA, sin alternar. La usa el botón de quitar de Mi Lista.
+//
+// No se puede usar toggleMyList ahí: si por cualquier desajuste el item no
+// aparece en la lista local, el toggle lo interpreta como "no estaba" y lo
+// AGREGA — local y remotamente. Como la pantalla además lo oculta de forma
+// optimista, el usuario veía que se quitaba y reaparecía al recargar.
+// Espeja a removeProgress, que sí borra siempre y por eso Seguir viendo
+// nunca tuvo este problema.
+export async function removeFromMyList(id: number, type: 'movie' | 'tv') {
+  const list = await getMyList()
+  await write(LEGACY_LIST, list.filter((i) => !(i.id === id && i.media_type === type)))
+  push({ t: 'list.del', id, media_type: type })
 }
 
 export async function toggleMyList(item: LibraryItem): Promise<boolean> {
@@ -371,7 +400,13 @@ export async function setSeasonWatched(
 // biblioteca vacía y pensaría que perdió todo.
 async function migrateLegacy(profileId: string) {
   const flag = `${MIGRATED_PREFIX}${profileId}`
-  if (await AsyncStorage.getItem(flag)) return
+  if (await AsyncStorage.getItem(flag)) {
+    // Ya migrado en un arranque anterior: igual se limpian las claves legacy,
+    // porque los dispositivos que migraron ANTES de este arreglo las
+    // conservan. Es idempotente.
+    await AsyncStorage.multiRemove([LEGACY_LIST, LEGACY_PROGRESS, LEGACY_WATCHED]).catch(() => {})
+    return
+  }
 
   const [rawList, rawProgress, rawWatched] = await Promise.all([
     AsyncStorage.getItem(LEGACY_LIST),
@@ -394,6 +429,10 @@ async function migrateLegacy(profileId: string) {
     if (list.length || progress.length || watched.length) {
       console.log(`[library] migrados al perfil: ${list.length} lista, ${progress.length} progreso, ${watched.length} vistos`)
     }
+    // Se borran una vez absorbidas. Si quedaran, seguirían siendo una copia
+    // congelada del estado previo a las cuentas que nadie actualiza — y
+    // cualquier lectura que las alcanzara resucitaría lo ya borrado.
+    await AsyncStorage.multiRemove([LEGACY_LIST, LEGACY_PROGRESS, LEGACY_WATCHED])
   } catch {}
   await AsyncStorage.setItem(flag, '1')
 }
