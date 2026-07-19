@@ -120,6 +120,34 @@ function bufToBase64(buf: ArrayBuffer): string {
 
 // Map de descargas activas (para pausar/cancelar)
 const _active = new Map<string, { cancelled: boolean }>()
+// Descargas de archivo único en curso: hay que poder pausarlas de verdad, no
+// solo marcar un flag — el resumable sigue escribiendo hasta que se le dice.
+const _activeFile = new Map<string, FileSystem.DownloadResumable>()
+
+// Nombre local del archivo, conservando la extensión real (mkv/mp4): el player
+// decide por ella si va por VLCKit o por AVPlayer.
+function fileNameFor(url: string): string {
+  let ext = 'mp4'
+  try {
+    const m = decodeURIComponent(new URL(url).pathname).match(/\.(mkv|mp4|avi|m4v)$/i)
+    if (m) ext = m[1].toLowerCase()
+  } catch {}
+  return `video.${ext}`
+}
+
+// Subtítulo en español para ver offline. Opcional: si falla, la descarga sigue
+// siendo válida.
+async function downloadSubtitle(
+  dir: string, type: 'movie' | 'tv', id: number,
+  season: number | undefined, episode: number | undefined,
+  captionCount: number
+): Promise<void> {
+  if (captionCount === 0) return
+  try {
+    const url = `${API_URL}/stream/sub.vtt?type=${type}&id=${id}&season=${season ?? ''}&episode=${episode ?? ''}&i=0`
+    await FileSystem.downloadAsync(url, dir + 'subs.vtt')
+  } catch { /* subs opcionales */ }
+}
 
 export async function startDownload(opts: {
   id: number
@@ -176,6 +204,7 @@ async function _runDownload(
 ) {
   const ctrl = { cancelled: false }
   _active.set(key, ctrl)
+  let lastFileSave = 0
 
   const update = async (patch: Partial<DownloadItem>) => {
     Object.assign(item, patch)
@@ -191,25 +220,71 @@ async function _runDownload(
       ? `${API_URL}/download/tv/${id}/${season}/${episode}`
       : `${API_URL}/download/movie/${id}`
 
-    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(60_000) })
-    if (!resp.ok) throw new Error(`API ${resp.status}`)
-    const data: {
-      segments: SegmentInfo[]
-      referer: string
-      quality: string
-      captions: Array<{ language: string; url: string; type: string }>
-    } = await resp.json()
+    const resp = await fetch(apiUrl, { signal: AbortSignal.timeout(90_000) })
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      throw new Error(`API ${resp.status}${body ? `: ${body.slice(0, 80)}` : ''}`)
+    }
+    type Caption = { language: string; url: string; type: string }
+    const data:
+      | { kind: 'file'; url: string; referer: string; quality: string; captions: Caption[] }
+      | { kind: 'hls'; segments: SegmentInfo[]; referer: string; quality: string; captions: Caption[] }
+      = await resp.json()
 
     if (ctrl.cancelled) return
-
-    await update({ totalSegments: data.segments.length, quality: data.quality })
 
     // 2. Crear directorio
     const dir = DOWNLOADS_DIR + key + '/'
     await FileSystem.makeDirectoryAsync(dir, { intermediates: true })
 
+    // ── Fuente de archivo único (Real-Debrid) ──
+    // Se baja con createDownloadResumable y NO con el camino de segmentos: ese
+    // mete cada trozo en memoria como base64, lo cual con un MKV entero de
+    // varios GB reventaría la app. El resumable escribe a disco en streaming y
+    // además da progreso real por bytes.
+    if (data.kind === 'file') {
+      await update({ quality: data.quality, totalSegments: 1 })
+      const dest = dir + fileNameFor(data.url)
+      const resumable = FileSystem.createDownloadResumable(
+        data.url,
+        dest,
+        { headers: data.referer ? { Referer: data.referer } : undefined },
+        (p) => {
+          if (!p.totalBytesExpectedToWrite || p.totalBytesExpectedToWrite < 0) return
+          const ratio = p.totalBytesWritten / p.totalBytesExpectedToWrite
+          // Throttle: el callback dispara muy seguido y cada update escribe
+          // en AsyncStorage y notifica a la UI.
+          const now = Date.now()
+          if (now - lastFileSave < 700 && ratio < 1) return
+          lastFileSave = now
+          update({ progress: ratio, size: p.totalBytesWritten }).catch(() => {})
+        }
+      )
+      _activeFile.set(key, resumable)
+      try {
+        const out = await resumable.downloadAsync()
+        if (ctrl.cancelled) return
+        if (!out?.uri) throw new Error('La descarga no devolvió archivo')
+        await downloadSubtitle(dir, type, id, season, episode, data.captions.length)
+        const info = await FileSystem.getInfoAsync(out.uri)
+        await update({
+          status: 'done', progress: 1, downloadedSegments: 1,
+          localPath: out.uri, size: (info as any).size ?? 0,
+        })
+      } finally {
+        _activeFile.delete(key)
+      }
+      return
+    }
+
+    // ── Fuente HLS: lista de segmentos ──
+    // Alias con el tipo ya estrechado: TS no propaga el narrowing de `data`
+    // dentro de las funciones anidadas de abajo (worker/downloadSegment).
+    const hls = data
+    await update({ totalSegments: hls.segments.length, quality: hls.quality })
+
     // 3. Descargar segmentos con concurrencia MAX_CONCURRENT y reintentos
-    const referer = data.referer
+    const referer = hls.referer
     let done = 0
     let lastSave = Date.now()
 
@@ -246,20 +321,20 @@ async function _runDownload(
       throw lastErr
     }
 
-    const localUris: string[] = new Array(data.segments.length).fill('')
+    const localUris: string[] = new Array(hls.segments.length).fill('')
     let segIdx = 0
 
     async function worker() {
-      while (segIdx < data.segments.length) {
+      while (segIdx < hls.segments.length) {
         if (ctrl.cancelled) return
         const i = segIdx++
-        localUris[i] = await downloadSegment(data.segments[i], i)
+        localUris[i] = await downloadSegment(hls.segments[i], i)
         done++
         // Guardar progreso cada 20 segmentos o cada 3s (evita saturar AsyncStorage)
         const now = Date.now()
-        if (done % 20 === 0 || done === data.segments.length || now - lastSave > 3000) {
+        if (done % 20 === 0 || done === hls.segments.length || now - lastSave > 3000) {
           lastSave = now
-          await update({ downloadedSegments: done, progress: done / data.segments.length })
+          await update({ downloadedSegments: done, progress: done / hls.segments.length })
         }
       }
     }
@@ -271,11 +346,11 @@ async function _runDownload(
     const m3u8Lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
-      `#EXT-X-TARGETDURATION:${Math.ceil(Math.max(...data.segments.map(s => s.duration), 6))}`,
+      `#EXT-X-TARGETDURATION:${Math.ceil(Math.max(...hls.segments.map(s => s.duration), 6))}`,
       '#EXT-X-MEDIA-SEQUENCE:0',
     ]
-    for (let i = 0; i < data.segments.length; i++) {
-      m3u8Lines.push(`#EXTINF:${data.segments[i].duration.toFixed(3)},`)
+    for (let i = 0; i < hls.segments.length; i++) {
+      m3u8Lines.push(`#EXTINF:${hls.segments[i].duration.toFixed(3)},`)
       m3u8Lines.push(localUris[i])
     }
     m3u8Lines.push('#EXT-X-ENDLIST')
@@ -283,14 +358,7 @@ async function _runDownload(
     await FileSystem.writeAsStringAsync(m3u8Path, m3u8Lines.join('\n'))
 
     // 5. Subtítulos (primer idioma disponible)
-    let subPath: string | undefined
-    if (data.captions.length > 0) {
-      try {
-        const subUrl = `${API_URL}/stream/sub.vtt?type=${type}&id=${id}&season=${season ?? ''}&episode=${episode ?? ''}&i=0`
-        const subResult = await FileSystem.downloadAsync(subUrl, dir + 'subs.vtt')
-        if (subResult.status === 200) subPath = subResult.uri
-      } catch { /* subs opcionales */ }
-    }
+    await downloadSubtitle(dir, type, id, season, episode, hls.captions.length)
 
     // Estimar tamaño total
     const dirInfo = await FileSystem.getInfoAsync(dir)
@@ -299,10 +367,9 @@ async function _runDownload(
     await update({
       status: 'done',
       progress: 1,
-      downloadedSegments: data.segments.length,
+      downloadedSegments: hls.segments.length,
       localPath: m3u8Path,
       size,
-      ...(subPath ? {} : {}),
     })
 
   } catch (e) {
@@ -319,7 +386,17 @@ async function _runDownload(
 export async function cancelDownload(key: string) {
   const ctrl = _active.get(key)
   if (ctrl) ctrl.cancelled = true
-  // Pequeño delay para que los workers vean el flag
+
+  // El resumable de archivo único no mira el flag: sigue escribiendo hasta que
+  // se le pausa explícitamente. Sin esto la descarga continuaba en segundo
+  // plano después de "cancelar" y volvía a crear el archivo ya borrado.
+  const resumable = _activeFile.get(key)
+  if (resumable) {
+    await resumable.pauseAsync().catch(() => {})
+    _activeFile.delete(key)
+  }
+
+  // Pequeño delay para que los workers de segmentos vean el flag
   await new Promise(r => setTimeout(r, 200))
   await deleteDownload(key)
 }

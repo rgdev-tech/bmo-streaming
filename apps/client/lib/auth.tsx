@@ -19,6 +19,15 @@ type AuthState = {
   selectProfile: (p: Profile) => Promise<void>
   refreshProfiles: () => Promise<Profile[]>
   createProfile: (name: string, avatar: string) => Promise<Profile | null>
+  updateProfile: (profileId: string, patch: { name?: string; avatar?: string }) => Promise<boolean>
+  // El PIN se pone y se comprueba en el servidor (RPC): el hash nunca llega al
+  // cliente. Ver supabase/002_profile_pin.sql.
+  setProfilePin: (profileId: string, pin: string | null) => Promise<boolean>
+  verifyProfilePin: (profileId: string, pin: string) => Promise<boolean>
+  // Contraseña de la CUENTA (no el PIN del perfil): se exige antes de borrar,
+  // que es la única acción irreversible de esta pantalla.
+  verifyAccountPassword: (password: string) => Promise<boolean>
+  deleteProfile: (profileId: string) => Promise<boolean>
   signOut: () => Promise<void>
 }
 
@@ -48,13 +57,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applyProfile = useCallback(async (p: Profile | null) => {
     activeProfileId = p?.id ?? null
     setProfile(p)
-    if (p) await AsyncStorage.setItem(ACTIVE_PROFILE_KEY, p.id)
-    else await AsyncStorage.removeItem(ACTIVE_PROFILE_KEY)
+    if (p) {
+      await AsyncStorage.setItem(ACTIVE_PROFILE_KEY, p.id)
+      // Sync en segundo plano: migra lo que hubiera en el teléfono, reintenta
+      // el outbox y baja el estado del servidor. No se espera — las lecturas
+      // son locales, así que la UI ya puede pintar mientras esto corre.
+      import('./library').then((lib) => lib.syncLibrary()).catch(() => {})
+    } else {
+      await AsyncStorage.removeItem(ACTIVE_PROFILE_KEY)
+    }
   }, [])
 
   const loadProfiles = useCallback(async (): Promise<Profile[]> => {
+    // Columnas explícitas, NO `*`: el SELECT de `pin_hash` está revocado a
+    // nivel de columna (ver 002_profile_pin.sql) y un `*` haría fallar la
+    // consulta entera con "permission denied for column".
     const { data, error } = await supabase
-      .from('profiles').select('*').order('created_at', { ascending: true })
+      .from('profiles')
+      .select('id, account_id, name, avatar, is_kids, created_at, has_pin')
+      .order('created_at', { ascending: true })
     if (error) { console.warn('[auth] no se pudieron cargar perfiles:', error.message); return [] }
     const list = (data ?? []) as Profile[]
     setProfiles(list)
@@ -103,6 +124,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return data as Profile
   }, [session, loadProfiles])
 
+  const setProfilePin = useCallback(async (profileId: string, pin: string | null) => {
+    const { error } = await supabase.rpc('set_profile_pin', { p_profile: profileId, p_pin: pin })
+    if (error) { console.warn('[auth] setProfilePin:', error.message); return false }
+    await loadProfiles() // refresca has_pin para que la UI muestre el candado
+    return true
+  }, [loadProfiles])
+
+  const verifyProfilePin = useCallback(async (profileId: string, pin: string) => {
+    const { data, error } = await supabase.rpc('verify_profile_pin', { p_profile: profileId, p_pin: pin })
+    if (error) { console.warn('[auth] verifyProfilePin:', error.message); return false }
+    return data === true
+  }, [])
+
+  const updateProfile = useCallback(async (
+    profileId: string,
+    patch: { name?: string; avatar?: string }
+  ) => {
+    const { error } = await supabase.from('profiles').update(patch).eq('id', profileId)
+    if (error) { console.warn('[auth] updateProfile:', error.message); return false }
+    const list = await loadProfiles()
+    // Si se editó el perfil activo hay que refrescar el objeto en memoria: si
+    // no, el header seguiría mostrando el nombre y el avatar viejos.
+    const fresh = list.find((p) => p.id === profileId)
+    if (fresh && activeProfileId === profileId) setProfile(fresh)
+    return true
+  }, [loadProfiles])
+
+  // Supabase no expone un "verificar contraseña" suelto, así que se reintenta
+  // el login con el mismo correo: si pasa, la contraseña es correcta. Refresca
+  // la sesión del mismo usuario, o sea que es inofensivo.
+  const verifyAccountPassword = useCallback(async (password: string) => {
+    const email = session?.user.email
+    if (!email) return false // cuentas de Apple sin correo: no hay contraseña que validar
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    return !error
+  }, [session])
+
+  const deleteProfile = useCallback(async (profileId: string) => {
+    // El borrado en la base arrastra en cascada lista, progreso, vistos y
+    // ajustes (on delete cascade en el esquema).
+    const { error } = await supabase.from('profiles').delete().eq('id', profileId)
+    if (error) { console.warn('[auth] deleteProfile:', error.message); return false }
+
+    // Y el caché local del dispositivo, que no está en la base.
+    import('./library').then((lib) => lib.clearProfileCache(profileId)).catch(() => {})
+
+    // Si era el perfil activo hay que soltarlo: dejarlo apuntando a una fila
+    // borrada haría fallar toda escritura por RLS, sin dar ninguna pista.
+    if (activeProfileId === profileId) await applyProfile(null)
+    await loadProfiles()
+    return true
+  }, [applyProfile, loadProfiles])
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
     setProfiles([])
@@ -115,6 +189,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       selectProfile: applyProfile,
       refreshProfiles: loadProfiles,
       createProfile,
+      updateProfile,
+      setProfilePin,
+      verifyProfilePin,
+      verifyAccountPassword,
+      deleteProfile,
       signOut,
     }}>
       {children}

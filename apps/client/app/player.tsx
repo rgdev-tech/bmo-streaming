@@ -229,19 +229,27 @@ export default function PlayerScreen() {
     getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
   }, [id, isTv, seasonN, episodeN])
 
+  // Una descarga puede ser de dos formas y cada una necesita un player
+  // distinto: un m3u8 recompuesto a partir de segmentos (HLS → expo-video) o
+  // un archivo único mkv/mp4 bajado de Real-Debrid (→ VLCKit). Antes se asumía
+  // que todo lo local era HLS, así que un mkv descargado se le pasaba a
+  // AVPlayer y no reproducía.
+  const localIsFile = !!localUri && !localUri.endsWith('.m3u8')
+
   // URI final para la vía expo-video/HLS:
   //  - local: m3u8 descargado
   //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
-  // Las fuentes "file" (mp4/mkv de Real-Debrid) van por VLCKit directo al CDN
-  // (ver isVlcSource más abajo) — no pasan por esta rama.
-  const masterUrl = localUri
+  const masterUrl = (localUri && !localIsFile ? localUri : null)
     ?? (isTv
       ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
       : stream.masterMovie(id, audioLang))
 
-  // Fuentes "file" (Real-Debrid, mp4/mkv) → VLCKit: soporta mkv nativo y
-  // permite sideload/selección de subtítulos y pistas de audio sin re-resolver.
-  const isVlcSource = streamType === 'file' && !localUri && !!streamUrl
+  // Fuentes "file" → VLCKit: soporta mkv nativo y permite sideload/selección de
+  // subtítulos y pistas de audio sin re-resolver. Cubre tanto el streaming
+  // directo de Real-Debrid como un archivo ya descargado.
+  const isVlcSource = localIsFile || (streamType === 'file' && !localUri && !!streamUrl)
+  // Para VLCKit: el archivo local manda sobre la URL remota.
+  const vlcUri = localIsFile ? localUri! : streamUrl
 
   // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer ni por tipo
   // de fuente. Se fuerza landscape UNA vez al entrar a esta pantalla (deps
@@ -374,11 +382,12 @@ export default function PlayerScreen() {
             </Touchable>
           </View>
         </View>
-      ) : ready && isVlcSource && streamUrl ? (
+      ) : ready && isVlcSource && vlcUri ? (
         <VlcPlayer
           key={`${seasonN ?? 0}-${episodeN ?? 0}-vlc`}
-          uri={streamUrl}
-          referer={referer}
+          uri={vlcUri}
+          // Un archivo local no necesita Referer (y pasárselo confunde a VLC).
+          referer={localIsFile ? '' : referer}
           srtCues={srtCues}
           startAt={startAt}
           meta={meta}

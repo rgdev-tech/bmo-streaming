@@ -10,8 +10,6 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.rgdev.bmostreaming",
-      "deploymentTarget": "18.0",
-      "usesAppleSignIn": true,
       "icon": {
         "light": "./assets/images/ios/icon-light.png",
         "dark": "./assets/images/ios/icon-dark.png"

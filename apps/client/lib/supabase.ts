@@ -46,6 +46,9 @@ export type Profile = {
   avatar: string
   is_kids: boolean
   created_at: string
+  // Derivada en la base (pin_hash is not null). El hash en sí nunca llega acá:
+  // su SELECT está revocado y la verificación es por RPC.
+  has_pin: boolean
 }
 
 export type ListItemRow = {

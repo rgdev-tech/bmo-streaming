@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { screenTitle, rowHeading } from '@/lib/typography'
 import { getContinueWatching, type Progress } from '@/lib/library'
 import { useAuth } from '@/lib/auth'
+import { ProfileAvatar } from '@/components/ProfileAvatar'
 
 export default function HomeScreen() {
   const router = useRouter()
@@ -147,7 +148,7 @@ export default function HomeScreen() {
           onPress={() => router.push('/profiles' as never)}
         >
           {profile ? (
-            <Text style={styles.avatarEmoji}>{profile.avatar}</Text>
+            <ProfileAvatar avatar={profile.avatar} size={36} />
           ) : (
             <SymbolView name="person.fill" tintColor="rgba(255,255,255,0.9)" style={styles.avatarIcon} />
           )}
@@ -189,5 +190,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarIcon: { width: 22, height: 22 },
-  avatarEmoji: { fontSize: 22 },
 })

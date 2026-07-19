@@ -69,6 +69,36 @@ async function buildSegmentList(
   return { segments, quality: chosen.quality }
 }
 
+// La calidad no viene en el StreamResult para fuentes 'file', pero el nombre
+// del archivo de Real-Debrid casi siempre la lleva.
+function qualityFromName(url: string): string {
+  let name = url
+  try { name = decodeURIComponent(new URL(url).pathname) } catch {}
+  if (/2160p|\b4k\b/i.test(name)) return '2160p'
+  if (/1080p/i.test(name)) return '1080p'
+  if (/720p/i.test(name)) return '720p'
+  if (/480p/i.test(name)) return '480p'
+  return ''
+}
+
+// Respuesta discriminada por `kind`:
+//   'file' → un único archivo directo (Real-Debrid): el cliente lo baja de una
+//   'hls'  → lista de segmentos a bajar y recomponer en un m3u8 local
+//
+// Antes esto asumía SIEMPRE HLS: con una fuente 'file' hacía .text() sobre un
+// MKV de varios GB para buscarle variantes, y la función moría por timeout.
+// Desde que Real-Debrid es la fuente principal, eso rompía toda descarga.
+async function buildPayload(result: NonNullable<Awaited<ReturnType<typeof resolveStream>>>) {
+  const referer = result.headers.Referer ?? result.headers.referer ?? ''
+  const common = { referer, captions: result.captions, source: result.source }
+
+  if (result.type === 'file') {
+    return { kind: 'file' as const, url: result.url, quality: qualityFromName(result.url), ...common }
+  }
+  const { segments, quality } = await buildSegmentList(result.url, referer)
+  return { kind: 'hls' as const, segments, quality, ...common }
+}
+
 export const downloadRoutes = new Elysia({ prefix: '/download' })
   .get(
     '/movie/:id',
@@ -76,14 +106,7 @@ export const downloadRoutes = new Elysia({ prefix: '/download' })
       const result = await resolveStream('movie', Number(params.id))
       if (!result) { set.status = 404; return { error: 'No stream' } }
       try {
-        const { segments, quality } = await buildSegmentList(result.url, result.headers.Referer ?? '')
-        return {
-          segments,
-          referer: result.headers.Referer ?? '',
-          quality,
-          captions: result.captions,
-          source: result.source,
-        }
+        return await buildPayload(result)
       } catch (e) {
         set.status = 500
         return { error: (e as Error).message }
@@ -97,14 +120,7 @@ export const downloadRoutes = new Elysia({ prefix: '/download' })
       const result = await resolveStream('tv', Number(params.id), Number(params.season), Number(params.episode))
       if (!result) { set.status = 404; return { error: 'No stream' } }
       try {
-        const { segments, quality } = await buildSegmentList(result.url, result.headers.Referer ?? '')
-        return {
-          segments,
-          referer: result.headers.Referer ?? '',
-          quality,
-          captions: result.captions,
-          source: result.source,
-        }
+        return await buildPayload(result)
       } catch (e) {
         set.status = 500
         return { error: (e as Error).message }

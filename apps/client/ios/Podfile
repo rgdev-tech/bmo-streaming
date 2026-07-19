@@ -75,5 +75,22 @@ target 'BMO' do
         puts "✅ Patched ExpoFileSystem: replaced ExpoAppDelegate with nil"
       end
     end
+
+    # fmt 11.0.2 (el que fija RN 0.81.5) no compila con el clang de Xcode 26:
+    # "call to consteval function ... is not a constant expression".
+    # FMT_USE_CONSTEVAL se autodetecta sin guarda de override, así que no se
+    # puede desactivar por -D; hay que neutralizar la macro en el header.
+    # Solo se pierde la validación EN COMPILACIÓN de las cadenas de formato
+    # (pasa a runtime), que es interno de fmt y no afecta a la app.
+    fmt_base = File.join(Pod::Config.instance.installation_root, 'Pods/fmt/include/fmt/base.h')
+    if File.exist?(fmt_base)
+      content = File.read(fmt_base)
+      if content.include?("#  define FMT_CONSTEVAL consteval")
+        # CocoaPods deja las fuentes de los pods en solo-lectura.
+        File.chmod(0644, fmt_base)
+        File.write(fmt_base, content.sub("#  define FMT_CONSTEVAL consteval", "#  define FMT_CONSTEVAL"))
+        puts "✅ Patched fmt: FMT_CONSTEVAL neutralizado (incompatibilidad con clang de Xcode 26)"
+      end
+    end
   end
 end
