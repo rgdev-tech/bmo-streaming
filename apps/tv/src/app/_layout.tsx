@@ -36,8 +36,12 @@ function AuthGate() {
       if (!onProfiles) router.replace('/profiles')
       return
     }
-    // Ya autenticado y con perfil: sacarlo de las pantallas de entrada.
-    if (onLogin || onProfiles) router.replace('/')
+    // Ya autenticado y con perfil: sacarlo del login.
+    //
+    // A /profiles NO se lo saca: con perfil activo sigue siendo una pantalla
+    // legítima, es como se cambia de perfil desde el rail. Incluirla acá hacía
+    // que entrar a cambiar de perfil rebotara al inicio en el acto.
+    if (onLogin) router.replace('/')
   }, [loading, session, profile, segments, router])
 
   return null

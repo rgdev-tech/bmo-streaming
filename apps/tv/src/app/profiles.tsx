@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { useRouter } from 'expo-router'
 import { useAuth } from '@bmo/core/auth'
 import { AVATARS, DEFAULT_AVATAR } from '@bmo/core/avatars'
 import type { Profile } from '@bmo/core/supabase'
@@ -89,7 +90,25 @@ function AvatarChoice({
 }
 
 export default function ProfilesScreen() {
+  const router = useRouter()
   const { profiles, selectProfile, createProfile, verifyProfilePin, loading } = useAuth()
+
+  /**
+   * Entrar al contenido con el perfil elegido.
+   *
+   * La navegación la hace esta pantalla y NO la compuerta de sesión. La
+   * compuerta solo redirige cuando FALTA algo (sin sesión, sin perfil); si
+   * también sacara de acá al haber perfil, sería imposible entrar a cambiarlo
+   * desde el rail: rebotaría antes de que la pantalla se viera.
+   *
+   * Se usa replace y no back: al cambiar de perfil, la biblioteca y el
+   * "continuar viendo" son otros, así que volver a la pantalla anterior
+   * mostraría datos del perfil que se acaba de dejar.
+   */
+  async function enter(p: Profile) {
+    await selectProfile(p)
+    router.replace('/')
+  }
 
   // Tres modos en una pantalla: elegir, desbloquear con PIN, o crear. Van como
   // estados y no como rutas distintas para no meter transiciones de stack en
@@ -109,7 +128,7 @@ export default function ProfilesScreen() {
       setPinError(null)
       return
     }
-    await selectProfile(p)
+    await enter(p)
   }
 
   async function onPinChange(v: string) {
@@ -120,7 +139,7 @@ export default function ProfilesScreen() {
     const ok = await verifyProfilePin(locked.id, v)
     setBusy(false)
     if (ok) {
-      await selectProfile(locked)
+      await enter(locked)
       return
     }
     setPin('')
@@ -137,7 +156,7 @@ export default function ProfilesScreen() {
       setCreating(false)
       setNewName('')
       setNewAvatar(DEFAULT_AVATAR)
-      await selectProfile(created)
+      await enter(created)
     }
   }
 

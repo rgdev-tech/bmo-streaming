@@ -23,11 +23,17 @@ export function ProfileAvatar({
   // alrededor que no aportaba nada y ensuciaba la fila.
   const radius = size / 2
 
+  // Borde proporcional, no fijo. Con 2 px fijos, en el avatar de 21 dp del rail
+  // el marco se comía el 10% del dibujo y lo dejaba con aspecto sucio; en el de
+  // 152 dp de la pantalla de perfiles, en cambio, quedaba flaco. Por debajo de
+  // 40 dp directamente no lleva borde: a ese tamaño ensucia más de lo que suma.
+  const border = size < 40 ? 0 : Math.max(2, Math.round(size * 0.02))
+
   return (
     <View
       style={[
         styles.wrap,
-        { width: size, height: size, borderRadius: radius },
+        { width: size, height: size, borderRadius: radius, borderWidth: border },
         selected ? styles.selected : styles.idle,
       ]}
     >
@@ -49,12 +55,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.surface,
   },
-  idle: { borderWidth: 2, borderColor: 'rgba(255,255,255,0.12)' },
-  // El foco no se marca solo con un borde: sobre negro, un contorno blanco de
-  // 3 px a distancia de sillón es fácil de perder. La sombra lo despega del
-  // fondo y hace que la ficha se lea como levantada, no como pintada.
+  // El ancho del borde lo fija el componente según el tamaño; acá solo el color.
+  idle: { borderColor: 'rgba(255,255,255,0.12)' },
+  // El foco no se marca solo con un borde: sobre negro, un contorno blanco a
+  // distancia de sillón es fácil de perder. La sombra lo despega del fondo y
+  // hace que la ficha se lea como levantada, no como pintada.
   selected: {
-    borderWidth: 3,
     borderColor: colors.focusBorder,
     shadowColor: '#000',
     shadowOpacity: 0.65,

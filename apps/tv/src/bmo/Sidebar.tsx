@@ -3,7 +3,9 @@ import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { LinearGradient } from 'expo-linear-gradient'
 import { usePathname, useRouter } from 'expo-router'
-import { colors, layout } from './theme'
+import { useAuth } from '@bmo/core/auth'
+import { ProfileAvatar } from './ProfileAvatar'
+import { colors, layout, safe } from './theme'
 
 // `as const` para que las rutas queden como literales y las valide el sistema de
 // rutas tipadas de expo-router (typedRoutes está activo en app.json). Con
@@ -39,6 +41,7 @@ type Section = (typeof SECTIONS)[number]
 export function Sidebar() {
   const router = useRouter()
   const pathname = usePathname()
+  const { profile } = useAuth()
 
   // Cuenta de ítems enfocados en vez de un booleano: al moverse entre ítems el
   // blur del anterior llega DESPUÉS del focus del siguiente, así que un booleano
@@ -90,6 +93,24 @@ export function Sidebar() {
         pointerEvents="none"
       />
 
+      {/* El perfil va anclado arriba, no en el bloque de secciones: no es un
+          destino más del catálogo, es "quién sos". Separarlo por posición dice
+          eso mejor que una línea divisoria entre ítems pegados. */}
+      {profile && (
+        <View style={styles.profileSlot}>
+          <RailItem
+            avatar={profile.avatar}
+            label={profile.name}
+            active={false}
+            expanded={expanded}
+            onFocusChange={bumpFocus}
+            // push y no replace: cambiar de perfil es una visita, y al volver
+            // el usuario espera aterrizar donde estaba.
+            onPress={() => router.push('/profiles')}
+          />
+        </View>
+      )}
+
       <View style={styles.items}>
         {SECTIONS.map((s) => (
           <RailItem
@@ -112,19 +133,27 @@ export function Sidebar() {
 
 function RailItem({
   section,
+  avatar,
+  label,
   active,
   expanded,
   hasTVPreferredFocus,
   onFocusChange,
   onPress,
 }: {
-  section: Section
+  /** Ítem de sección (icono + etiqueta del catálogo). */
+  section?: Section
+  /** Ítem de perfil: en vez de icono lleva el avatar del perfil activo. */
+  avatar?: string | null
+  label?: string
   active: boolean
   expanded: boolean
   hasTVPreferredFocus?: boolean
   onFocusChange: (focused: boolean) => void
   onPress: () => void
 }) {
+  const text = label ?? section?.label ?? ''
+
   return (
     <Pressable
       onFocus={() => onFocusChange(true)}
@@ -142,11 +171,17 @@ function RailItem({
             focused && styles.pillFocused,
           ]}
         >
-          <Ionicons
-            name={section.icon}
-            size={21}
-            color={focused ? '#000' : active ? colors.text : 'rgba(235,235,245,0.5)'}
-          />
+          {section ? (
+            <Ionicons
+              name={section.icon}
+              size={21}
+              color={focused ? '#000' : active ? colors.text : 'rgba(235,235,245,0.5)'}
+            />
+          ) : (
+            // 21 px, el mismo alto que los iconos, para que el rail no se
+            // desalinee entre el perfil y las secciones.
+            <ProfileAvatar avatar={avatar} size={21} />
+          )}
           {expanded && (
             <Text
               style={[
@@ -156,7 +191,7 @@ function RailItem({
               ]}
               numberOfLines={1}
             >
-              {section.label}
+              {text}
             </Text>
           )}
         </View>
@@ -168,7 +203,9 @@ function RailItem({
 const styles = StyleSheet.create({
   rail: {
     width: layout.railWidth,
-    justifyContent: 'center',
+    // El perfil queda arriba y las secciones centradas en lo que sobra: por eso
+    // el bloque de ítems lleva flex:1 y no se centra el rail entero.
+    justifyContent: 'flex-start',
     // Imprescindible: las etiquetas y el velo se dibujan fuera de estos límites.
     overflow: 'visible',
     zIndex: 10,
@@ -182,7 +219,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.96)',
   },
   gradient: { position: 'absolute', left: 0, top: 0, bottom: 0, width: layout.railWidth },
-  items: { gap: 6, paddingLeft: 8 },
+  profileSlot: { paddingLeft: 8, paddingTop: safe.top - 8 },
+  // flex:1 + center: las secciones se reparten el alto que queda bajo el perfil
+  // y quedan centradas ahí, no pegadas a él.
+  items: { flex: 1, justifyContent: 'center', gap: 6, paddingLeft: 8 },
   hit: { width: layout.railWidth - 8, height: 42, justifyContent: 'center' },
   pill: {
     position: 'absolute',
