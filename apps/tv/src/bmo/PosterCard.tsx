@@ -15,9 +15,16 @@ import { colors, layout } from './theme'
 export function PosterCard({
   item,
   onPress,
+  inGrid,
 }: {
   item: MediaItem
   onPress?: (item: MediaItem) => void
+  /**
+   * En cuadrícula la separación la pone el contenedor (gap), no la tarjeta.
+   * Con el margen propio, la última columna arrastra un margen derecho que no
+   * separa de nada y empuja el ancho total fuera del contenedor.
+   */
+  inGrid?: boolean
 }) {
   const { scale, onFocus, onBlur } = useFocusScale()
   const uri = posterUrl(item.poster_path, 'w500')
@@ -27,7 +34,7 @@ export function PosterCard({
       onFocus={onFocus}
       onBlur={onBlur}
       onPress={() => onPress?.(item)}
-      style={styles.pressable}
+      style={inGrid ? undefined : styles.pressable}
     >
       {({ focused }) => (
         <Animated.View style={[styles.card, { transform: [{ scale }] }]}>

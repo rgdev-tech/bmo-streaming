@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   ScrollView,
@@ -7,22 +7,26 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native'
-import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
+import { Linking } from 'react-native'
 import {
   backdropUrl,
   certificationOf,
   logoUrl,
   titleOf,
   tmdb,
+  trailerKey,
   yearOf,
   type MediaDetails,
 } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
-import { isInMyList, toggleMyList, toLibraryItem } from '@bmo/core/library'
+import { getResumePoint, isInMyList, toggleMyList, toLibraryItem } from '@bmo/core/library'
 import { FocusButton } from '@/bmo/FocusButton'
 import { PosterRow } from '@/bmo/PosterRow'
+import { CastRow } from '@/bmo/CastRow'
+import { SeasonEpisodes } from '@/bmo/SeasonEpisodes'
 import { colors, heroOverview, heroTitle, rowHeading, safe } from '@/bmo/theme'
 
 export default function TitleScreen() {
@@ -40,6 +44,28 @@ export default function TitleScreen() {
   useEffect(() => {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
   }, [id, isTv])
+
+  // Punto de retomar de la serie. Se recalcula cada vez que se vuelve a esta
+  // pantalla (no solo al montar) porque lo normal es llegar acá justo después
+  // de haber visto un episodio, y el botón tiene que reflejarlo.
+  const [resume, setResume] = useState<{ season: number; episode: number; fresh: boolean } | null>(
+    null
+  )
+  useFocusEffect(
+    useCallback(() => {
+      if (!isTv) return
+      let alive = true
+      getResumePoint(Number(id)).then((p) => {
+        if (!alive) return
+        // Sin historial se ofrece el primer episodio: el botón tiene que existir
+        // igual, si no la serie no tiene punto de entrada obvio.
+        setResume(p ?? { season: 1, episode: 1, fresh: true })
+      })
+      return () => {
+        alive = false
+      }
+    }, [id, isTv])
+  )
 
   // Igual que en el Hero de la home: el logo es una petición aparte y muchos
   // títulos no tienen, así que el texto sigue siendo el caso normal, no el error.
@@ -82,6 +108,42 @@ export default function TitleScreen() {
   const certification = certificationOf(data)
   const backdrop = backdropUrl(data.backdrop_path, 'original')
   const heroHeight = Math.round(height * 0.62)
+
+  // Series: el botón refleja dónde quedó. "Ver" cuando nunca vio nada,
+  // "Continuar" cuando hay historial — la palabra sola ya le dice al usuario si
+  // la app se acuerda de él o no.
+  const playLabel = !isTv
+    ? 'Reproducir'
+    : resume
+      ? `${resume.fresh ? 'Ver' : 'Continuar'} T${resume.season}:E${resume.episode}`
+      : 'Reproducir'
+
+  function play() {
+    const ep = isTv ? (resume ?? { season: 1, episode: 1 }) : null
+    router.push({
+      pathname: '/player',
+      params: {
+        type: isTv ? 'tv' : 'movie',
+        id,
+        title: ep ? `${titleOf(data!)} · T${ep.season}:E${ep.episode}` : titleOf(data!),
+        poster: data!.poster_path ?? '',
+        backdrop: data!.backdrop_path ?? '',
+        ...(ep ? { season: String(ep.season), episode: String(ep.episode) } : {}),
+      },
+    })
+  }
+
+  const trailer = trailerKey(data.videos?.results)
+  function openTrailer() {
+    if (!trailer) return
+    // Linking y no un navegador embebido: en Android TV muchos dispositivos no
+    // traen navegador, pero sí la app de YouTube, y el intent la resuelve.
+    // Si nada puede abrir la URL, se ignora en silencio en vez de romper.
+    const url = `https://www.youtube.com/watch?v=${trailer}`
+    Linking.canOpenURL(url)
+      .then((ok) => ok && Linking.openURL(url))
+      .catch(() => {})
+  }
 
   // Chips de metadatos. Se arma como lista y se une con separadores para no
   // terminar con un "·" colgando cuando alguno de los campos viene vacío.
@@ -146,45 +208,62 @@ export default function TitleScreen() {
                 aterriza sin foco visible y no sabe por dónde empezar. */}
             <View style={styles.actions}>
               <FocusButton
-                label={isTv ? 'Ver T1:E1' : 'Reproducir'}
+                label={playLabel}
                 primary
                 hasTVPreferredFocus
-                onPress={() =>
-                  router.push({
-                    pathname: '/player',
-                    params: {
-                      type: isTv ? 'tv' : 'movie',
-                      id,
-                      title: titleOf(data),
-                      poster: data.poster_path ?? '',
-                      backdrop: data.backdrop_path ?? '',
-                      ...(isTv ? { season: '1', episode: '1' } : {}),
-                    },
-                  })
-                }
+                onPress={play}
               />
               <FocusButton
                 label={inList ? '✓ En Mi Lista' : '+ Mi Lista'}
                 onPress={onToggleList}
               />
+              {!!trailer && <FocusButton label="Tráiler" onPress={openTrailer} />}
             </View>
           </View>
         </View>
 
         <View style={styles.body}>
+          {/* Los géneros como pastillas y no como texto corrido: en el bloque
+              de abajo compiten con los encabezados de sección, y una línea de
+              texto suelta se lee como si fuera contenido en vez de etiquetas. */}
           {!!data.genres?.length && (
-            <Text style={styles.genres}>
-              {data.genres.map((g) => g.name).join('  ·  ')}
-            </Text>
+            <View style={styles.genres}>
+              {data.genres.map((g) => (
+                <View key={g.id} style={styles.genreChip}>
+                  <Text style={styles.genreText}>{g.name}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Series: episodios antes que reparto. Quien entra a la ficha de una
+              serie casi siempre viene a elegir capítulo, no a mirar el elenco. */}
+          {isTv && !!data.seasons?.length && (
+            <SeasonEpisodes
+              tvId={id}
+              seasons={data.seasons}
+              onPlayEpisode={(season, ep) =>
+                router.push({
+                  pathname: '/player',
+                  params: {
+                    type: 'tv',
+                    id,
+                    season: String(season),
+                    episode: String(ep.episode_number),
+                    title: `${titleOf(data)} · T${season}:E${ep.episode_number}`,
+                    poster: data.poster_path ?? '',
+                    backdrop: data.backdrop_path ?? '',
+                  },
+                })
+              }
+            />
           )}
 
           {!!data.credits?.cast?.length && (
-            <View style={styles.castBlock}>
-              <Text style={styles.sectionHeading}>Reparto</Text>
-              <Text style={styles.cast} numberOfLines={2}>
-                {data.credits.cast.slice(0, 8).map((c) => c.name).join('  ·  ')}
-              </Text>
-            </View>
+            <CastRow
+              cast={data.credits.cast}
+              onPressPerson={(p) => router.push(`/person/${p.id}`)}
+            />
           )}
 
           {!!data.similar?.results?.length && (
@@ -200,6 +279,10 @@ export default function TitleScreen() {
               }}
             />
           )}
+
+          {/* Aire al final: sin esto la última fila queda pegada al borde y al
+              enfocarla el scroll no tiene hacia dónde correrse. */}
+          <View style={styles.tail} />
         </View>
       </ScrollView>
     </View>
@@ -235,14 +318,20 @@ const styles = StyleSheet.create({
   },
   overview: { ...heroOverview, marginBottom: 18 },
   actions: { flexDirection: 'row', gap: 12 },
-  body: { paddingTop: 4 },
+  body: { paddingTop: 6 },
   genres: {
-    fontSize: 13,
-    color: colors.textDim,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     paddingHorizontal: safe.horizontal,
-    marginBottom: 18,
+    marginBottom: 26,
   },
-  castBlock: { paddingHorizontal: safe.horizontal, marginBottom: 26 },
-  sectionHeading: { ...rowHeading, marginBottom: 6 },
-  cast: { fontSize: 13, color: colors.textDim, lineHeight: 19 },
+  genreChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: 'rgba(120,120,128,0.24)',
+  },
+  genreText: { fontSize: 12, fontWeight: '600', color: colors.textDim },
+  tail: { height: safe.bottom },
 })

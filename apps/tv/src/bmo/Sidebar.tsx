@@ -46,6 +46,23 @@ export function Sidebar() {
   const [focusCount, setFocusCount] = useState(0)
   const expanded = focusCount > 0
 
+  // El ítem activo recibe el foco durante el montaje (hasTVPreferredFocus), y
+  // ese onFocus dispara un setState antes de que el componente termine de
+  // montarse → "Can't perform a React state update on a component that hasn't
+  // mounted yet". Ese primer cambio se difiere un tick para que caiga después
+  // del commit. No se puede simplemente ignorar: el contador quedaría
+  // desbalanceado y el rail se cerraría al moverse al segundo ítem.
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+  }, [])
+
+  const bumpFocus = (focused: boolean) => {
+    const apply = () => setFocusCount((n) => Math.max(0, n + (focused ? 1 : -1)))
+    if (mounted.current) apply()
+    else setTimeout(apply, 0)
+  }
+
   const veil = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -84,7 +101,7 @@ export function Sidebar() {
             // tarjeta del catálogo, el ScrollView la trae a la vista y el hero
             // desaparece antes de que el usuario toque nada.
             hasTVPreferredFocus={pathname === s.path}
-            onFocusChange={(f) => setFocusCount((n) => Math.max(0, n + (f ? 1 : -1)))}
+            onFocusChange={bumpFocus}
             onPress={() => router.replace(s.path)}
           />
         ))}
