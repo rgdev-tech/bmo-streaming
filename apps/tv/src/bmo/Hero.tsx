@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react'
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
-import { backdropUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
+import { backdropUrl, logoUrl, titleOf, tmdb, type MediaItem } from '@bmo/core/tmdb'
 import { colors, heroOverview, heroTitle, safe } from './theme'
 
 /**
@@ -19,6 +20,25 @@ export function Hero({ item }: { item: MediaItem }) {
   // la pista visual de que la pantalla sigue hacia abajo.
   const heroHeight = Math.round(height * 0.58)
   const uri = backdropUrl(item.backdrop_path, 'original')
+
+  // El logo va en su propia petición: TMDB no lo trae en los listados, hay que
+  // pedirlo por título. Si falla o no existe, queda el título en texto — muchos
+  // títulos no tienen logo cargado, así que el texto no es un caso raro.
+  const [logo, setLogo] = useState<string | null>(null)
+  const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
+  useEffect(() => {
+    let cancelled = false
+    // Se limpia al cambiar de item: sin esto, al rotar el héroe se vería un
+    // instante el logo del título anterior sobre el backdrop nuevo.
+    setLogo(null)
+    tmdb
+      .logo(isTv ? 'tv' : 'movie', item.id)
+      .then((r) => !cancelled && setLogo(logoUrl(r.logo)))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [item.id, isTv])
 
   return (
     <View style={[styles.hero, { height: heroHeight }]}>
@@ -43,9 +63,23 @@ export function Hero({ item }: { item: MediaItem }) {
       />
 
       <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>
-          {titleOf(item)}
-        </Text>
+        {logo ? (
+          // contentFit "contain" y alineado abajo-izquierda: los logos vienen en
+          // proporciones muy distintas (algunos apaisados, otros casi cuadrados)
+          // y estirarlos los deforma. Se les fija el alto máximo y se dejan
+          // crecer a lo ancho hasta el límite del bloque.
+          <Image
+            source={logo}
+            style={styles.logo}
+            contentFit="contain"
+            contentPosition="bottom left"
+            transition={300}
+          />
+        ) : (
+          <Text style={styles.title} numberOfLines={2}>
+            {titleOf(item)}
+          </Text>
+        )}
         {!!item.overview && (
           <Text style={styles.overview} numberOfLines={3}>
             {item.overview}
@@ -67,5 +101,8 @@ const styles = StyleSheet.create({
     maxWidth: '48%',
   },
   title: { ...heroTitle, marginBottom: 10 },
+  // Mismo bloque visual que ocuparía el título en texto, para que la sinopsis no
+  // salte de posición según el título tenga logo o no.
+  logo: { width: '100%', height: 78, marginBottom: 12 },
   overview: heroOverview,
 })

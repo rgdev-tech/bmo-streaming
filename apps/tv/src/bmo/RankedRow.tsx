@@ -1,0 +1,136 @@
+import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Image } from 'expo-image'
+import { posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
+import { useFocusScale } from './useFocusScale'
+import { colors, layout, rowHeading, safe } from './theme'
+
+const NUM_WIDTH = 52
+
+/**
+ * Fila de Top 10 con el número gigante detrás del póster.
+ *
+ * Es la fila con más peso visual de la home, y por eso va una sola vez: si se
+ * repitiera, el recurso deja de leerse como "esto es lo más visto" y pasa a ser
+ * decoración.
+ */
+function RankedCard({
+  item,
+  rank,
+  onPress,
+}: {
+  item: MediaItem
+  rank: number
+  onPress?: (item: MediaItem) => void
+}) {
+  const { scale, onFocus, onBlur } = useFocusScale()
+  const uri = posterUrl(item.poster_path, 'w500')
+
+  return (
+    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
+      {({ focused }) => (
+        <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
+          {/* El número va debajo del póster y sobresale por la izquierda; el
+              margen negativo del póster es lo que los hace solaparse. */}
+          <Text style={styles.num}>{rank}</Text>
+          <View style={[styles.posterWrap, focused && styles.posterWrapFocused]}>
+            {uri ? (
+              <Image source={uri} style={styles.poster} contentFit="cover" transition={200} />
+            ) : (
+              <View style={[styles.poster, styles.placeholder]}>
+                <Text style={styles.placeholderText} numberOfLines={3}>
+                  {titleOf(item)}
+                </Text>
+              </View>
+            )}
+          </View>
+        </Animated.View>
+      )}
+    </Pressable>
+  )
+}
+
+export function RankedRow({
+  title,
+  items,
+  onPressItem,
+}: {
+  title: string
+  items: MediaItem[]
+  onPressItem?: (item: MediaItem) => void
+}) {
+  if (!items?.length) return null
+
+  return (
+    <View style={styles.row}>
+      <Text style={styles.heading}>{title}</Text>
+      <FlatList
+        horizontal
+        data={items.slice(0, 10)}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item, index }) => (
+          <RankedCard item={item} rank={index + 1} onPress={onPressItem} />
+        )}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.list}
+        initialNumToRender={6}
+      />
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  row: { marginBottom: layout.rowGap },
+  heading: {
+    ...rowHeading,
+    marginBottom: 10,
+    paddingHorizontal: safe.horizontal,
+  },
+  // El primer número tiene que quedar alineado con el resto del contenido, y el
+  // número sobresale del póster, así que se descuenta su ancho del padding.
+  list: {
+    paddingLeft: safe.horizontal - NUM_WIDTH + 14,
+    paddingRight: safe.horizontal,
+    paddingVertical: 14,
+  },
+  hit: { marginRight: 10 },
+  card: { flexDirection: 'row', alignItems: 'flex-end' },
+  num: {
+    width: NUM_WIDTH,
+    fontSize: 72,
+    lineHeight: 74,
+    fontWeight: '900',
+    letterSpacing: -5,
+    textAlign: 'right',
+    color: 'rgba(255,255,255,0.9)',
+    // Contorno oscuro: sobre pósters claros el número blanco se perdía.
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowRadius: 6,
+    marginRight: -10,
+  },
+  posterWrap: {
+    borderRadius: layout.radius,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  posterWrapFocused: {
+    borderColor: colors.focusBorder,
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  poster: {
+    width: layout.posterWidth,
+    height: layout.posterHeight,
+    backgroundColor: colors.surface,
+  },
+  placeholder: { alignItems: 'center', justifyContent: 'center', padding: 10 },
+  placeholderText: {
+    color: colors.textDim,
+    fontSize: 11,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+})

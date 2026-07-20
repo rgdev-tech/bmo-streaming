@@ -1,7 +1,7 @@
-import { useRef } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
+import { useFocusScale } from './useFocusScale'
 import { colors, layout } from './theme'
 
 /**
@@ -19,24 +19,13 @@ export function PosterCard({
   item: MediaItem
   onPress?: (item: MediaItem) => void
 }) {
-  const scale = useRef(new Animated.Value(1)).current
+  const { scale, onFocus, onBlur } = useFocusScale()
   const uri = posterUrl(item.poster_path, 'w500')
-
-  const animate = (to: number) => {
-    Animated.spring(scale, {
-      toValue: to,
-      useNativeDriver: true,
-      // Sin rebote: el foco tiene que asentarse rápido porque el usuario puede
-      // estar recorriendo la fila a toda velocidad con la cruceta.
-      speed: 30,
-      bounciness: 0,
-    }).start()
-  }
 
   return (
     <Pressable
-      onFocus={() => animate(layout.focusScale)}
-      onBlur={() => animate(1)}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onPress={() => onPress?.(item)}
       style={styles.pressable}
     >

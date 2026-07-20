@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import {
   backdropUrl,
   certificationOf,
+  logoUrl,
   titleOf,
   tmdb,
   yearOf,
@@ -38,6 +39,21 @@ export default function TitleScreen() {
   const [inList, setInList] = useState(false)
   useEffect(() => {
     isInMyList(Number(id), isTv ? 'tv' : 'movie').then(setInList)
+  }, [id, isTv])
+
+  // Igual que en el Hero de la home: el logo es una petición aparte y muchos
+  // títulos no tienen, así que el texto sigue siendo el caso normal, no el error.
+  const [logo, setLogo] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setLogo(null)
+    tmdb
+      .logo(isTv ? 'tv' : 'movie', Number(id))
+      .then((r) => !cancelled && setLogo(logoUrl(r.logo)))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [id, isTv])
 
   async function onToggleList() {
@@ -103,9 +119,19 @@ export default function TitleScreen() {
           />
 
           <View style={styles.heroContent}>
-            <Text style={styles.title} numberOfLines={2}>
-              {titleOf(data)}
-            </Text>
+            {logo ? (
+              <Image
+                source={logo}
+                style={styles.logo}
+                contentFit="contain"
+                contentPosition="bottom left"
+                transition={300}
+              />
+            ) : (
+              <Text style={styles.title} numberOfLines={2}>
+                {titleOf(data)}
+              </Text>
+            )}
 
             {!!meta.length && <Text style={styles.meta}>{meta.join('  ·  ')}</Text>}
 
@@ -198,6 +224,9 @@ const styles = StyleSheet.create({
     maxWidth: '52%',
   },
   title: { ...heroTitle, marginBottom: 8 },
+  // Mismo hueco que ocuparía el título en texto, para que los metadatos no
+  // salten de posición según el título tenga logo o no.
+  logo: { width: '100%', height: 72, marginBottom: 10 },
   meta: {
     fontSize: 14,
     fontWeight: '600',

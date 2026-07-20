@@ -2,7 +2,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { useRouter } from 'expo-router'
 import { tmdb, type CatalogData, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
-import { Hero } from './Hero'
+import { HeroCarousel, HERO_ITEMS } from './HeroCarousel'
 import { PosterRow } from './PosterRow'
 import { colors, rowHeading, safe, screenTitle } from './theme'
 
@@ -48,15 +48,19 @@ export function CatalogScreen({
     )
   }
 
-  const spotlight = data.trending.results.find((i) => i.backdrop_path && i.overview)
-  const trendingRest = spotlight
-    ? data.trending.results.filter((i) => i.id !== spotlight.id)
-    : data.trending.results
+  // Mismo criterio que la home: lo que rota arriba no se repite en la fila.
+  const heroIds = new Set(
+    data.trending.results
+      .filter((i) => i.backdrop_path && i.overview)
+      .slice(0, HERO_ITEMS)
+      .map((i) => i.id)
+  )
+  const trendingRest = data.trending.results.filter((i) => !heroIds.has(i.id))
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {spotlight && <Hero item={spotlight} />}
+        <HeroCarousel items={data.trending.results} />
 
         <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} />
         <PosterRow title="Populares" items={data.popular.results} onPressItem={openTitle} />

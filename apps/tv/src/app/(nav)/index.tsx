@@ -2,13 +2,18 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { useRouter } from 'expo-router'
 import { tmdb, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
-import { Hero } from '@/bmo/Hero'
+import { HeroCarousel, HERO_ITEMS } from '@/bmo/HeroCarousel'
 import { PosterRow } from '@/bmo/PosterRow'
-import { colors, rowHeading, safe, screenTitle } from '@/bmo/theme'
+import { RankedRow } from '@/bmo/RankedRow'
+import { BackdropRow } from '@/bmo/BackdropRow'
+import { colors, rowHeading, safe } from '@/bmo/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
   const { data, loading, error } = useAsync(() => tmdb.home())
+  // Las colecciones por plataforma van en su propia petición: son lentas y no
+  // deben frenar el primer pintado. La home ya se ve mientras estas llegan.
+  const { data: collections } = useAsync(() => tmdb.collections())
 
   // TMDB marca el tipo con media_type solo en trending; en las listas de
   // películas/series viene ausente, así que se deduce por la forma del item
@@ -37,26 +42,56 @@ export default function HomeScreen() {
     )
   }
 
-  // Mismo criterio que el cliente: el destacado es el primer trending que tenga
-  // backdrop y sinopsis, y se saca de la fila para no repetirlo justo debajo.
-  const spotlight = data.trending.results.find((i) => i.backdrop_path && i.overview)
-  const trendingRest = spotlight
-    ? data.trending.results.filter((i) => i.id !== spotlight.id)
-    : data.trending.results
+  // Los títulos que rotan arriba se sacan de la fila: tenerlos en el hero y a
+  // treinta píxeles en "Tendencias" hace que el catálogo parezca más chico de lo
+  // que es. El criterio para entrar al carrusel (backdrop + sinopsis) tiene que
+  // ser el mismo que usa HeroCarousel, si no los conjuntos no coinciden.
+  const heroIds = new Set(
+    data.trending.results
+      .filter((i) => i.backdrop_path && i.overview)
+      .slice(0, HERO_ITEMS)
+      .map((i) => i.id)
+  )
+  const trendingRest = data.trending.results.filter((i) => !heroIds.has(i.id))
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {spotlight && <Hero item={spotlight} />}
+        <HeroCarousel items={data.trending.results} />
 
-        {/* Sin título de pantalla: la barra de navegación ya marca la sección
-            activa, así que un "Inicio" en grande sería la misma información dos
-            veces. El teléfono sí lo lleva porque allá no hay barra visible. */}
+        {/* Sin título de pantalla: el rail ya marca la sección activa, así que
+            un "Inicio" en grande sería la misma información dos veces.
 
+            El orden de las filas no es casual. Alterna formatos (póster →
+            ranking → apaisada) para que el ojo tenga puntos de referencia al
+            bajar, y pone lo más fuerte arriba: Tendencias y Top 10 son lo que
+            decide si el usuario se queda. */}
         <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} />
+
+        <RankedRow title="Top 10 películas" items={data.topMovies.results} onPressItem={openTitle} />
+
+        {collections && (
+          <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} onPressItem={openTitle} />
+        )}
+
+        <BackdropRow title="Series del momento" items={data.popularSeries.results} onPressItem={openTitle} />
+
+        {collections && (
+          <>
+            <PosterRow title="Lo mejor de HBO Max" items={collections.hbo.results} onPressItem={openTitle} />
+            <BackdropRow title="Lo mejor de Apple TV+" items={collections.appletv.results} onPressItem={openTitle} />
+            <PosterRow title="Lo mejor de Disney+" items={collections.disney.results} onPressItem={openTitle} />
+            <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} onPressItem={openTitle} />
+          </>
+        )}
+
         <PosterRow title="Películas populares" items={data.popularMovies.results} onPressItem={openTitle} />
-        <PosterRow title="Series del momento" items={data.popularSeries.results} onPressItem={openTitle} />
-        <PosterRow title="Mejor valoradas" items={data.topMovies.results} onPressItem={openTitle} />
+
+        <BackdropRow title="Mejor valoradas" items={data.topMovies.results} onPressItem={openTitle} />
+
+        {/* Aire al final: sin esto la última fila queda pegada al borde inferior
+            y al enfocarla el scroll no tiene hacia dónde correrse. */}
+        <View style={styles.tail} />
       </ScrollView>
     </View>
   )
@@ -71,6 +106,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
+  tail: { height: safe.bottom },
   errorTitle: rowHeading,
   errorHint: { fontSize: 14, color: colors.textDim },
 })
