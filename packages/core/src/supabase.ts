@@ -15,11 +15,19 @@ export const supabaseConfigured = !!(SUPABASE_URL && SUPABASE_ANON_KEY)
 if (!supabaseConfigured) {
   console.warn(
     '⚠️  Supabase sin configurar — define EXPO_PUBLIC_SUPABASE_URL y ' +
-    'EXPO_PUBLIC_SUPABASE_ANON_KEY en apps/client/.env.local'
+    'EXPO_PUBLIC_SUPABASE_ANON_KEY en el .env.local de la app'
   )
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+// Placeholders sintácticamente válidos cuando falta configuración. Sin esto,
+// createClient('') tira "supabaseUrl is required" al importar el módulo, y como
+// medio árbol de imports pasa por acá, la app entera se cae en el arranque en
+// vez de arrancar sin sesión. El warning de arriba ya avisa qué pasa; quien
+// necesite saber si hay backend consulta `supabaseConfigured`.
+const url = SUPABASE_URL || 'http://localhost:54321'
+const key = SUPABASE_ANON_KEY || 'sin-configurar'
+
+export const supabase = createClient(url, key, {
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

@@ -17,6 +17,7 @@
     "@bmo/core": "file:../../packages/core",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@supabase/supabase-js": "^2.110.7",
     "expo": "~56.0.3",
     "expo-build-properties": "~56.0.13",
     "expo-constants": "~56.0.14",
