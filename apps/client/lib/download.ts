@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system'
+// expo-file-system v19 (SDK 54) movió esta API a /legacy; la nueva es File/Directory.
+import * as FileSystem from 'expo-file-system/legacy'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { API_URL } from './api'
 

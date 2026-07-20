@@ -6,7 +6,8 @@ import {
   type GestureResponderEvent,
 } from 'react-native'
 import { Image } from 'expo-image'
-import * as FileSystem from 'expo-file-system'
+// expo-file-system v19 (SDK 54) movió esta API a /legacy; la nueva es File/Directory.
+import * as FileSystem from 'expo-file-system/legacy'
 import { BlurView } from 'expo-blur'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useVideoPlayer, VideoView } from 'expo-video'

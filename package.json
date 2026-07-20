@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/api",
+    "apps/client",
+    "apps/proxy",
+    "packages/*"
   ],
   "overrides": {
     "@sinclair/typebox": "^0.34.0"

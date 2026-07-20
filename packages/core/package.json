@@ -1,0 +1,35 @@
+{
+  "name": "@bmo/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./tmdb": "./src/tmdb.ts",
+    "./api": "./src/api.ts",
+    "./supabase": "./src/supabase.ts",
+    "./auth": "./src/auth.tsx",
+    "./library": "./src/library.ts",
+    "./stream": "./src/stream.ts",
+    "./srt": "./src/srt.ts",
+    "./subtitleStyle": "./src/subtitleStyle.ts",
+    "./studios": "./src/studios.ts",
+    "./avatars": "./src/avatars.ts",
+    "./useAsync": "./src/useAsync.ts"
+  },
+  "//react-pin": "react va PINNEADO a la versión de apps/client a propósito. Con '*', bun resolvía react@19.2.3 (entra como peer opcional vía react-dom de @expo/metro-runtime y @radix-ui) y lo linkeaba acá; como apps/client resuelve subiendo hasta packages/core/node_modules, quedaban dos React en un mismo árbol → 'Invalid hook call' en auth.tsx. apps/tv no se ve afectado: usa npm con disableHierarchicalLookup y nunca lee este node_modules.",
+  "peerDependencies": {
+    "react": "19.1.0",
+    "react-native": "*",
+    "@react-native-async-storage/async-storage": "*",
+    "expo-constants": "*",
+    "react-native-url-polyfill": "*"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7"
+  }
+}
