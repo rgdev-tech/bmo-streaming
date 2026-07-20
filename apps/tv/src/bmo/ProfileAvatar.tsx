@@ -18,7 +18,10 @@ export function ProfileAvatar({
   selected?: boolean
 }) {
   const def = resolveAvatar(avatar)
-  const radius = Math.round(size * 0.16)
+  // Círculo pleno, no cuadrado redondeado: el arte de los avatares ya es una
+  // cara circular, así que un contenedor cuadrado dibujaba un marco oscuro
+  // alrededor que no aportaba nada y ensuciaba la fila.
+  const radius = size / 2
 
   return (
     <View
@@ -47,6 +50,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   idle: { borderWidth: 2, borderColor: 'rgba(255,255,255,0.12)' },
-  selected: { borderWidth: 3, borderColor: colors.focusBorder },
+  // El foco no se marca solo con un borde: sobre negro, un contorno blanco de
+  // 3 px a distancia de sillón es fácil de perder. La sombra lo despega del
+  // fondo y hace que la ficha se lea como levantada, no como pintada.
+  selected: {
+    borderWidth: 3,
+    borderColor: colors.focusBorder,
+    shadowColor: '#000',
+    shadowOpacity: 0.65,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 16,
+  },
   fallback: { color: colors.text },
 })

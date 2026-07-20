@@ -11,7 +11,11 @@ import { ProfileAvatar } from '@/bmo/ProfileAvatar'
 import { useFocusScale } from '@/bmo/useFocusScale'
 import { colors, heroTitle, layout, rowHeading, safe } from '@/bmo/theme'
 
-const AVATAR = 116
+// Grande a propósito. Esta pantalla no compite con nada: es un solo gesto, se
+// mira desde el sillón y es lo primero que ve el usuario al entrar. En TV, un
+// elemento único y pequeño en medio de una pantalla negra se lee como error de
+// maquetación, no como diseño sobrio.
+const AVATAR = 152
 
 function ProfileTile({
   profile,
@@ -51,9 +55,11 @@ function AddTile({ onPress }: { onPress: () => void }) {
       {({ focused }) => (
         <Animated.View style={[styles.tile, { transform: [{ scale }] }]}>
           <View style={[styles.add, focused && styles.addFocused, { width: AVATAR, height: AVATAR }]}>
-            <Ionicons name="add" size={44} color={focused ? '#000' : colors.textDim} />
+            <Ionicons name="add" size={54} color={focused ? '#000' : colors.textDim} />
           </View>
-          <Text style={[styles.tileName, focused && styles.tileNameFocused]}>Nuevo</Text>
+          <View style={styles.tileNameRow}>
+            <Text style={[styles.tileName, focused && styles.tileNameFocused]}>Nuevo perfil</Text>
+          </View>
         </Animated.View>
       )}
     </Pressable>
@@ -215,8 +221,20 @@ export default function ProfilesScreen() {
   // ── Elegir ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>¿Quién está viendo?</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tiles}>
+      <View style={styles.heading}>
+        <Text style={styles.pickTitle}>¿Quién está viendo?</Text>
+        <Text style={styles.pickSubtitle}>Elegí tu perfil con el control</Text>
+      </View>
+
+      {/* flexGrow + center en el contenido: con pocos perfiles la fila queda
+          centrada en pantalla, y si algún día son muchos el ScrollView se
+          activa solo sin que haya que cambiar nada. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tilesScroll}
+        contentContainerStyle={styles.tiles}
+      >
         {profiles.map((p) => (
           <ProfileTile key={p.id} profile={p} onPress={pick} />
         ))}
@@ -227,29 +245,64 @@ export default function ProfilesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center' },
+  // Toda la pantalla es un solo bloque centrado vertical y horizontalmente. Es
+  // la primera pantalla tras el login y no tiene nada más que mostrar: dejarla
+  // pegada arriba con media pantalla negra abajo se ve inacabado.
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   center: {
     flex: 1,
     backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { ...heroTitle, fontSize: 34, textAlign: 'center', marginBottom: 30 },
-  tiles: { paddingHorizontal: safe.horizontal, gap: 30, paddingVertical: 16 },
+  // Título de la pantalla de creación, que es de dos columnas y alineada a la
+  // izquierda — distinta de la de selección, que va centrada.
+  title: { ...heroTitle, fontSize: 32, marginBottom: 20 },
+  heading: { alignItems: 'center', marginBottom: 46 },
+  pickTitle: { ...heroTitle, fontSize: 40, textAlign: 'center' },
+  pickSubtitle: { fontSize: 15, color: colors.textDim, marginTop: 8 },
+
+  // El ScrollView no puede crecer a lo alto o empujaría el bloque fuera del
+  // centro: se le fija el alto del contenido.
+  tilesScroll: { flexGrow: 0 },
+  tiles: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    gap: 44,
+    paddingHorizontal: safe.horizontal,
+    // Aire para que las fichas crezcan al enfocarse sin recortarse.
+    paddingVertical: 14,
+  },
   tileHit: { alignItems: 'center' },
   tile: { alignItems: 'center', width: AVATAR },
-  tileNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
-  tileName: { fontSize: 14, fontWeight: '600', color: colors.textDim },
-  tileNameFocused: { color: colors.text },
+  tileNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
+  tileName: { fontSize: 17, fontWeight: '600', color: colors.textDim },
+  tileNameFocused: { color: colors.text, fontWeight: '700' },
   add: {
-    borderRadius: 18,
+    // Redondo como los avatares: si fuera cuadrado, la ficha de "nuevo" sería
+    // la única forma distinta de la fila y se leería como algo aparte.
+    borderRadius: AVATAR / 2,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderStyle: 'dashed',
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(120,120,128,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addFocused: { backgroundColor: '#fff', borderColor: '#fff', borderStyle: 'solid' },
+  addFocused: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 14,
+  },
   backRow: { marginTop: 24, flexDirection: 'row' },
 
   createWrap: {
