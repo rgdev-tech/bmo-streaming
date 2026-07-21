@@ -700,17 +700,21 @@ function Playback({
   // el menú abierto no tocamos nada (el menú navega solo).
   useTVEventHandler((evt) => {
     if (menuOpenRef.current) return
+    // Con el HUD VISIBLE, la cruceta navega los botones enfocables (lo maneja el
+    // motor de foco nativo de Android TV): acá NO tocamos las flechas. El modo
+    // rápido —seek con izq/der, revelar con arriba/abajo— es solo con el HUD
+    // OCULTO. Así, con el HUD a la vista, izq/der ya no hace seek de golpe y
+    // arriba no abre el menú: para eso enfocás la tuerca y das OK.
+    if (controlsVisibleRef.current) {
+      if (evt?.eventType === 'playPause') togglePlay()
+      return
+    }
     switch (evt?.eventType) {
-      // Seek: solo el badge chico, NO el HUD completo.
+      // Seek rápido (solo con HUD oculto): mueve el tiempo y muestra el badge,
+      // sin abrir el HUD completo.
       case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
       case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
-      case 'up':
-        // Primer up con el HUD oculto: solo mostrar el HUD. Con el HUD ya
-        // visible, el segundo up abre el menú (coherente con el hint "^⚙️"
-        // que aparece abajo a la derecha justo cuando el HUD está a la vista).
-        if (controlsVisibleRef.current) { revealControls(); setMenuTab('main') }
-        else revealControls()
-        break
+      case 'up': revealControls(); break
       case 'down': revealControls(); break
       case 'playPause': revealControls(); togglePlay(); break
     }
@@ -776,26 +780,32 @@ function Playback({
       {/* Capa de interacción: Pressable full-screen enfocable que retiene el foco
           (para que useTVEventHandler reciba la cruceta). OK = pausa + controles.
           Se remonta al cerrar el menú, recuperando el foco vía hasTVPreferredFocus. */}
-      {!menuTab && (
+      {!menuTab && !controlsVisible && (
         <Pressable
           style={StyleSheet.absoluteFill}
           hasTVPreferredFocus
-          onPress={() => { revealControls(); togglePlay() }}
+          onPress={revealControls}
         />
       )}
 
-      {/* HUD: puramente visual (pointerEvents none). El transporte va por cruceta. */}
+      {/* HUD: botones ENFOCABLES. Con el HUD visible la cruceta navega entre
+          ellos (izq/der) y OK activa; la tuerca abre el menú. El transporte
+          rápido por cruceta (seek, revelar) es solo con el HUD oculto (sink). */}
       {!menuTab && controlsVisible && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} />
-          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} />
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} pointerEvents="none" />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} pointerEvents="none" />
 
-          <View style={styles.controls}>
+          <View style={styles.controls} pointerEvents="box-none">
             <View style={styles.topRow}>
-              <HudIcon><Ionicons name="chevron-back" size={30} color="#fff" /></HudIcon>
+              <IconBtn
+                onFocus={revealControls}
+                onPress={onExit}
+                render={(f) => <Ionicons name="chevron-back" size={30} color={f ? '#000' : '#fff'} />}
+              />
             </View>
 
-            <View style={styles.bottomBlock}>
+            <View style={styles.bottomBlock} pointerEvents="box-none">
               <View style={styles.metaRow}>
                 <View style={styles.metaText}>
                   <Text style={styles.title} numberOfLines={1}>{baseTitle}</Text>
@@ -814,15 +824,30 @@ function Playback({
               <View style={styles.controlRow}>
                 <View style={styles.sideGroup} />
                 <View style={styles.centerGroup}>
-                  <HudIcon><MaterialIcons name="replay-10" size={34} color="#fff" /></HudIcon>
-                  <HudIcon big><Ionicons name={playing ? 'pause' : 'play'} size={40} color="#fff" /></HudIcon>
-                  <HudIcon><MaterialIcons name="forward-10" size={34} color="#fff" /></HudIcon>
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); seekBy(-SEEK_STEP) }}
+                    render={(f) => <MaterialIcons name="replay-10" size={34} color={f ? '#000' : '#fff'} />}
+                  />
+                  <IconBtn
+                    big
+                    hasTVPreferredFocus
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); togglePlay() }}
+                    render={(f) => <Ionicons name={playing ? 'pause' : 'play'} size={40} color={f ? '#000' : '#fff'} />}
+                  />
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); seekBy(SEEK_STEP) }}
+                    render={(f) => <MaterialIcons name="forward-10" size={34} color={f ? '#000' : '#fff'} />}
+                  />
                 </View>
                 <View style={[styles.sideGroup, styles.sideRight]}>
-                  <View style={styles.hudHint}>
-                    <Ionicons name="chevron-up" size={16} color={colors.textDim} />
-                    <Ionicons name="settings-outline" size={26} color="#fff" />
-                  </View>
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => setMenuTab('main')}
+                    render={(f) => <Ionicons name="settings-outline" size={28} color={f ? '#000' : '#fff'} />}
+                  />
                 </View>
               </View>
             </View>
@@ -1105,17 +1130,18 @@ function VlcPlayback({
   // el menú abierto no tocamos nada: el menú maneja su propia navegación.
   useTVEventHandler((evt) => {
     if (menuTabRef.current) return
+    // Con el HUD VISIBLE, la cruceta navega los botones enfocables (motor de foco
+    // nativo): acá NO tocamos las flechas, para que izq/der no siga haciendo seek
+    // ni arriba abra el menú. El modo rápido es solo con el HUD OCULTO.
+    if (controlsVisibleRef.current) {
+      if (evt?.eventType === 'playPause') togglePlay()
+      return
+    }
     switch (evt?.eventType) {
-      // Seek: solo el badge chico, NO el HUD completo.
+      // Seek rápido (solo con HUD oculto): mueve el tiempo y muestra el badge.
       case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
       case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
-      case 'up':
-        // Primer up con el HUD oculto: solo mostrar el HUD. Con el HUD ya
-        // visible, el segundo up abre el menú (coherente con el hint "^⚙️"
-        // que aparece abajo a la derecha justo cuando el HUD está a la vista).
-        if (controlsVisibleRef.current) { revealControls(); setMenuTab('main') }
-        else revealControls()
-        break
+      case 'up': revealControls(); break
       case 'down': revealControls(); break
       case 'playPause': revealControls(); togglePlay(); break
     }
@@ -1188,27 +1214,32 @@ function VlcPlayback({
           (así useTVEventHandler recibe la cruceta). OK = pausa + mostrar
           controles. Se remonta al cerrar el menú (condicional en !menuTab), así
           recupera el foco solo vía hasTVPreferredFocus. */}
-      {!menuTab && (
+      {!menuTab && !controlsVisible && (
         <Pressable
           style={StyleSheet.absoluteFill}
           hasTVPreferredFocus
-          onPress={() => { revealControls(); togglePlay() }}
+          onPress={revealControls}
         />
       )}
 
-      {/* HUD: puramente visual (pointerEvents none). El transporte se maneja por
-          cruceta directa, no tocando estos iconos. */}
+      {/* HUD: botones ENFOCABLES (igual que el motor expo-video). Con el HUD
+          visible la cruceta navega entre ellos y OK activa; la tuerca abre el
+          menú. El seek/revelar rápido por cruceta es solo con el HUD oculto. */}
       {!menuTab && controlsVisible && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} />
-          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} />
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} pointerEvents="none" />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} pointerEvents="none" />
 
-          <View style={styles.controls}>
+          <View style={styles.controls} pointerEvents="box-none">
             <View style={styles.topRow}>
-              <HudIcon><Ionicons name="chevron-back" size={30} color="#fff" /></HudIcon>
+              <IconBtn
+                onFocus={revealControls}
+                onPress={onExit}
+                render={(f) => <Ionicons name="chevron-back" size={30} color={f ? '#000' : '#fff'} />}
+              />
             </View>
 
-            <View style={styles.bottomBlock}>
+            <View style={styles.bottomBlock} pointerEvents="box-none">
               <View style={styles.metaRow}>
                 <View style={styles.metaText}>
                   <Text style={styles.title} numberOfLines={1}>{baseTitle}</Text>
@@ -1225,15 +1256,30 @@ function VlcPlayback({
               <View style={styles.controlRow}>
                 <View style={styles.sideGroup} />
                 <View style={styles.centerGroup}>
-                  <HudIcon><MaterialIcons name="replay-10" size={34} color="#fff" /></HudIcon>
-                  <HudIcon big><Ionicons name={paused ? 'play' : 'pause'} size={40} color="#fff" /></HudIcon>
-                  <HudIcon><MaterialIcons name="forward-10" size={34} color="#fff" /></HudIcon>
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); seekBy(-SEEK_STEP) }}
+                    render={(f) => <MaterialIcons name="replay-10" size={34} color={f ? '#000' : '#fff'} />}
+                  />
+                  <IconBtn
+                    big
+                    hasTVPreferredFocus
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); togglePlay() }}
+                    render={(f) => <Ionicons name={paused ? 'play' : 'pause'} size={40} color={f ? '#000' : '#fff'} />}
+                  />
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => { revealControls(); seekBy(SEEK_STEP) }}
+                    render={(f) => <MaterialIcons name="forward-10" size={34} color={f ? '#000' : '#fff'} />}
+                  />
                 </View>
                 <View style={[styles.sideGroup, styles.sideRight]}>
-                  <View style={styles.hudHint}>
-                    <Ionicons name="chevron-up" size={16} color={colors.textDim} />
-                    <Ionicons name="settings-outline" size={26} color="#fff" />
-                  </View>
+                  <IconBtn
+                    onFocus={revealControls}
+                    onPress={() => setMenuTab('main')}
+                    render={(f) => <Ionicons name="settings-outline" size={28} color={f ? '#000' : '#fff'} />}
+                  />
                 </View>
               </View>
             </View>
