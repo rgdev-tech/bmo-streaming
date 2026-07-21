@@ -185,7 +185,11 @@ export default function PlayerScreen() {
   const meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'> = {
     id: Number(id),
     media_type: isTv ? 'tv' : 'movie',
-    title: params.title ?? '',
+    // Guardamos SOLO el título base, sin el sufijo "· T_:E_": la temporada y el
+    // episodio ya van en season/episode. Si lo guardáramos con sufijo, cada
+    // pantalla que lo re-muestra le agrega otro y se acumula ("· T9:E2 · T9:E2…").
+    // El regex saca uno o más sufijos al final (limpia también títulos ya viciados).
+    title: (params.title ?? '').replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, ''),
     poster_path: params.poster ?? null,
     backdrop_path: params.backdrop ?? null,
     season: seasonN,
@@ -693,7 +697,7 @@ function Playback({
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
   // El título viene con el sufijo "· T_:E_" desde el detalle; lo separamos para
   // mostrar título y episodio en dos líneas (como la referencia).
-  const baseTitle = title.replace(/\s*·\s*T\d+:E\d+\s*$/, '')
+  const baseTitle = title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
 
   return (
@@ -1019,11 +1023,24 @@ function VlcPlayback({
     onSourceFailed(info.source, e?.error?.errorString ?? 'Error de reproducción (VLC)')
   }, [info.source, onSourceFailed])
 
+  // VLC emite EndReached (→ onEnd) NO solo al terminar el contenido, sino también
+  // cuando reemplazamos el media en un swap de fuente (fallback / cambio de audio).
+  // Si saliéramos siempre, cambiar de audio cerraba el reproductor. Salimos solo
+  // si de verdad estamos al final (posición pegada a la duración).
+  const handleEnd = useCallback(() => {
+    const { time, duration: d } = progressRef.current
+    if (d > 0 && time >= d - 1.5) onExit()
+  }, [onExit])
+
   // Selección de pistas → props del componente. VLC usa ids numéricos y -1 apaga
   // los subtítulos nativos (modos 'external'/'none', que van por overlay o nada).
   const selectedAudioTrack = currentAudioId != null ? Number(currentAudioId) : undefined
-  const selectedTextTrack =
-    subMode === 'external' || subMode === 'none' ? -1 : Number(subMode)
+  const nativeSubActive = subMode !== 'external' && subMode !== 'none'
+  const selectedTextTrack = nativeSubActive ? Number(subMode) : -1
+  // Sincronía de la pista de subtítulo NATIVA vía spuDelay de VLC. El prop nativo
+  // toma segundos ENTEROS (los pasa a microsegundos), así que redondeamos; el
+  // overlay .srt (modo 'external') sigue usando subOffset con precisión fina.
+  const textTrackDelay = nativeSubActive ? Math.round(subOffset) : 0
 
   const selectAudioTrack = useCallback((t: AudioTrack) => {
     if (t.id != null) setCurrentAudioId(t.id)
@@ -1064,7 +1081,7 @@ function VlcPlayback({
   const remaining = Math.max(0, duration - position)
   // El overlay JS solo se dibuja en modo 'external'; las pistas nativas las pinta VLC.
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
-  const baseTitle = title.replace(/\s*·\s*T\d+:E\d+\s*$/, '')
+  const baseTitle = title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
 
   return (
@@ -1083,11 +1100,12 @@ function VlcPlayback({
         progressUpdateInterval={500}
         selectedAudioTrack={selectedAudioTrack}
         selectedTextTrack={selectedTextTrack}
+        textTrackDelay={textTrackDelay}
         onLoad={handleLoad}
         onProgress={handleProgress}
         onBuffer={(e) => setBuffering(e.isBuffering)}
         onError={handleError}
-        onEnd={onExit}
+        onEnd={handleEnd}
       />
 
       {/* Overlay del subtítulo español (dibujado por JS, igual que en expo-video). */}
@@ -1184,7 +1202,11 @@ function VlcPlayback({
         <OptionsMenu
           tab={menuTab}
           onTab={setMenuTab}
-          hasStyleTab={srtCues.length > 0}
+          // En VLC el Estilo/Sincronía sirve también con pistas nativas (la
+          // sincronía las ajusta vía spuDelay), así que lo mostramos si hay
+          // cualquier subtítulo, no solo el .srt externo.
+          hasStyleTab={srtCues.length > 0 || subtitleTracks.length > 0}
+          syncNative
           audioLang={audioLang}
           hasLatinoAlternative={info.hasLatinoAlternative}
           audioTracks={audioTracks}
@@ -1199,7 +1221,7 @@ function VlcPlayback({
           activeSourceIndex={activeSourceIndex}
           filled={filled}
           onSetFilled={setFilled}
-          onChangeAudioLang={onChangeAudioLang}
+          onChangeAudioLang={(lang) => { setMenuTab(null); onChangeAudioLang(lang) }}
           onSelectAudioTrack={selectAudioTrack}
           onChooseSubMode={chooseSubMode}
           onChangeSubStyle={changeSubStyle}
@@ -1219,7 +1241,7 @@ function VlcPlayback({
 // (Estilo/Calidad/Pantalla) y la X de cerrar: tocar un icono reemplaza las
 // columnas por ese panel; tocarlo de nuevo (o Atrás) vuelve a las columnas.
 function OptionsMenu({
-  tab, onTab, hasStyleTab,
+  tab, onTab, hasStyleTab, syncNative,
   audioLang, hasLatinoAlternative, audioTracks, currentAudioId,
   subtitleTracks, hasExternalSubs, subMode, subStyle, subOffset,
   sources, sourcesLoading, activeSourceIndex, filled, onSetFilled,
@@ -1229,6 +1251,9 @@ function OptionsMenu({
   tab: MenuTabKey
   onTab: (t: MenuTabKey) => void
   hasStyleTab: boolean
+  // Motor VLC: la sincronía ajusta también las pistas nativas (spuDelay). En
+  // expo-video la sincronía solo mueve el overlay .srt.
+  syncNative?: boolean
   audioLang: AudioLang
   hasLatinoAlternative: boolean
   audioTracks: AudioTrack[]
@@ -1312,6 +1337,7 @@ function OptionsMenu({
                 subStyle={subStyle}
                 subOffset={subOffset}
                 subMode={subMode}
+                syncNative={syncNative}
                 onChangeSubStyle={onChangeSubStyle}
                 onBumpOffset={onBumpOffset}
               />
@@ -1427,14 +1453,16 @@ function SubsTabContent({
 }
 
 function StyleTabContent({
-  subStyle, subOffset, subMode, onChangeSubStyle, onBumpOffset,
+  subStyle, subOffset, subMode, syncNative, onChangeSubStyle, onBumpOffset,
 }: {
   subStyle: SubtitleStyle
   subOffset: number
   subMode: 'external' | 'none' | string
+  syncNative?: boolean
   onChangeSubStyle: (patch: Partial<SubtitleStyle>) => void
   onBumpOffset: (delta: number) => void
 }) {
+  const nativeSubActive = typeof subMode === 'string' && subMode !== 'external' && subMode !== 'none'
   return (
     <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.menuList}>
       <ChipRow
@@ -1482,10 +1510,11 @@ function StyleTabContent({
       <Text style={styles.menuHint}>
         Si el texto va adelantado, subí el valor. El número del medio vuelve a 0.
       </Text>
-      {typeof subMode === 'string' && subMode !== 'external' && subMode !== 'none' && (
+      {nativeSubActive && (
         <Text style={styles.menuNotice}>
-          Estás viendo una pista incrustada: estos ajustes solo se aplican al
-          subtítulo en español que descargamos.
+          {syncNative
+            ? 'Estás viendo una pista incrustada: el tamaño/color/fondo solo aplican al subtítulo en español que descargamos; la sincronía sí ajusta esta pista (en pasos de 1 s).'
+            : 'Estás viendo una pista incrustada: estos ajustes solo se aplican al subtítulo en español que descargamos.'}
         </Text>
       )}
     </ScrollView>

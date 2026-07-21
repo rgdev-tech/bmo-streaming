@@ -73,10 +73,13 @@ export default function BibliotecaScreen() {
       params: {
         type: p.media_type,
         id: String(p.id),
+        // Limpiamos cualquier sufijo "· T_:E_" ya presente en el título guardado
+        // (datos viejos viciados) antes de agregar el del episodio actual, para
+        // que no se acumule.
         title:
           p.season != null && p.episode != null
-            ? `${p.title} · T${p.season}:E${p.episode}`
-            : p.title,
+            ? `${p.title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')} · T${p.season}:E${p.episode}`
+            : p.title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, ''),
         poster: p.poster_path ?? '',
         backdrop: p.backdrop_path ?? '',
         ...(p.season != null ? { season: String(p.season), episode: String(p.episode) } : {}),

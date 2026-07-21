@@ -1,3 +1,4 @@
+import { useCallback, useRef } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useRouter } from 'expo-router'
 import { tmdb, type MediaItem } from '@bmo/core/tmdb'
@@ -6,10 +7,17 @@ import { HeroCarousel, HERO_ITEMS } from '@/bmo/HeroCarousel'
 import { PosterRow } from '@/bmo/PosterRow'
 import { RankedRow } from '@/bmo/RankedRow'
 import { BackdropRow } from '@/bmo/BackdropRow'
+import { RowScrollContext, ROW_SCROLL_TOP_INSET } from '@/bmo/RowScrollContext'
 import { colors, rowHeading, safe } from '@/bmo/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
+  const scrollRef = useRef<ScrollView>(null)
+  // Lleva la fila enfocada a una altura fija (como Apple TV), en vez de dejar que
+  // el auto-scroll nativo la empuje contra el borde inferior con pósters cortados.
+  const scrollRowIntoView = useCallback((y: number) => {
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
+  }, [])
   const { data, loading, error } = useAsync(() => tmdb.home())
   // Las colecciones por plataforma van en su propia petición: son lentas y no
   // deben frenar el primer pintado. La home ya se ve mientras estas llegan.
@@ -56,7 +64,8 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <RowScrollContext.Provider value={scrollRowIntoView}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <HeroCarousel items={data.trending.results} />
 
         {/* Sin título de pantalla: el rail ya marca la sección activa, así que
@@ -93,6 +102,7 @@ export default function HomeScreen() {
             y al enfocarla el scroll no tiene hacia dónde correrse. */}
         <View style={styles.tail} />
       </ScrollView>
+      </RowScrollContext.Provider>
     </View>
   )
 }
@@ -106,7 +116,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
-  tail: { height: safe.bottom },
+  // Alto para que la última fila también pueda subir a la altura fija del foco
+  // (si no, no habría contenido debajo hacia donde correr el scroll).
+  tail: { height: safe.bottom + 320 },
   errorTitle: rowHeading,
   errorHint: { fontSize: 14, color: colors.textDim },
 })

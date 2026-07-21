@@ -1,10 +1,17 @@
+import { useRef } from 'react'
 import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
 import { useFocusScale } from './useFocusScale'
+import { useRowFocusScroll } from './useRowFocusScroll'
+import { useRowScroll } from './RowScrollContext'
 import { colors, layout, rowHeading, safe } from './theme'
 
 const NUM_WIDTH = 52
+// El contentContainer arranca corrido a la izquierda (el número sobresale del
+// póster); el scroll al foco usa el mismo offset para que el ítem enfocado
+// descanse donde descansa el #1.
+const RANKED_LEFT = safe.horizontal - NUM_WIDTH + 14
 
 /**
  * Fila de Top 10 con el número gigante detrás del póster.
@@ -17,16 +24,18 @@ function RankedCard({
   item,
   rank,
   onPress,
+  onFocus,
 }: {
   item: MediaItem
   rank: number
   onPress?: (item: MediaItem) => void
+  onFocus?: () => void
 }) {
-  const { scale, onFocus, onBlur } = useFocusScale()
+  const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
   const uri = posterUrl(item.poster_path, 'w500')
 
   return (
-    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
+    <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
       {({ focused }) => (
         <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
           {/* El número va debajo del póster y sobresale por la izquierda; el
@@ -58,20 +67,31 @@ export function RankedRow({
   items: MediaItem[]
   onPressItem?: (item: MediaItem) => void
 }) {
+  const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>(RANKED_LEFT)
+  const rowScroll = useRowScroll()
+  const rowY = useRef(0)
+
   if (!items?.length) return null
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
+        ref={ref}
         horizontal
         data={items.slice(0, 10)}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item, index }) => (
-          <RankedCard item={item} rank={index + 1} onPress={onPressItem} />
+          <RankedCard
+            item={item}
+            rank={index + 1}
+            onPress={onPressItem}
+            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+          />
         )}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={6}
       />
     </View>

@@ -43,7 +43,7 @@ function ContinueCard({
 
           <View style={styles.info}>
             <Text style={styles.title} numberOfLines={1}>
-              {item.title}
+              {item.title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')}
             </Text>
             <Text style={styles.meta} numberOfLines={1}>
               {item.season != null && item.episode != null

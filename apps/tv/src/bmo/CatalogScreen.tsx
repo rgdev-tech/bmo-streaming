@@ -1,9 +1,11 @@
+import { useCallback, useRef } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useRouter } from 'expo-router'
 import { tmdb, type CatalogData, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
 import { HeroCarousel, HERO_ITEMS } from './HeroCarousel'
 import { PosterRow } from './PosterRow'
+import { RowScrollContext, ROW_SCROLL_TOP_INSET } from './RowScrollContext'
 import { colors, rowHeading, safe, screenTitle } from './theme'
 
 /**
@@ -19,6 +21,10 @@ export function CatalogScreen({
   kind: 'movies' | 'series'
 }) {
   const router = useRouter()
+  const scrollRef = useRef<ScrollView>(null)
+  const scrollRowIntoView = useCallback((y: number) => {
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
+  }, [])
   const { data, loading, error } = useAsync<CatalogData>(
     () => (kind === 'movies' ? tmdb.movies() : tmdb.series()),
     [kind]
@@ -59,7 +65,8 @@ export function CatalogScreen({
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <RowScrollContext.Provider value={scrollRowIntoView}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <HeroCarousel items={data.trending.results} />
 
         <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} />
@@ -76,7 +83,11 @@ export function CatalogScreen({
         {data.genres?.map((g) => (
           <PosterRow key={g.name} title={g.name} items={g.results} onPressItem={openTitle} />
         ))}
+
+        {/* Aire al final: deja subir la última fila a la altura fija del foco. */}
+        <View style={styles.tail} />
       </ScrollView>
+      </RowScrollContext.Provider>
     </View>
   )
 }
@@ -92,4 +103,5 @@ const styles = StyleSheet.create({
   },
   errorTitle: rowHeading,
   errorHint: { fontSize: 14, color: colors.textDim },
+  tail: { height: safe.bottom + 320 },
 })

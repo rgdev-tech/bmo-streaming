@@ -1,8 +1,11 @@
+import { useRef } from 'react'
 import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { backdropUrl, posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
 import { useFocusScale } from './useFocusScale'
+import { useRowFocusScroll } from './useRowFocusScroll'
+import { useRowScroll } from './RowScrollContext'
 import { colors, layout, rowHeading, safe } from './theme'
 
 /**
@@ -18,16 +21,18 @@ import { colors, layout, rowHeading, safe } from './theme'
 function BackdropCard({
   item,
   onPress,
+  onFocus,
 }: {
   item: MediaItem
   onPress?: (item: MediaItem) => void
+  onFocus?: () => void
 }) {
-  const { scale, onFocus, onBlur } = useFocusScale(1.05)
+  const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
   // Si no hay backdrop se cae al póster antes que dejar un hueco gris.
   const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
 
   return (
-    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
+    <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
       {({ focused }) => (
         <Animated.View
           style={[styles.card, focused && styles.cardFocused, { transform: [{ scale }] }]}
@@ -58,18 +63,30 @@ export function BackdropRow({
   items: MediaItem[]
   onPressItem?: (item: MediaItem) => void
 }) {
+  const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>()
+  const rowScroll = useRowScroll()
+  const rowY = useRef(0)
+
   if (!items?.length) return null
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
+        ref={ref}
         horizontal
         data={items}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <BackdropCard item={item} onPress={onPressItem} />}
+        renderItem={({ item, index }) => (
+          <BackdropCard
+            item={item}
+            onPress={onPressItem}
+            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+          />
+        )}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={5}
         windowSize={5}
       />

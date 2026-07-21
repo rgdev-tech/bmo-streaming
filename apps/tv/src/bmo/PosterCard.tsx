@@ -15,10 +15,13 @@ import { colors, layout } from './theme'
 export function PosterCard({
   item,
   onPress,
+  onFocus,
   inGrid,
 }: {
   item: MediaItem
   onPress?: (item: MediaItem) => void
+  /** Aviso al padre de que esta tarjeta tomó foco (para el scroll de la fila). */
+  onFocus?: () => void
   /**
    * En cuadrícula la separación la pone el contenedor (gap), no la tarjeta.
    * Con el margen propio, la última columna arrastra un margen derecho que no
@@ -26,12 +29,12 @@ export function PosterCard({
    */
   inGrid?: boolean
 }) {
-  const { scale, onFocus, onBlur } = useFocusScale()
+  const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
   const uri = posterUrl(item.poster_path, 'w500')
 
   return (
     <Pressable
-      onFocus={onFocus}
+      onFocus={() => { onScaleFocus(); onFocus?.() }}
       onBlur={onBlur}
       onPress={() => onPress?.(item)}
       style={inGrid ? undefined : styles.pressable}

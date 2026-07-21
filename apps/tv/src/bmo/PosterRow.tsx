@@ -1,6 +1,9 @@
+import { useRef } from 'react'
 import { FlatList, StyleSheet, Text, View } from 'react-native'
 import type { MediaItem } from '@bmo/core/tmdb'
 import { PosterCard } from './PosterCard'
+import { useRowFocusScroll } from './useRowFocusScroll'
+import { useRowScroll } from './RowScrollContext'
 import { rowHeading, layout, safe } from './theme'
 
 /**
@@ -20,18 +23,30 @@ export function PosterRow({
   items: MediaItem[]
   onPressItem?: (item: MediaItem) => void
 }) {
+  const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>()
+  const rowScroll = useRowScroll()
+  const rowY = useRef(0)
+
   if (!items?.length) return null
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
+        ref={ref}
         horizontal
         data={items}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <PosterCard item={item} onPress={onPressItem} />}
+        renderItem={({ item, index }) => (
+          <PosterCard
+            item={item}
+            onPress={onPressItem}
+            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+          />
+        )}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={8}
         windowSize={5}
       />
