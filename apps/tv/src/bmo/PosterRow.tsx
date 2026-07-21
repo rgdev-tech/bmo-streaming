@@ -1,5 +1,4 @@
-import { useRef } from 'react'
-import { FlatList, StyleSheet, Text, View } from 'react-native'
+import { FlatList, StyleSheet, Text, TVFocusGuideView } from 'react-native'
 import type { MediaItem } from '@bmo/core/tmdb'
 import { PosterCard } from './PosterCard'
 import { useRowFocusScroll } from './useRowFocusScroll'
@@ -18,19 +17,24 @@ export function PosterRow({
   title,
   items,
   onPressItem,
+  size = 'normal',
 }: {
   title: string
   items: MediaItem[]
   onPressItem?: (item: MediaItem) => void
+  /** 'large' = fila destacada con pósters más grandes. */
+  size?: 'normal' | 'large'
 }) {
   const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>()
   const rowScroll = useRowScroll()
-  const rowY = useRef(0)
 
   if (!items?.length) return null
 
   return (
-    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
+    // trapFocusRight: al llegar al final de la fila, derecha no salta a otra fila
+    // (no hay nada a la derecha; sin esto el foco se iba a la fila diagonal). La
+    // izquierda queda libre para poder ir al rail del menú.
+    <TVFocusGuideView style={styles.row} trapFocusRight>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
         ref={ref}
@@ -40,8 +44,9 @@ export function PosterRow({
         renderItem={({ item, index }) => (
           <PosterCard
             item={item}
+            size={size}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+            onFocus={() => { focusItem(index); rowScroll() }}
           />
         )}
         showsHorizontalScrollIndicator={false}
@@ -50,7 +55,7 @@ export function PosterRow({
         initialNumToRender={8}
         windowSize={5}
       />
-    </View>
+    </TVFocusGuideView>
   )
 }
 

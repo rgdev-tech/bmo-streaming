@@ -1,12 +1,13 @@
-import { useCallback, useRef } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { useRouter } from 'expo-router'
 import { tmdb, type CatalogData, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
 import { HeroCarousel, HERO_ITEMS } from './HeroCarousel'
 import { PosterRow } from './PosterRow'
-import { RowScrollContext, ROW_SCROLL_TOP_INSET } from './RowScrollContext'
-import { colors, rowHeading, safe, screenTitle } from './theme'
+import { RankedRow } from './RankedRow'
+import { BackdropRow } from './BackdropRow'
+import { RowsList, type RowSection } from './RowsList'
+import { colors, rowHeading } from './theme'
 
 /**
  * Pantalla de catálogo, compartida por Películas y Series. Las dos consumen la
@@ -21,15 +22,6 @@ export function CatalogScreen({
   kind: 'movies' | 'series'
 }) {
   const router = useRouter()
-  const scrollRef = useRef<ScrollView>(null)
-  // Dedup: solo re-scrollea al cambiar de fila (evita el "tirón" vertical en cada
-  // movimiento horizontal). Ver nota en app/(nav)/index.tsx.
-  const lastRowY = useRef(-1)
-  const scrollRowIntoView = useCallback((y: number) => {
-    if (lastRowY.current === y) return
-    lastRowY.current = y
-    scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
-  }, [])
   const { data, loading, error } = useAsync<CatalogData>(
     () => (kind === 'movies' ? tmdb.movies() : tmdb.series()),
     [kind]
@@ -68,31 +60,33 @@ export function CatalogScreen({
   )
   const trendingRest = data.trending.results.filter((i) => !heroIds.has(i.id))
 
+  // Formatos intercalados (póster grande → Top 10 → apaisada → póster…) como
+  // secciones de la lista virtualizada, para que la pantalla no sea la misma
+  // tarjeta repetida hacia abajo. Solo se incluye lo que tiene contenido.
+  const sections: RowSection[] = [
+    { key: 'tendencias', node: <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} size="large" /> },
+    { key: 'top10', node: <RankedRow title={`Top 10 en ${kind === 'movies' ? 'películas' : 'series'}`} items={data.popular.results} onPressItem={openTitle} /> },
+    { key: 'toprated', node: <BackdropRow title="Mejor valoradas" items={data.topRated.results} onPressItem={openTitle} /> },
+  ]
+  if (data.recent?.results?.length) {
+    sections.push({ key: 'recent', node: <PosterRow title="Novedades" items={data.recent.results} onPressItem={openTitle} /> })
+  }
+  if (data.classics?.results?.length) {
+    sections.push({ key: 'classics', node: <BackdropRow title="Clásicos" items={data.classics.results} onPressItem={openTitle} /> })
+  }
+  // Filas por género. Cada tercera va apaisada para seguir cortando el ritmo.
+  data.genres?.forEach((g, i) => {
+    sections.push({
+      key: `genre-${g.name}`,
+      node: i % 3 === 2
+        ? <BackdropRow title={g.name} items={g.results} onPressItem={openTitle} />
+        : <PosterRow title={g.name} items={g.results} onPressItem={openTitle} />,
+    })
+  })
+
   return (
     <View style={styles.container}>
-      <RowScrollContext.Provider value={scrollRowIntoView}>
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
-        <HeroCarousel items={data.trending.results} />
-
-        <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} />
-        <PosterRow title="Populares" items={data.popular.results} onPressItem={openTitle} />
-        <PosterRow title="Mejor valoradas" items={data.topRated.results} onPressItem={openTitle} />
-        {!!data.recent?.results?.length && (
-          <PosterRow title="Novedades" items={data.recent.results} onPressItem={openTitle} />
-        )}
-        {!!data.classics?.results?.length && (
-          <PosterRow title="Clásicos" items={data.classics.results} onPressItem={openTitle} />
-        )}
-
-        {/* Filas por género. Vienen del API ya agrupadas. */}
-        {data.genres?.map((g) => (
-          <PosterRow key={g.name} title={g.name} items={g.results} onPressItem={openTitle} />
-        ))}
-
-        {/* Aire al final: deja subir la última fila a la altura fija del foco. */}
-        <View style={styles.tail} />
-      </ScrollView>
-      </RowScrollContext.Provider>
+      <RowsList header={<HeroCarousel items={data.trending.results} />} sections={sections} />
     </View>
   )
 }
@@ -108,5 +102,4 @@ const styles = StyleSheet.create({
   },
   errorTitle: rowHeading,
   errorHint: { fontSize: 14, color: colors.textDim },
-  tail: { height: safe.bottom + 320 },
 })

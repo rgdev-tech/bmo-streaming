@@ -6,7 +6,10 @@ export function posterUrl(path: string | null, size: 'w342' | 'w500' = 'w342') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
-export function backdropUrl(path: string | null, size: 'w780' | 'w1280' | 'original' = 'w780') {
+export function backdropUrl(
+  path: string | null,
+  size: 'w300' | 'w780' | 'w1280' | 'original' = 'w780'
+) {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 

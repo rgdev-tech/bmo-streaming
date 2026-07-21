@@ -1,5 +1,4 @@
-import { useRef } from 'react'
-import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated, FlatList, Pressable, StyleSheet, Text, TVFocusGuideView, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
@@ -20,7 +19,7 @@ function ContinueCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
-  const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
+  const uri = backdropUrl(item.backdrop_path, 'w300') ?? posterUrl(item.poster_path, 'w342')
 
   // La duración puede venir en 0 si el reproductor guardó antes de conocerla;
   // sin este resguardo la barra saldría con NaN de ancho y no se dibujaría.
@@ -32,7 +31,7 @@ function ContinueCard({
       {({ focused }) => (
         <Animated.View style={[styles.card, focused && styles.cardFocused, { transform: [{ scale }] }]}>
           {uri && (
-            <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+            <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={`${item.media_type}-${item.id}`} />
           )}
           <LinearGradient
             colors={['transparent', 'rgba(0,0,0,0.9)']}
@@ -84,12 +83,11 @@ export function ContinueRow({
 }) {
   const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<Progress>()
   const rowScroll = useRowScroll()
-  const rowY = useRef(0)
 
   if (!items?.length) return null
 
   return (
-    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
+    <TVFocusGuideView style={styles.row} trapFocusRight>
       <Text style={styles.heading}>Seguir viendo</Text>
       <FlatList
         ref={ref}
@@ -100,7 +98,7 @@ export function ContinueRow({
           <ContinueCard
             item={item}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+            onFocus={() => { focusItem(index); rowScroll() }}
           />
         )}
         showsHorizontalScrollIndicator={false}
@@ -108,7 +106,7 @@ export function ContinueRow({
         onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={5}
       />
-    </View>
+    </TVFocusGuideView>
   )
 }
 

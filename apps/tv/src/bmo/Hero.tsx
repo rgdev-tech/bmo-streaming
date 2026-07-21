@@ -19,7 +19,10 @@ export function Hero({ item }: { item: MediaItem }) {
   // El héroe ocupa ~58% del alto: deja asomar la primera fila de pósters, que es
   // la pista visual de que la pantalla sigue hacia abajo.
   const heroHeight = Math.round(height * 0.58)
-  const uri = backdropUrl(item.backdrop_path, 'original')
+  // w1280 en vez de 'original': el panel es ~1920 px de ancho, así que 'original'
+  // (a menudo 3840 px) es un decode enorme e inútil que hacía "pesar" cada
+  // rotación del carrusel. w1280 se ve bien a distancia de living y pesa ~1/4.
+  const uri = backdropUrl(item.backdrop_path, 'w1280')
 
   // El logo va en su propia petición: TMDB no lo trae en los listados, hay que
   // pedirlo por título. Si falla o no existe, queda el título en texto — muchos
@@ -43,7 +46,7 @@ export function Hero({ item }: { item: MediaItem }) {
   return (
     <View style={[styles.hero, { height: heroHeight }]}>
       {uri && (
-        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} />
+        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
       )}
 
       {/* Dos degradados en cruz: el vertical funde el borde inferior con las

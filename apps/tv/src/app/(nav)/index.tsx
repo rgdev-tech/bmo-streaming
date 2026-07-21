@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react'
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useCallback, useState } from 'react'
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { tmdb, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
@@ -9,22 +9,11 @@ import { ContinueRow } from '@/bmo/ContinueRow'
 import { PosterRow } from '@/bmo/PosterRow'
 import { RankedRow } from '@/bmo/RankedRow'
 import { BackdropRow } from '@/bmo/BackdropRow'
-import { RowScrollContext, ROW_SCROLL_TOP_INSET } from '@/bmo/RowScrollContext'
-import { colors, rowHeading, safe } from '@/bmo/theme'
+import { RowsList, type RowSection } from '@/bmo/RowsList'
+import { colors, rowHeading } from '@/bmo/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
-  const scrollRef = useRef<ScrollView>(null)
-  // Lleva la fila enfocada a una altura fija (como Apple TV), en vez de dejar que
-  // el auto-scroll nativo la empuje contra el borde inferior con pósters cortados.
-  // Dedup: solo re-scrollea al CAMBIAR de fila. Sin esto, cada movimiento
-  // horizontal disparaba un scroll vertical redundante → se sentía "a tirones".
-  const lastRowY = useRef(-1)
-  const scrollRowIntoView = useCallback((y: number) => {
-    if (lastRowY.current === y) return
-    lastRowY.current = y
-    scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
-  }, [])
   const { data, loading, error } = useAsync(() => tmdb.home())
 
   // "Seguir viendo" arriba de todo: al volver de reproducir algo, este effect
@@ -108,51 +97,32 @@ export default function HomeScreen() {
   )
   const trendingRest = data.trending.results.filter((i) => !heroIds.has(i.id))
 
+  // Filas como secciones para la lista virtualizada. Solo se incluye lo que tiene
+  // contenido (así los índices quedan limpios para el scroll-al-foco). El orden
+  // alterna formatos (póster grande → ranking → apaisada) para dar puntos de
+  // referencia al bajar y poner lo más fuerte arriba.
+  const sections: RowSection[] = []
+  if (watching.length) {
+    sections.push({ key: 'continue', node: <ContinueRow items={watching} onPressItem={resume} /> })
+  }
+  sections.push({ key: 'tendencias', node: <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} size="large" /> })
+  sections.push({ key: 'top10', node: <RankedRow title="Top 10 películas" items={data.topMovies.results} onPressItem={openTitle} /> })
+  if (collections) {
+    sections.push({ key: 'netflix', node: <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} onPressItem={openTitle} /> })
+  }
+  sections.push({ key: 'popseries', node: <BackdropRow title="Series del momento" items={data.popularSeries.results} onPressItem={openTitle} /> })
+  if (collections) {
+    sections.push({ key: 'hbo', node: <PosterRow title="Lo mejor de HBO Max" items={collections.hbo.results} onPressItem={openTitle} /> })
+    sections.push({ key: 'appletv', node: <BackdropRow title="Lo mejor de Apple TV+" items={collections.appletv.results} onPressItem={openTitle} /> })
+    sections.push({ key: 'disney', node: <PosterRow title="Lo mejor de Disney+" items={collections.disney.results} onPressItem={openTitle} /> })
+    sections.push({ key: 'prime', node: <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} onPressItem={openTitle} /> })
+  }
+  sections.push({ key: 'popmovies', node: <PosterRow title="Películas populares" items={data.popularMovies.results} onPressItem={openTitle} /> })
+  sections.push({ key: 'topmovies', node: <BackdropRow title="Mejor valoradas" items={data.topMovies.results} onPressItem={openTitle} /> })
+
   return (
     <View style={styles.container}>
-      <RowScrollContext.Provider value={scrollRowIntoView}>
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
-        <HeroCarousel items={data.trending.results} />
-
-        {/* Seguir viendo primero: si el usuario dejó algo a medias, es lo que más
-            probablemente quiera retomar al abrir la app. Solo aparece si hay algo. */}
-        <ContinueRow items={watching} onPressItem={resume} />
-
-        {/* Sin título de pantalla: el rail ya marca la sección activa, así que
-            un "Inicio" en grande sería la misma información dos veces.
-
-            El orden de las filas no es casual. Alterna formatos (póster →
-            ranking → apaisada) para que el ojo tenga puntos de referencia al
-            bajar, y pone lo más fuerte arriba: Tendencias y Top 10 son lo que
-            decide si el usuario se queda. */}
-        <PosterRow title="Tendencias" items={trendingRest} onPressItem={openTitle} />
-
-        <RankedRow title="Top 10 películas" items={data.topMovies.results} onPressItem={openTitle} />
-
-        {collections && (
-          <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} onPressItem={openTitle} />
-        )}
-
-        <BackdropRow title="Series del momento" items={data.popularSeries.results} onPressItem={openTitle} />
-
-        {collections && (
-          <>
-            <PosterRow title="Lo mejor de HBO Max" items={collections.hbo.results} onPressItem={openTitle} />
-            <BackdropRow title="Lo mejor de Apple TV+" items={collections.appletv.results} onPressItem={openTitle} />
-            <PosterRow title="Lo mejor de Disney+" items={collections.disney.results} onPressItem={openTitle} />
-            <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} onPressItem={openTitle} />
-          </>
-        )}
-
-        <PosterRow title="Películas populares" items={data.popularMovies.results} onPressItem={openTitle} />
-
-        <BackdropRow title="Mejor valoradas" items={data.topMovies.results} onPressItem={openTitle} />
-
-        {/* Aire al final: sin esto la última fila queda pegada al borde inferior
-            y al enfocarla el scroll no tiene hacia dónde correrse. */}
-        <View style={styles.tail} />
-      </ScrollView>
-      </RowScrollContext.Provider>
+      <RowsList header={<HeroCarousel items={data.trending.results} />} sections={sections} />
     </View>
   )
 }
@@ -166,9 +136,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
   },
-  // Alto para que la última fila también pueda subir a la altura fija del foco
-  // (si no, no habría contenido debajo hacia donde correr el scroll).
-  tail: { height: safe.bottom + 320 },
   errorTitle: rowHeading,
   errorHint: { fontSize: 14, color: colors.textDim },
 })

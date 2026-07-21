@@ -17,6 +17,7 @@ export function PosterCard({
   onPress,
   onFocus,
   inGrid,
+  size = 'normal',
 }: {
   item: MediaItem
   onPress?: (item: MediaItem) => void
@@ -28,9 +29,17 @@ export function PosterCard({
    * separa de nada y empuja el ancho total fuera del contenedor.
    */
   inGrid?: boolean
+  /** 'large' = fila destacada (póster más grande). */
+  size?: 'normal' | 'large'
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
-  const uri = posterUrl(item.poster_path, 'w500')
+  const lg = size === 'large'
+  const dims = lg
+    ? { width: layout.posterWidthLg, height: layout.posterHeightLg }
+    : { width: layout.posterWidth, height: layout.posterHeight }
+  // Tamaño de imagen al render real: la tarjeta normal es 124 dp (~248 px), w342
+  // alcanza y pesa mucho menos que w500. La grande (168 dp) sí usa w500.
+  const uri = posterUrl(item.poster_path, lg ? 'w500' : 'w342')
 
   return (
     <Pressable
@@ -40,17 +49,19 @@ export function PosterCard({
       style={inGrid ? undefined : styles.pressable}
     >
       {({ focused }) => (
-        <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
+        <Animated.View style={[styles.card, { width: dims.width, transform: [{ scale }] }]}>
           <View style={[styles.posterWrap, focused && styles.posterWrapFocused]}>
             {uri ? (
               <Image
                 source={uri}
-                style={styles.poster}
+                style={[styles.poster, dims]}
                 contentFit="cover"
                 transition={200}
+                cachePolicy="memory-disk"
+                recyclingKey={String(item.id)}
               />
             ) : (
-              <View style={[styles.poster, styles.placeholder]}>
+              <View style={[styles.poster, dims, styles.placeholder]}>
                 <Text style={styles.placeholderText} numberOfLines={4}>
                   {titleOf(item)}
                 </Text>

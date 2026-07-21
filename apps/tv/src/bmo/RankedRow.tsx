@@ -1,5 +1,4 @@
-import { useRef } from 'react'
-import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated, FlatList, Pressable, StyleSheet, Text, TVFocusGuideView, View } from 'react-native'
 import { Image } from 'expo-image'
 import { posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
 import { useFocusScale } from './useFocusScale'
@@ -32,7 +31,7 @@ function RankedCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
-  const uri = posterUrl(item.poster_path, 'w500')
+  const uri = posterUrl(item.poster_path, 'w342')
 
   return (
     <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
@@ -43,7 +42,7 @@ function RankedCard({
           <Text style={styles.num}>{rank}</Text>
           <View style={[styles.posterWrap, focused && styles.posterWrapFocused]}>
             {uri ? (
-              <Image source={uri} style={styles.poster} contentFit="cover" transition={200} />
+              <Image source={uri} style={styles.poster} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
             ) : (
               <View style={[styles.poster, styles.placeholder]}>
                 <Text style={styles.placeholderText} numberOfLines={3}>
@@ -69,12 +68,11 @@ export function RankedRow({
 }) {
   const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>(RANKED_LEFT)
   const rowScroll = useRowScroll()
-  const rowY = useRef(0)
 
   if (!items?.length) return null
 
   return (
-    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
+    <TVFocusGuideView style={styles.row} trapFocusRight>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
         ref={ref}
@@ -86,7 +84,7 @@ export function RankedRow({
             item={item}
             rank={index + 1}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+            onFocus={() => { focusItem(index); rowScroll() }}
           />
         )}
         showsHorizontalScrollIndicator={false}
@@ -94,7 +92,7 @@ export function RankedRow({
         onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={6}
       />
-    </View>
+    </TVFocusGuideView>
   )
 }
 

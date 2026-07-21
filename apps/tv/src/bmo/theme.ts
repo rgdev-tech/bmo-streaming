@@ -77,6 +77,10 @@ export const layout = {
   // de catálogo sin que se vuelvan miniaturas.
   posterWidth: 124,
   posterHeight: 186,
+  // Póster grande, para la fila destacada de cada pantalla: rompe la monotonía de
+  // que todas las filas tengan tarjetas del mismo tamaño.
+  posterWidthLg: 168,
+  posterHeightLg: 252,
   // Backdrop 16:9 para filas apaisadas.
   backdropWidth: 248,
   backdropHeight: 140,

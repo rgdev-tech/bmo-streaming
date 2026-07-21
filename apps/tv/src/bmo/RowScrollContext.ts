@@ -1,15 +1,14 @@
 import { createContext, useContext } from 'react'
 
 /**
- * Permite que una fila avise a la ScrollView vertical de la pantalla para que
- * lleve la fila enfocada a una posición CONSISTENTE (siempre a la misma altura),
- * en vez de dejar que el auto-scroll nativo la empuje contra el borde inferior
- * con los pósters cortados. Cada pantalla con filas provee su implementación;
- * fuera de un provider es un no-op (p.ej. la cuadrícula de búsqueda).
+ * Llamar (sin argumentos) para llevar ESTA fila a la altura fija del foco. El
+ * provider lo instancia por fila dentro de la FlatList vertical (cada fila tiene
+ * su callback ligado a su índice), así el scroll funciona con virtualización sin
+ * depender de medir la Y absoluta —que con filas virtualizadas no es confiable.
  *
- * El argumento `y` es el offset vertical de la fila dentro del contenido.
+ * Fuera de un provider es un no-op (p.ej. la cuadrícula de búsqueda o Biblioteca).
  */
-export const RowScrollContext = createContext<(y: number) => void>(() => {})
+export const RowScrollContext = createContext<() => void>(() => {})
 
 export const useRowScroll = () => useContext(RowScrollContext)
 

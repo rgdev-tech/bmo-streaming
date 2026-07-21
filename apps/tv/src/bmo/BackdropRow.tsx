@@ -1,5 +1,4 @@
-import { useRef } from 'react'
-import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated, FlatList, Pressable, StyleSheet, Text, TVFocusGuideView, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { backdropUrl, posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
@@ -28,8 +27,9 @@ function BackdropCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
-  // Si no hay backdrop se cae al póster antes que dejar un hueco gris.
-  const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
+  // Si no hay backdrop se cae al póster antes que dejar un hueco gris. w300 basta
+  // para 248 dp y pesa mucho menos que w780 (decode/GPU en el emulador).
+  const uri = backdropUrl(item.backdrop_path, 'w300') ?? posterUrl(item.poster_path, 'w342')
 
   return (
     <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
@@ -38,7 +38,7 @@ function BackdropCard({
           style={[styles.card, focused && styles.cardFocused, { transform: [{ scale }] }]}
         >
           {uri && (
-            <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+            <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
           )}
           <LinearGradient
             colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -65,12 +65,11 @@ export function BackdropRow({
 }) {
   const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<MediaItem>()
   const rowScroll = useRowScroll()
-  const rowY = useRef(0)
 
   if (!items?.length) return null
 
   return (
-    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
+    <TVFocusGuideView style={styles.row} trapFocusRight>
       <Text style={styles.heading}>{title}</Text>
       <FlatList
         ref={ref}
@@ -81,7 +80,7 @@ export function BackdropRow({
           <BackdropCard
             item={item}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+            onFocus={() => { focusItem(index); rowScroll() }}
           />
         )}
         showsHorizontalScrollIndicator={false}
@@ -90,7 +89,7 @@ export function BackdropRow({
         initialNumToRender={5}
         windowSize={5}
       />
-    </View>
+    </TVFocusGuideView>
   )
 }
 
