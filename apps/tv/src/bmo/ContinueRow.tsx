@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -5,16 +6,20 @@ import { Ionicons } from '@expo/vector-icons'
 import { backdropUrl, posterUrl } from '@bmo/core/tmdb'
 import type { Progress } from '@bmo/core/library'
 import { useFocusScale } from './useFocusScale'
+import { useRowFocusScroll } from './useRowFocusScroll'
+import { useRowScroll } from './RowScrollContext'
 import { colors, layout, rowHeading, safe } from './theme'
 
 function ContinueCard({
   item,
   onPress,
+  onFocus,
 }: {
   item: Progress
   onPress: (p: Progress) => void
+  onFocus?: () => void
 }) {
-  const { scale, onFocus, onBlur } = useFocusScale(1.05)
+  const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
   const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
 
   // La duración puede venir en 0 si el reproductor guardó antes de conocerla;
@@ -23,7 +28,7 @@ function ContinueCard({
   const left = Math.max(0, Math.round((item.duration - item.position) / 60))
 
   return (
-    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={() => onPress(item)} style={styles.hit}>
+    <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress(item)} style={styles.hit}>
       {({ focused }) => (
         <Animated.View style={[styles.card, focused && styles.cardFocused, { transform: [{ scale }] }]}>
           {uri && (
@@ -77,18 +82,30 @@ export function ContinueRow({
   items: Progress[]
   onPressItem: (p: Progress) => void
 }) {
+  const { ref, focusItem, onScrollToIndexFailed } = useRowFocusScroll<Progress>()
+  const rowScroll = useRowScroll()
+  const rowY = useRef(0)
+
   if (!items?.length) return null
 
   return (
-    <View style={styles.row}>
+    <View style={styles.row} onLayout={(e) => { rowY.current = e.nativeEvent.layout.y }}>
       <Text style={styles.heading}>Seguir viendo</Text>
       <FlatList
+        ref={ref}
         horizontal
         data={items}
         keyExtractor={(i) => `${i.media_type}-${i.id}-${i.season ?? 0}-${i.episode ?? 0}`}
-        renderItem={({ item }) => <ContinueCard item={item} onPress={onPressItem} />}
+        renderItem={({ item, index }) => (
+          <ContinueCard
+            item={item}
+            onPress={onPressItem}
+            onFocus={() => { focusItem(index); rowScroll(rowY.current) }}
+          />
+        )}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        onScrollToIndexFailed={onScrollToIndexFailed}
         initialNumToRender={5}
       />
     </View>

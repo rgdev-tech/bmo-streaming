@@ -1,9 +1,11 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
-import { useRouter } from 'expo-router'
+import { useFocusEffect, useRouter } from 'expo-router'
 import { tmdb, type MediaItem } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
+import { getContinueWatching, syncLibrary, type Progress } from '@bmo/core/library'
 import { HeroCarousel, HERO_ITEMS } from '@/bmo/HeroCarousel'
+import { ContinueRow } from '@/bmo/ContinueRow'
 import { PosterRow } from '@/bmo/PosterRow'
 import { RankedRow } from '@/bmo/RankedRow'
 import { BackdropRow } from '@/bmo/BackdropRow'
@@ -19,6 +21,25 @@ export default function HomeScreen() {
     scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
   }, [])
   const { data, loading, error } = useAsync(() => tmdb.home())
+
+  // "Seguir viendo" arriba de todo: al volver de reproducir algo, este effect
+  // corre de nuevo (useFocusEffect) y la fila queda al día. Se pinta con el caché
+  // local y se refresca tras sincronizar con Supabase, igual que en Biblioteca.
+  const [watching, setWatching] = useState<Progress[]>([])
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true
+      async function load() {
+        const w0 = await getContinueWatching()
+        if (alive) setWatching(w0)
+        await syncLibrary()
+        const w1 = await getContinueWatching()
+        if (alive) setWatching(w1)
+      }
+      load()
+      return () => { alive = false }
+    }, [])
+  )
   // Las colecciones por plataforma van en su propia petición: son lentas y no
   // deben frenar el primer pintado. La home ya se ve mientras estas llegan.
   const { data: collections } = useAsync(() => tmdb.collections())
@@ -29,6 +50,26 @@ export default function HomeScreen() {
   function openTitle(item: MediaItem) {
     const t = item.media_type === 'tv' || (!!item.name && !item.title) ? 'tv' : 'movie'
     router.push(`/title/${t}/${item.id}`)
+  }
+
+  // "Seguir viendo" lleva directo a reproducir (no a la ficha). Limpiamos el
+  // sufijo "· T_:E_" ya guardado antes de re-agregar el del episodio, para que no
+  // se acumule (mismo criterio que Biblioteca).
+  function resume(p: Progress) {
+    router.push({
+      pathname: '/player',
+      params: {
+        type: p.media_type,
+        id: String(p.id),
+        title:
+          p.season != null && p.episode != null
+            ? `${p.title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')} · T${p.season}:E${p.episode}`
+            : p.title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, ''),
+        poster: p.poster_path ?? '',
+        backdrop: p.backdrop_path ?? '',
+        ...(p.season != null ? { season: String(p.season), episode: String(p.episode) } : {}),
+      },
+    })
   }
 
   if (loading) {
@@ -67,6 +108,10 @@ export default function HomeScreen() {
       <RowScrollContext.Provider value={scrollRowIntoView}>
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         <HeroCarousel items={data.trending.results} />
+
+        {/* Seguir viendo primero: si el usuario dejó algo a medias, es lo que más
+            probablemente quiera retomar al abrir la app. Solo aparece si hay algo. */}
+        <ContinueRow items={watching} onPressItem={resume} />
 
         {/* Sin título de pantalla: el rail ya marca la sección activa, así que
             un "Inicio" en grande sería la misma información dos veces.
