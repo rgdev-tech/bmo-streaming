@@ -17,7 +17,12 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null)
   // Lleva la fila enfocada a una altura fija (como Apple TV), en vez de dejar que
   // el auto-scroll nativo la empuje contra el borde inferior con pósters cortados.
+  // Dedup: solo re-scrollea al CAMBIAR de fila. Sin esto, cada movimiento
+  // horizontal disparaba un scroll vertical redundante → se sentía "a tirones".
+  const lastRowY = useRef(-1)
   const scrollRowIntoView = useCallback((y: number) => {
+    if (lastRowY.current === y) return
+    lastRowY.current = y
     scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
   }, [])
   const { data, loading, error } = useAsync(() => tmdb.home())

@@ -22,7 +22,12 @@ export function CatalogScreen({
 }) {
   const router = useRouter()
   const scrollRef = useRef<ScrollView>(null)
+  // Dedup: solo re-scrollea al cambiar de fila (evita el "tirón" vertical en cada
+  // movimiento horizontal). Ver nota en app/(nav)/index.tsx.
+  const lastRowY = useRef(-1)
   const scrollRowIntoView = useCallback((y: number) => {
+    if (lastRowY.current === y) return
+    lastRowY.current = y
     scrollRef.current?.scrollTo({ y: Math.max(0, y - ROW_SCROLL_TOP_INSET), animated: true })
   }, [])
   const { data, loading, error } = useAsync<CatalogData>(

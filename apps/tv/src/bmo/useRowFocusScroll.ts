@@ -23,8 +23,11 @@ export function useRowFocusScroll<T>(leftOffset: number = safe.horizontal) {
   const focusItem = useCallback(
     (index: number) => {
       ref.current?.scrollToIndex({
+        // Instantáneo (sin animar): la fila se pega en lockstep con el foco, sin
+        // el "arrastre" de la animación que se sentía a tirones al recorrer rápido.
+        // El realce suave lo da la escala de la tarjeta (useFocusScale).
         index,
-        animated: true,
+        animated: false,
         viewPosition: 0,
         viewOffset: leftOffset,
       })
