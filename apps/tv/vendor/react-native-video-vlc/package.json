@@ -1,0 +1,30 @@
+{
+  "name": "react-native-video-vlc",
+  "version": "1.0.18-bmo",
+  "description": "vlc player in react native fabric (vendorizado + implementación real de iOS con MobileVLCKit)",
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
+  "files": [
+    "src",
+    "android",
+    "ios",
+    "*.podspec"
+  ],
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "codegenConfig": {
+    "name": "VideoVLCViewSpec",
+    "type": "all",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.videovlc"
+    },
+    "ios": {
+      "componentProvider": {
+        "VideoVLCView": "VideoVLCView"
+      }
+    }
+  }
+}

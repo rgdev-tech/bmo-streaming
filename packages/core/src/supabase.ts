@@ -45,6 +45,14 @@ AppState.addEventListener('change', (state) => {
   else supabase.auth.stopAutoRefresh()
 })
 
+// Arranque en frío: al abrir la app AppState ya está 'active' y NO dispara un
+// 'change', así que el listener de arriba nunca llama a startAutoRefresh() al
+// inicio. Si el access token guardado ya venció, se manda igual y el servidor
+// responde "JWT expired" (las queries fallan, p.ej. no cargan los perfiles).
+// Lo arrancamos una vez acá: startAutoRefresh() refresca de inmediato si el
+// token está vencido o por vencer, usando el refresh token persistido.
+if (supabaseConfigured) supabase.auth.startAutoRefresh()
+
 // ── Tipos de las tablas (espejo de supabase/schema.sql) ─────────────────────
 
 export type Profile = {

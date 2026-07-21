@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const loadProfiles = useCallback(async (): Promise<Profile[]> => {
+  const loadProfiles = useCallback(async (retry = true): Promise<Profile[]> => {
     // Columnas explícitas, NO `*`: el SELECT de `pin_hash` está revocado a
     // nivel de columna (ver 002_profile_pin.sql) y un `*` haría fallar la
     // consulta entera con "permission denied for column".
@@ -76,7 +76,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select('id, account_id, name, avatar, is_kids, created_at, has_pin')
       .order('created_at', { ascending: true })
-    if (error) { console.warn('[auth] no se pudieron cargar perfiles:', error.message); return [] }
+    if (error) {
+      // El access token pudo vencer estando la app cerrada. getSession() no
+      // refresca, así que ante "JWT expired" refrescamos y reintentamos UNA vez.
+      // Si el refresh token también murió, refreshSession devuelve sesión null y
+      // caemos al warn (el flujo de login toma la posta).
+      if (retry && /jwt|expired|token/i.test(error.message)) {
+        const { data: r, error: rErr } = await supabase.auth.refreshSession()
+        console.warn('[auth] refresh tras JWT expired →', r?.session ? 'OK' : 'FALLÓ', rErr?.message ?? '')
+        if (r?.session) return loadProfiles(false)
+      }
+      console.warn('[auth] no se pudieron cargar perfiles:', error.message); return []
+    }
     const list = (data ?? []) as Profile[]
     setProfiles(list)
 
@@ -95,8 +106,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (cancelled) return
-      setSession(data.session)
-      if (data.session) await loadProfiles()
+      let session = data.session
+      // getSession() NO refresca: devuelve la sesión persistida tal cual. Si el
+      // access token ya venció (app cerrada un rato), consultar con él da
+      // "JWT expired" y no cargan los perfiles. Lo refrescamos ACÁ, antes de
+      // cualquier query, en vez de depender de que el auto-refresh en segundo
+      // plano le gane la carrera. Si el refresh token también murió, refreshSession
+      // devuelve sesión null y cae al flujo de login.
+      const expMs = session?.expires_at ? session.expires_at * 1000 : 0
+      if (session && expMs && expMs < Date.now()) {
+        const { data: refreshed } = await supabase.auth.refreshSession()
+        if (cancelled) return
+        session = refreshed.session
+      }
+      setSession(session)
+      if (session) await loadProfiles()
       if (!cancelled) setLoading(false)
     })
 
