@@ -517,6 +517,9 @@ function Playback({
 
   // "Llenar pantalla" (recorta bordes) vs "Ajustar" (ve el frame completo).
   const [filled, setFilled] = useState(false)
+  // Badge transitorio de seek (±Ns), sin el HUD completo (ver VlcPlayback).
+  const [seekHint, setSeekHint] = useState(0)
+  const seekHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const revealControls = useCallback(() => {
     setControlsVisible(true)
@@ -678,17 +681,24 @@ function Playback({
     [player]
   )
 
-  // Los controles del player son FOCUSABLES (Pressable), navegados por el motor
-  // de foco nativo de Android TV — el mismo que usa el resto de la app y que sí
-  // responde a la cruceta. `useTVEventHandler` NO sirve acá para direccionales:
-  // cuando el player no tiene nada enfocable, el sistema de foco consume/pierde
-  // los eventos de cruceta antes de que lleguen al handler (por eso "arriba" no
-  // abría nada). Solo escuchamos la tecla dedicada de PLAY/PAUSE del mando
-  // físico, que no la maneja el foco, como atajo extra.
+  const flashSeek = useCallback((delta: number) => {
+    setSeekHint((prev) => prev + delta)
+    clearTimeout(seekHintTimer.current)
+    seekHintTimer.current = setTimeout(() => setSeekHint(0), 900)
+  }, [])
+
+  // Control por cruceta directa: OK lo maneja el Pressable-sink de abajo (que
+  // retiene el foco para que estos direccionales SÍ lleguen); acá el resto. Con
+  // el menú abierto no tocamos nada (el menú navega solo).
   useTVEventHandler((evt) => {
-    if (evt?.eventType === 'playPause') {
-      revealControls()
-      togglePlay()
+    if (menuOpenRef.current) return
+    switch (evt?.eventType) {
+      // Seek: solo el badge chico, NO el HUD completo.
+      case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
+      case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
+      case 'up': revealControls(); setMenuTab('main'); break
+      case 'down': revealControls(); break
+      case 'playPause': revealControls(); togglePlay(); break
     }
   })
 
@@ -741,37 +751,36 @@ function Playback({
           (que el foco de Android TV no resuelve bien). Se atenúan solos pero
           siguen montados: cualquier movimiento los revela (onFocus). No se
           muestran con el menú abierto. */}
-      {!menuTab && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-          {controlsVisible && (
-            <>
-              <LinearGradient
-                colors={['rgba(0,0,0,0.6)', 'transparent']}
-                style={styles.scrimTop}
-                pointerEvents="none"
-              />
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.92)']}
-                style={styles.scrimBottom}
-                pointerEvents="none"
-              />
-            </>
-          )}
+      {/* Badge de seek: al saltar con la cruceta, sin el HUD completo. */}
+      {seekHint !== 0 && !menuTab && (
+        <View style={styles.seekHint} pointerEvents="none">
+          <MaterialIcons name={seekHint > 0 ? 'forward-10' : 'replay-10'} size={38} color="#fff" />
+          <Text style={styles.seekHintText}>{seekHint > 0 ? '+' : ''}{seekHint}s</Text>
+        </View>
+      )}
 
-          <View
-            style={[styles.controls, { opacity: controlsVisible ? 1 : 0 }]}
-            pointerEvents="box-none"
-          >
-            {/* Volver, arriba a la izquierda */}
+      {/* Capa de interacción: Pressable full-screen enfocable que retiene el foco
+          (para que useTVEventHandler reciba la cruceta). OK = pausa + controles.
+          Se remonta al cerrar el menú, recuperando el foco vía hasTVPreferredFocus. */}
+      {!menuTab && (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          hasTVPreferredFocus
+          onPress={() => { revealControls(); togglePlay() }}
+        />
+      )}
+
+      {/* HUD: puramente visual (pointerEvents none). El transporte va por cruceta. */}
+      {!menuTab && controlsVisible && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} />
+
+          <View style={styles.controls}>
             <View style={styles.topRow}>
-              <IconBtn
-                onFocus={revealControls}
-                onPress={onExit}
-                render={(f) => <Ionicons name="chevron-back" size={30} color={f ? '#000' : '#fff'} />}
-              />
+              <HudIcon><Ionicons name="chevron-back" size={30} color="#fff" /></HudIcon>
             </View>
 
-            {/* Bloque inferior: título + tiempo, scrubber, fila de controles */}
             <View style={styles.bottomBlock}>
               <View style={styles.metaRow}>
                 <View style={styles.metaText}>
@@ -790,33 +799,16 @@ function Playback({
 
               <View style={styles.controlRow}>
                 <View style={styles.sideGroup} />
-
                 <View style={styles.centerGroup}>
-                  <IconBtn
-                    onFocus={revealControls}
-                    onPress={() => { revealControls(); seekBy(-SEEK_STEP) }}
-                    render={(f) => <MaterialIcons name="replay-10" size={34} color={f ? '#000' : '#fff'} />}
-                  />
-                  <IconBtn
-                    big
-                    hasTVPreferredFocus
-                    onFocus={revealControls}
-                    onPress={() => { revealControls(); togglePlay() }}
-                    render={(f) => <Ionicons name={playing ? 'pause' : 'play'} size={40} color={f ? '#000' : '#fff'} />}
-                  />
-                  <IconBtn
-                    onFocus={revealControls}
-                    onPress={() => { revealControls(); seekBy(SEEK_STEP) }}
-                    render={(f) => <MaterialIcons name="forward-10" size={34} color={f ? '#000' : '#fff'} />}
-                  />
+                  <HudIcon><MaterialIcons name="replay-10" size={34} color="#fff" /></HudIcon>
+                  <HudIcon big><Ionicons name={playing ? 'pause' : 'play'} size={40} color="#fff" /></HudIcon>
+                  <HudIcon><MaterialIcons name="forward-10" size={34} color="#fff" /></HudIcon>
                 </View>
-
                 <View style={[styles.sideGroup, styles.sideRight]}>
-                  <IconBtn
-                    onFocus={revealControls}
-                    onPress={() => setMenuTab('main')}
-                    render={(f) => <Ionicons name="settings-outline" size={30} color={f ? '#000' : '#fff'} />}
-                  />
+                  <View style={styles.hudHint}>
+                    <Ionicons name="chevron-up" size={16} color={colors.textDim} />
+                    <Ionicons name="settings-outline" size={26} color="#fff" />
+                  </View>
                 </View>
               </View>
             </View>
@@ -883,6 +875,10 @@ function VlcPlayback({
   const [buffering, setBuffering] = useState(true)
   const [controlsVisible, setControlsVisible] = useState(true)
   const [filled, setFilled] = useState(false)
+  // Badge transitorio de seek (±Ns acumulados): al saltar con la cruceta NO
+  // aparece el HUD completo, solo este indicador chico que se desvanece solo.
+  const [seekHint, setSeekHint] = useState(0)
+  const seekHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Menú de opciones (Audio/Subtítulos/Estilo/Calidad/Pantalla), idéntico al del
   // motor expo-video. null = cerrado. La tuerca de la barra lo abre.
@@ -970,6 +966,13 @@ function VlcPlayback({
     vlcRef.current?.seek(next)
     setPosition(next)
     progressRef.current.time = next
+  }, [])
+
+  // Muestra el badge de seek acumulando el salto; se borra solo tras un ratito.
+  const flashSeek = useCallback((delta: number) => {
+    setSeekHint((prev) => prev + delta)
+    clearTimeout(seekHintTimer.current)
+    seekHintTimer.current = setTimeout(() => setSeekHint(0), 900)
   }, [])
 
   const handleLoad = useCallback((e: OnLoadData) => {
@@ -1073,8 +1076,20 @@ function VlcPlayback({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Control por cruceta directa (no por botones enfocables): OK lo maneja el
+  // Pressable-sink de abajo; acá el resto. El sink retiene el foco, así estos
+  // direccionales SÍ llegan (antes se perdían por no haber nada enfocable). Con
+  // el menú abierto no tocamos nada: el menú maneja su propia navegación.
   useTVEventHandler((evt) => {
-    if (evt?.eventType === 'playPause') { revealControls(); togglePlay() }
+    if (menuTabRef.current) return
+    switch (evt?.eventType) {
+      // Seek: solo el badge chico, NO el HUD completo.
+      case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
+      case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
+      case 'up': revealControls(); setMenuTab('main'); break
+      case 'down': revealControls(); break
+      case 'playPause': revealControls(); togglePlay(); break
+    }
   })
 
   const pct = duration > 0 ? Math.min(1, position / duration) : 0
@@ -1132,70 +1147,69 @@ function VlcPlayback({
         </View>
       )}
 
+      {/* Badge de seek: aparece al saltar con la cruceta, sin el HUD completo. */}
+      {seekHint !== 0 && !menuTab && (
+        <View style={styles.seekHint} pointerEvents="none">
+          <MaterialIcons name={seekHint > 0 ? 'forward-10' : 'replay-10'} size={38} color="#fff" />
+          <Text style={styles.seekHintText}>{seekHint > 0 ? '+' : ''}{seekHint}s</Text>
+        </View>
+      )}
+
+      {/* Capa de interacción: Pressable full-screen enfocable que retiene el foco
+          (así useTVEventHandler recibe la cruceta). OK = pausa + mostrar
+          controles. Se remonta al cerrar el menú (condicional en !menuTab), así
+          recupera el foco solo vía hasTVPreferredFocus. */}
       {!menuTab && (
-      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-        {controlsVisible && (
-          <>
-            <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} pointerEvents="none" />
-            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} pointerEvents="none" />
-          </>
-        )}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          hasTVPreferredFocus
+          onPress={() => { revealControls(); togglePlay() }}
+        />
+      )}
 
-        <View style={[styles.controls, { opacity: controlsVisible ? 1 : 0 }]} pointerEvents="box-none">
-          <View style={styles.topRow}>
-            <IconBtn
-              onFocus={revealControls}
-              onPress={onExit}
-              render={(f) => <Ionicons name="chevron-back" size={30} color={f ? '#000' : '#fff'} />}
-            />
-          </View>
+      {/* HUD: puramente visual (pointerEvents none). El transporte se maneja por
+          cruceta directa, no tocando estos iconos. */}
+      {!menuTab && controlsVisible && (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} />
 
-          <View style={styles.bottomBlock}>
-            <View style={styles.metaRow}>
-              <View style={styles.metaText}>
-                <Text style={styles.title} numberOfLines={1}>{baseTitle}</Text>
-                {!!episodeLabel && <Text style={styles.episode} numberOfLines={1}>{episodeLabel}</Text>}
-              </View>
-              <Text style={styles.remaining}>-{fmt(remaining)}</Text>
+          <View style={styles.controls}>
+            <View style={styles.topRow}>
+              <HudIcon><Ionicons name="chevron-back" size={30} color="#fff" /></HudIcon>
             </View>
 
-            <View style={styles.timeline}>
-              <View style={[styles.timelineFill, { width: `${pct * 100}%` }]} />
-              <View style={[styles.knob, { left: `${pct * 100}%` }]} />
-            </View>
-
-            <View style={styles.controlRow}>
-              <View style={styles.sideGroup} />
-              <View style={styles.centerGroup}>
-                <IconBtn
-                  onFocus={revealControls}
-                  onPress={() => { revealControls(); seekBy(-SEEK_STEP) }}
-                  render={(f) => <MaterialIcons name="replay-10" size={34} color={f ? '#000' : '#fff'} />}
-                />
-                <IconBtn
-                  big
-                  hasTVPreferredFocus
-                  onFocus={revealControls}
-                  onPress={() => { revealControls(); togglePlay() }}
-                  render={(f) => <Ionicons name={paused ? 'play' : 'pause'} size={40} color={f ? '#000' : '#fff'} />}
-                />
-                <IconBtn
-                  onFocus={revealControls}
-                  onPress={() => { revealControls(); seekBy(SEEK_STEP) }}
-                  render={(f) => <MaterialIcons name="forward-10" size={34} color={f ? '#000' : '#fff'} />}
-                />
+            <View style={styles.bottomBlock}>
+              <View style={styles.metaRow}>
+                <View style={styles.metaText}>
+                  <Text style={styles.title} numberOfLines={1}>{baseTitle}</Text>
+                  {!!episodeLabel && <Text style={styles.episode} numberOfLines={1}>{episodeLabel}</Text>}
+                </View>
+                <Text style={styles.remaining}>-{fmt(remaining)}</Text>
               </View>
-              <View style={[styles.sideGroup, styles.sideRight]}>
-                <IconBtn
-                  onFocus={revealControls}
-                  onPress={() => setMenuTab('main')}
-                  render={(f) => <Ionicons name="settings-outline" size={30} color={f ? '#000' : '#fff'} />}
-                />
+
+              <View style={styles.timeline}>
+                <View style={[styles.timelineFill, { width: `${pct * 100}%` }]} />
+                <View style={[styles.knob, { left: `${pct * 100}%` }]} />
+              </View>
+
+              <View style={styles.controlRow}>
+                <View style={styles.sideGroup} />
+                <View style={styles.centerGroup}>
+                  <HudIcon><MaterialIcons name="replay-10" size={34} color="#fff" /></HudIcon>
+                  <HudIcon big><Ionicons name={paused ? 'play' : 'pause'} size={40} color="#fff" /></HudIcon>
+                  <HudIcon><MaterialIcons name="forward-10" size={34} color="#fff" /></HudIcon>
+                </View>
+                <View style={[styles.sideGroup, styles.sideRight]}>
+                  <View style={styles.hudHint}>
+                    <Ionicons name="chevron-up" size={16} color={colors.textDim} />
+                    <Ionicons name="settings-outline" size={26} color="#fff" />
+                  </View>
+                </View>
               </View>
             </View>
           </View>
         </View>
-      </View>
       )}
 
       {menuTab && (
@@ -1727,6 +1741,17 @@ function SmallButton({ label, onPress }: { label: string; onPress: () => void })
 // blanco con ícono oscuro (máximo contraste desde lejos). `render` recibe el
 // estado de foco para pintar el ícono del color correcto. Mismo patrón que
 // FocusButton (Pressable + onPress), que es el que responde bien a la cruceta.
+// Ícono del HUD: puramente visual (no enfocable, no presionable). El transporte
+// del player va por cruceta directa, así que estos son solo indicadores.
+function HudIcon({ children, big }: { children: ReactNode; big?: boolean }) {
+  const size = big ? 64 : 48
+  return (
+    <View style={[styles.iconBtn, { width: size, height: size, borderRadius: size / 2 }]}>
+      {children}
+    </View>
+  )
+}
+
 function IconBtn({
   render, big, hasTVPreferredFocus, onPress, onFocus,
 }: {
@@ -1855,6 +1880,22 @@ const styles = StyleSheet.create({
   sideRight: { justifyContent: 'flex-end' },
   centerGroup: { flexDirection: 'row', alignItems: 'center', gap: 22 },
   iconBtn: { alignItems: 'center', justifyContent: 'center' },
+  // Pista visual "↑ ajustes": el menú se abre con la cruceta ARRIBA.
+  hudHint: { alignItems: 'center', justifyContent: 'center' },
+  // Badge transitorio de seek (±Ns), centrado, sin el HUD completo.
+  seekHint: {
+    position: 'absolute',
+    top: '44%',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  seekHintText: { color: '#fff', fontSize: 22, fontWeight: '800' },
   iconBtnFocused: {
     backgroundColor: '#fff',
     shadowColor: '#000',
