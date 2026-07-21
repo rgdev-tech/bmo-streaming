@@ -477,6 +477,8 @@ function Playback({
   // registra una sola vez y no debe capturar un menuTab viejo).
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
+  const controlsVisibleRef = useRef(controlsVisible)
+  controlsVisibleRef.current = controlsVisible
 
   // Pistas nativas expuestas por expo-video (ExoPlayer): audio y subtítulos
   // embebidos / del HLS. La selección de audio va directo al player; la de
@@ -552,6 +554,12 @@ function Playback({
       const t = menuTabRef.current
       if (t && t !== 'main') { setMenuTab('main'); return true }
       if (t === 'main') { setMenuTab(null); return true }
+      // Con el HUD visible, Atrás lo oculta (no sale); recién sin HUD, sale.
+      if (controlsVisibleRef.current) {
+        clearTimeout(hideTimer.current)
+        setControlsVisible(false)
+        return true
+      }
       return false
     })
     return () => sub.remove()
@@ -696,7 +704,13 @@ function Playback({
       // Seek: solo el badge chico, NO el HUD completo.
       case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
       case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
-      case 'up': revealControls(); setMenuTab('main'); break
+      case 'up':
+        // Primer up con el HUD oculto: solo mostrar el HUD. Con el HUD ya
+        // visible, el segundo up abre el menú (coherente con el hint "^⚙️"
+        // que aparece abajo a la derecha justo cuando el HUD está a la vista).
+        if (controlsVisibleRef.current) { revealControls(); setMenuTab('main') }
+        else revealControls()
+        break
       case 'down': revealControls(); break
       case 'playPause': revealControls(); togglePlay(); break
     }
@@ -885,6 +899,9 @@ function VlcPlayback({
   const [menuTab, setMenuTab] = useState<MenuTabKey | null>(null)
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
+  // Espejo del HUD visible para leerlo en el handler de Atrás (registrado una vez).
+  const controlsVisibleRef = useRef(controlsVisible)
+  controlsVisibleRef.current = controlsVisible
 
   // Pistas nativas que expone VLC en onLoad (audio/subtítulos con id NUMÉRICO).
   // Las adaptamos a la forma AudioTrack/SubtitleTrack (id como string) para
@@ -953,6 +970,12 @@ function VlcPlayback({
       const t = menuTabRef.current
       if (t && t !== 'main') { setMenuTab('main'); return true }
       if (t === 'main') { setMenuTab(null); return true }
+      // Con el HUD visible, Atrás lo oculta (no sale); recién sin HUD, sale.
+      if (controlsVisibleRef.current) {
+        clearTimeout(hideTimer.current)
+        setControlsVisible(false)
+        return true
+      }
       return false
     })
     return () => sub.remove()
@@ -1086,7 +1109,13 @@ function VlcPlayback({
       // Seek: solo el badge chico, NO el HUD completo.
       case 'left': seekBy(-SEEK_STEP); flashSeek(-SEEK_STEP); break
       case 'right': seekBy(SEEK_STEP); flashSeek(SEEK_STEP); break
-      case 'up': revealControls(); setMenuTab('main'); break
+      case 'up':
+        // Primer up con el HUD oculto: solo mostrar el HUD. Con el HUD ya
+        // visible, el segundo up abre el menú (coherente con el hint "^⚙️"
+        // que aparece abajo a la derecha justo cuando el HUD está a la vista).
+        if (controlsVisibleRef.current) { revealControls(); setMenuTab('main') }
+        else revealControls()
+        break
       case 'down': revealControls(); break
       case 'playPause': revealControls(); togglePlay(); break
     }

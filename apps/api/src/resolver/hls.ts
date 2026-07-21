@@ -38,6 +38,10 @@ export function srtToVtt(srt: string): string {
   const body = srt
     .replace(/\r+/g, '')
     .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+    // Etiquetas de override ASS/SSA embebidas ({\an8}, {\i1}…): el renderer de
+    // VTT (ExoPlayer/AVPlayer) las muestra literales. VTT sí soporta <i>/<b>,
+    // así que esos se dejan.
+    .replace(/\{[^}]*\}/g, '')
   return `WEBVTT\n\n${body}`
 }
 

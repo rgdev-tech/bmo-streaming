@@ -27,8 +27,10 @@ function parseSrtTime(s: string): number {
 
 // Parser de .srt básico: índice / rango de tiempo / texto (una o más líneas),
 // bloques separados por línea en blanco. Suficiente para lo que vamos a
-// mostrar — no soporta WebVTT ni estilos avanzados, solo el <i>/<b> más común
-// (los saca, no los renderiza).
+// mostrar — no soporta WebVTT ni estilos avanzados. Saca (no renderiza):
+//  - tags HTML (<i>/<b>…),
+//  - etiquetas de override ASS/SSA entre llaves ({\an8}, {\i1}, {\pos(..)}…),
+//    que muchos .srt traen embebidas y VLC/nuestro overlay mostraban literales.
 export function parseSrt(content: string): SrtCue[] {
   const cues: SrtCue[] = []
   const blocks = content.replace(/\r/g, '').trim().split(/\n\n+/)
@@ -42,6 +44,7 @@ export function parseSrt(content: string): SrtCue[] {
     const text = lines.slice(timeLineIdx + 1)
       .join('\n')
       .replace(/<[^>]+>/g, '')
+      .replace(/\{[^}]*\}/g, '')
       .trim()
     if (text && end > start) cues.push({ start, end, text })
   }
