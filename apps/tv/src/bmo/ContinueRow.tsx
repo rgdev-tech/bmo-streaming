@@ -19,7 +19,7 @@ function ContinueCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
-  const uri = backdropUrl(item.backdrop_path, 'w300') ?? posterUrl(item.poster_path, 'w342')
+  const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
 
   // La duración puede venir en 0 si el reproductor guardó antes de conocerla;
   // sin este resguardo la barra saldría con NaN de ancho y no se dibujaría.

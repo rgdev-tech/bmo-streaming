@@ -39,7 +39,7 @@ export function PosterCard({
     : { width: layout.posterWidth, height: layout.posterHeight }
   // Tamaño de imagen al render real: la tarjeta normal es 124 dp (~248 px), w342
   // alcanza y pesa mucho menos que w500. La grande (168 dp) sí usa w500.
-  const uri = posterUrl(item.poster_path, lg ? 'w500' : 'w342')
+  const uri = posterUrl(item.poster_path, 'w500')
 
   return (
     <Pressable

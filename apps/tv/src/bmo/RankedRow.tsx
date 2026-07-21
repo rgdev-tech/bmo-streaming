@@ -31,7 +31,7 @@ function RankedCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
-  const uri = posterUrl(item.poster_path, 'w342')
+  const uri = posterUrl(item.poster_path, 'w500')
 
   return (
     <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>

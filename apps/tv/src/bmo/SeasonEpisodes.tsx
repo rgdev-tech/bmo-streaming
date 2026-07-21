@@ -167,7 +167,7 @@ function EpisodeRow({
   progress?: number
   onPress?: (ep: Episode) => void
 }) {
-  const still = stillUrl(ep.still_path)
+  const still = stillUrl(ep.still_path, 'original')
   // La barra solo tiene sentido a medias: al 0 no aporta y al 100 lo dice el tilde.
   const showBar = progress != null && progress > 0.02 && progress < 0.98
   const year = ep.air_date ? ep.air_date.slice(0, 4) : null

@@ -204,7 +204,9 @@ export function logoUrl(path: string | null, size: 'w500' = 'w500') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
-export function stillUrl(path: string | null, size: 'w300' = 'w300') {
+// TMDB para stills solo ofrece w92/w185/w300/original (no hay w780): para que
+// se vean nítidos en una TV grande hay que pedir 'original'.
+export function stillUrl(path: string | null, size: 'w300' | 'original' = 'w300') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
