@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
-import { backdropUrl, logoUrl, titleOf, tmdb, type MediaItem } from '@bmo/core/tmdb'
+import { backdropUrl, cachedLogo, peekLogo, titleOf, type MediaItem } from '@bmo/core/tmdb'
 import { colors, heroOverview, heroTitle, safe } from './theme'
 
 /**
@@ -25,23 +25,29 @@ export function Hero({ item }: { item: MediaItem }) {
   const uri = backdropUrl(item.backdrop_path, 'w1280')
 
   // El logo va en su propia petición: TMDB no lo trae en los listados, hay que
-  // pedirlo por título. Si falla o no existe, queda el título en texto — muchos
-  // títulos no tienen logo cargado, así que el texto no es un caso raro.
-  const [logo, setLogo] = useState<string | null>(null)
+  // pedirlo por título. Va cacheado (cachedLogo): el hero rota entre los mismos
+  // títulos, y sin caché se re-pediría por red en cada vuelta. Si falla o no
+  // existe, queda el título en texto — no es un caso raro.
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
+  const type = isTv ? 'tv' : 'movie'
+  // Si ya lo teníamos resuelto, arrancamos con él directo: sin flash de
+  // texto→logo al re-rotar a un título ya visto.
+  const [logo, setLogo] = useState<string | null>(() => peekLogo(type, item.id) ?? null)
   useEffect(() => {
+    const cached = peekLogo(type, item.id)
+    if (cached !== undefined) {
+      setLogo(cached) // ya resuelto: sin red, sin parpadeo
+      return
+    }
     let cancelled = false
     // Se limpia al cambiar de item: sin esto, al rotar el héroe se vería un
     // instante el logo del título anterior sobre el backdrop nuevo.
     setLogo(null)
-    tmdb
-      .logo(isTv ? 'tv' : 'movie', item.id)
-      .then((r) => !cancelled && setLogo(logoUrl(r.logo)))
-      .catch(() => {})
+    cachedLogo(type, item.id).then((url) => !cancelled && setLogo(url))
     return () => {
       cancelled = true
     }
-  }, [item.id, isTv])
+  }, [item.id, type])
 
   return (
     <View style={[styles.hero, { height: heroHeight }]}>

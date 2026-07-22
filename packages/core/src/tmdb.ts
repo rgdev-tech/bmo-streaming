@@ -204,6 +204,35 @@ export function logoUrl(path: string | null, size: 'w500' = 'w500') {
   return path ? `${IMG_BASE}/${size}${path}` : null
 }
 
+/**
+ * Caché de logos por título. TMDB no trae el logo en los listados, hay que
+ * pedirlo aparte por id — y el hero rota entre los mismos 5 títulos cada 9s, así
+ * que sin caché se re-pediría el mismo logo por red en cada vuelta, para siempre.
+ * `null` cacheado = "no tiene logo" (evita reintentar los que no existen); los
+ * fallos de red NO se cachean, para poder reintentarlos.
+ */
+const logoCache = new Map<string, string | null>()
+
+/** Lee el logo ya resuelto sin disparar red. `undefined` = nunca se pidió. */
+export function peekLogo(type: 'movie' | 'tv', id: number): string | null | undefined {
+  return logoCache.get(`${type}:${id}`)
+}
+
+/** Devuelve el logo (cacheado o pidiéndolo una vez). No relanza si ya lo tiene. */
+export async function cachedLogo(type: 'movie' | 'tv', id: number): Promise<string | null> {
+  const key = `${type}:${id}`
+  const hit = logoCache.get(key)
+  if (hit !== undefined) return hit
+  try {
+    const r = await tmdb.logo(type, id)
+    const url = logoUrl(r.logo)
+    logoCache.set(key, url)
+    return url
+  } catch {
+    return null
+  }
+}
+
 // TMDB para stills solo ofrece w92/w185/w300/original (no hay w780): para que
 // se vean nítidos en una TV grande hay que pedir 'original'.
 export function stillUrl(path: string | null, size: 'w300' | 'original' = 'w300') {

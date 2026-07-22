@@ -32,7 +32,12 @@ export function RowsList({
       index,
       viewOffset: ROW_SCROLL_TOP_INSET,
       viewPosition: 0,
-      animated: true,
+      // Instantáneo (sin animar), mismo criterio que el scroll horizontal
+      // (useRowFocusScroll): al bajar rápido con la cruceta, animar cada salto
+      // encadenaba glides de ~300ms que se re-apuntaban a mitad de camino y se
+      // sentían "a tirones". Sin animar, la lista se pega en lockstep con el
+      // foco; el realce suave lo da la escala de la tarjeta (useFocusScale).
+      animated: false,
     })
   }, [])
 

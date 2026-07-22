@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Animated, StyleSheet, View } from 'react-native'
-import type { MediaItem } from '@bmo/core/tmdb'
+import { Image } from 'expo-image'
+import { backdropUrl, cachedLogo, type MediaItem } from '@bmo/core/tmdb'
 import { Hero } from './Hero'
 import { colors, safe } from './theme'
 
@@ -30,6 +31,18 @@ export function HeroCarousel({ items }: { items: MediaItem[] }) {
 
   const [index, setIndex] = useState(0)
   const fade = useRef(new Animated.Value(1)).current
+
+  // Precalienta backdrop + logo de TODOS los slides una sola vez: así cada
+  // rotación entra con la imagen ya decodificada (nada de fundir hacia un
+  // backdrop a medio bajar) y sin disparar red en cada vuelta.
+  useEffect(() => {
+    for (const it of data) {
+      const uri = backdropUrl(it.backdrop_path, 'w1280')
+      if (uri) Image.prefetch(uri, { cachePolicy: 'memory-disk' })
+      const t = it.media_type === 'tv' || (!!it.name && !it.title) ? 'tv' : 'movie'
+      cachedLogo(t, it.id)
+    }
+  }, [data])
 
   useEffect(() => {
     if (data.length < 2) return
