@@ -32,6 +32,7 @@ import type {
 } from '../../vendor/react-native-video-vlc/src'
 import { Ionicons, MaterialIcons } from '@expo/vector-icons'
 import {
+  stream,
   type ResolveInfo,
   type AudioLang,
   type SourceOption,
@@ -113,6 +114,16 @@ export default function PlayerScreen() {
 
   // Subtítulo español descargado + parseado (overlay JS con estilo propio).
   const srtCues = useSpanishSubs(src.info)
+
+  // Precalienta el PRÓXIMO episodio mientras se reproduce este (series): al pasar
+  // al siguiente, el API ya tiene su fuente en caché y arranca casi al instante.
+  // Igual que el cliente. episodio+1 puede no existir al final de la temporada —
+  // el resolve falla en silencio, sin costo visible. Va antes de los early return
+  // para no romper el orden de hooks.
+  useEffect(() => {
+    if (!src.info || !isTv) return
+    stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, src.audioLang)
+  }, [src.info, isTv, id, seasonN, episodeN, src.audioLang])
 
   if (src.error) {
     return (

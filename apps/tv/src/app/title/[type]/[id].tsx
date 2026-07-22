@@ -22,6 +22,7 @@ import {
   type MediaDetails,
 } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
+import { prewarmTitle } from '@bmo/core/stream'
 import { getResumePoint, isInMyList, toggleMyList, toLibraryItem } from '@bmo/core/library'
 import { FocusButton } from '@/bmo/FocusButton'
 import { PosterRow } from '@/bmo/PosterRow'
@@ -82,6 +83,18 @@ export default function TitleScreen() {
       cancelled = true
     }
   }, [id, isTv])
+
+  // Precalienta la fuente en segundo plano mientras el usuario está en la ficha:
+  // el scraping (lo más lento del arranque) corre durante la lectura de la
+  // sinopsis, así que al apretar Play el API ya tiene la fuente en caché y el
+  // primer frame llega mucho antes. Igual que hace el cliente (teléfono).
+  //  - Películas: en cuanto se conoce el título.
+  //  - Series: recién cuando `resume` resolvió el episodio exacto a reproducir,
+  //    para no precalentar S1E1 cuando en realidad va a retomar en otro.
+  useEffect(() => {
+    if (!isTv) { prewarmTitle(Number(id), false); return }
+    if (resume) prewarmTitle(Number(id), true, resume.season, resume.episode)
+  }, [id, isTv, resume])
 
   async function onToggleList() {
     if (!data) return
