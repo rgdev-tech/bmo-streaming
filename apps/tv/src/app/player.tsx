@@ -38,7 +38,7 @@ import {
   type AudioLang,
   type SourceOption,
 } from '@bmo/core/stream'
-import { tmdb, type MediaDetails } from '@bmo/core/tmdb'
+import { tmdb, posterUrl, stillUrl, titleOf, type MediaDetails } from '@bmo/core/tmdb'
 import { useAsync } from '@bmo/core/useAsync'
 import { findActiveCue, type SrtCue } from '@bmo/core/srt'
 import {
@@ -64,6 +64,7 @@ import {
   type MediaMeta,
 } from '@bmo/player'
 import { FocusButton } from '@/bmo/FocusButton'
+import { UpNextShelf, type ShelfItem } from '@/bmo/UpNextShelf'
 import { colors, heroTitle, safe } from '@/bmo/theme'
 
 const SEEK_STEP = 10 // segundos por pulsación de la cruceta
@@ -180,6 +181,70 @@ export default function PlayerScreen() {
     })
   }, [nextEp, id, params.title, params.poster, params.backdrop, router])
 
+  // ── Repisa "A continuación" (flecha ABAJO en el HUD) ────────────────────────
+  // Serie → episodios de la temporada actual (saltar a cualquiera). Película →
+  // relacionadas de TMDB (secuelas + afines: Iron Man 1 → 2, 3, y demás Marvel).
+  // Se arma en segundo plano; si queda vacía, la flecha abajo no abre nada.
+  const [upNext, setUpNext] = useState<ShelfItem[]>([])
+  const [upNextTitle, setUpNextTitle] = useState('')
+  const [shelfFocus, setShelfFocus] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    const base = stripEpisodeSuffix(params.title ?? '')
+    const poster = params.poster ?? ''
+    const backdrop = params.backdrop ?? ''
+    ;(async () => {
+      if (isTv) {
+        const s = seasonN ?? 1
+        const detail = await tmdb.season(id, s)
+        if (cancelled) return
+        const eps = detail.episodes ?? []
+        const curr = episodeN ?? 1
+        setUpNextTitle('Episodios')
+        setShelfFocus(Math.max(0, eps.findIndex((e) => e.episode_number === curr)))
+        setUpNext(eps.map((ep): ShelfItem => ({
+          key: `e${ep.id}`,
+          image: stillUrl(ep.still_path, 'w300'),
+          label: `${ep.episode_number}. ${ep.name}`,
+          sublabel: ep.runtime ? `${ep.runtime} min` : undefined,
+          aspect: 'still',
+          active: ep.episode_number === curr,
+          onSelect: () => router.replace({
+            pathname: '/player',
+            params: {
+              type: 'tv', id,
+              title: `${base} · T${s}:E${ep.episode_number}`,
+              poster, backdrop,
+              season: String(s), episode: String(ep.episode_number),
+            },
+          }),
+        })))
+      } else {
+        const detail = await tmdb.movie(id)
+        if (cancelled) return
+        const rec = (detail.similar?.results ?? []).filter((m) => m.poster_path).slice(0, 20)
+        setUpNextTitle('También te puede gustar')
+        setShelfFocus(0)
+        setUpNext(rec.map((m): ShelfItem => ({
+          key: `m${m.id}`,
+          image: posterUrl(m.poster_path, 'w342'),
+          label: titleOf(m),
+          aspect: 'poster',
+          onSelect: () => router.replace({
+            pathname: '/player',
+            params: {
+              type: 'movie', id: String(m.id),
+              title: titleOf(m),
+              poster: m.poster_path ?? '', backdrop: m.backdrop_path ?? '',
+            },
+          }),
+        })))
+      }
+    })().catch(() => {})
+    return () => { cancelled = true }
+  }, [isTv, id, seasonN, episodeN, params.title, params.poster, params.backdrop, router])
+
   if (src.error) {
     return (
       <View style={styles.center}>
@@ -228,6 +293,9 @@ export default function PlayerScreen() {
       activeSourceIndex={src.pickedSource}
       offsetKey={`${params.type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
       hasNext={!!nextEp}
+      upNext={upNext}
+      upNextTitle={upNextTitle}
+      initialShelfFocus={shelfFocus}
       onExit={() => router.back()}
       onNext={goNext}
       onSourceFailed={src.onSourceFailed}
@@ -254,6 +322,10 @@ type PlaybackProps = {
   offsetKey: string
   // Hay un episodio siguiente (series). Habilita el botón flotante "Siguiente episodio".
   hasNext: boolean
+  // Repisa "A continuación" (flecha abajo): episodios de la temporada o relacionadas.
+  upNext: ShelfItem[]
+  upNextTitle: string
+  initialShelfFocus: number
   onExit: () => void
   onNext: () => void
   onSourceFailed: (failedSource: string, message: string) => void
@@ -289,6 +361,9 @@ function Playback({
   activeSourceIndex,
   offsetKey,
   hasNext,
+  upNext,
+  upNextTitle,
+  initialShelfFocus,
   onExit,
   onNext,
   onSourceFailed,
@@ -355,6 +430,13 @@ function Playback({
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
 
+  // Repisa "A continuación" (flecha abajo). Como el menú, mientras está abierta
+  // el foco nativo maneja la cruceta y useTVEventHandler se hace a un lado.
+  const [shelfOpen, setShelfOpen] = useState(false)
+  const shelfOpenRef = useRef(false)
+  shelfOpenRef.current = shelfOpen
+  const closeShelf = useCallback(() => setShelfOpen(false), [])
+
   // Pistas nativas expuestas por expo-video (ExoPlayer): audio y subtítulos
   // embebidos / del HLS. La selección de audio va directo al player; la de
   // subtítulos pasa por subMode (abajo) para poder convivir con el overlay JS.
@@ -366,7 +448,7 @@ function Playback({
   // progreso: todo compartido con el teléfono vía @bmo/player. `reveal` se
   // aliasa a `revealControls` para no tocar el JSX del HUD.
   const { controlsVisible, reveal: revealControls, hide: hideControls, controlsVisibleRef } =
-    useAutoHideControls({ menuOpen: menuTab !== null })
+    useAutoHideControls({ menuOpen: menuTab !== null || shelfOpen })
   const { seekHint, flashSeek } = useSeekHint()
   const { subStyle, subOffset, subMode, chooseSubMode, changeSubStyle, bumpOffset } =
     useSubtitlePrefs({ offsetKey, srtCues, subtitleTracks })
@@ -394,6 +476,8 @@ function Playback({
   // el back del sistema saque del reproductor.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // La repisa "A continuación" se cierra primero, si está abierta.
+      if (shelfOpenRef.current) { setShelfOpen(false); return true }
       // Con un panel de extras abierto (Estilo/Calidad/Pantalla), Atrás vuelve a
       // las dos columnas; en la vista principal, Atrás cierra el menú entero.
       const t = menuTabRef.current
@@ -489,14 +573,20 @@ function Playback({
   // retiene el foco para que estos direccionales SÍ lleguen); acá el resto. Con
   // el menú abierto no tocamos nada (el menú navega solo).
   useTVEventHandler((evt) => {
+    // Con la repisa abierta: ARRIBA la cierra (vuelve al HUD); izq/der/OK los
+    // maneja el foco nativo de la repisa.
+    if (shelfOpenRef.current) {
+      if (evt?.eventType === 'up') setShelfOpen(false)
+      return
+    }
     if (menuOpenRef.current) return
     // Con el HUD VISIBLE, la cruceta navega los botones enfocables (lo maneja el
-    // motor de foco nativo de Android TV): acá NO tocamos las flechas. El modo
-    // rápido —seek con izq/der, revelar con arriba/abajo— es solo con el HUD
-    // OCULTO. Así, con el HUD a la vista, izq/der ya no hace seek de golpe y
-    // arriba no abre el menú: para eso enfocás la tuerca y das OK.
+    // motor de foco nativo de Android TV): acá NO tocamos las flechas, salvo ABAJO,
+    // que abre la repisa "A continuación". El modo rápido —seek con izq/der,
+    // revelar con arriba/abajo— es solo con el HUD OCULTO.
     if (controlsVisibleRef.current) {
       if (evt?.eventType === 'playPause') togglePlay()
+      else if (evt?.eventType === 'down' && upNext.length > 0) setShelfOpen(true)
       return
     }
     switch (evt?.eventType) {
@@ -520,7 +610,7 @@ function Playback({
   // Botón "Siguiente episodio": último tramo del episodio. Con el HUD oculto va
   // abajo a la derecha (auto-enfocado); con el HUD visible sube (raised) para no
   // chocar con el transporte y queda navegable desde la tuerca.
-  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab
+  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab && !shelfOpen
 
   return (
     <View style={styles.playerRoot}>
@@ -590,7 +680,7 @@ function Playback({
       {/* HUD: botones ENFOCABLES. Con el HUD visible la cruceta navega entre
           ellos (izq/der) y OK activa; la tuerca abre el menú. El transporte
           rápido por cruceta (seek, revelar) es solo con el HUD oculto (sink). */}
-      {!menuTab && controlsVisible && (
+      {!menuTab && !shelfOpen && controlsVisible && (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} pointerEvents="none" />
           <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} pointerEvents="none" />
@@ -682,6 +772,15 @@ function Playback({
           onClose={() => setMenuTab(null)}
         />
       )}
+
+      {shelfOpen && upNext.length > 0 && (
+        <UpNextShelf
+          title={upNextTitle}
+          items={upNext}
+          initialFocus={initialShelfFocus}
+          onClose={closeShelf}
+        />
+      )}
     </View>
   )
 }
@@ -700,6 +799,7 @@ function Playback({
 function VlcPlayback({
   info, startAt, meta, title, srtCues, offsetKey,
   audioLang, sources, sourcesLoading, activeSourceIndex, hasNext,
+  upNext, upNextTitle, initialShelfFocus,
   onExit, onNext, onSourceFailed, onChangeAudioLang, onPickSource, onPosition,
 }: PlaybackProps) {
   const isTv = meta.media_type === 'tv'
@@ -719,6 +819,12 @@ function VlcPlayback({
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
 
+  // Repisa "A continuación" (flecha abajo), igual que el motor expo-video.
+  const [shelfOpen, setShelfOpen] = useState(false)
+  const shelfOpenRef = useRef(false)
+  shelfOpenRef.current = shelfOpen
+  const closeShelf = useCallback(() => setShelfOpen(false), [])
+
   // Pistas nativas que expone VLC en onLoad (audio/subtítulos con id NUMÉRICO).
   // Las adaptamos a la forma AudioTrack/SubtitleTrack (id como string) para
   // reusar tal cual el OptionsMenu del otro motor. La selección vuelve a número
@@ -731,7 +837,7 @@ function VlcPlayback({
   // progreso: compartidos con el teléfono vía @bmo/player (idénticos al motor
   // expo-video). `reveal` se aliasa a `revealControls` para no tocar el JSX.
   const { controlsVisible, reveal: revealControls, hide: hideControls, controlsVisibleRef } =
-    useAutoHideControls({ menuOpen: menuTab !== null })
+    useAutoHideControls({ menuOpen: menuTab !== null || shelfOpen })
   const { seekHint, flashSeek } = useSeekHint()
   const { subStyle, subOffset, subMode, chooseSubMode, changeSubStyle, bumpOffset } =
     useSubtitlePrefs({ offsetKey, srtCues, subtitleTracks })
@@ -760,6 +866,7 @@ function VlcPlayback({
   // 'main' cierra el menú; sin menú, deja salir del reproductor.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (shelfOpenRef.current) { setShelfOpen(false); return true }
       const t = menuTabRef.current
       if (t && t !== 'main') { setMenuTab('main'); return true }
       if (t === 'main') { setMenuTab(null); return true }
@@ -849,12 +956,19 @@ function VlcPlayback({
   // direccionales SÍ llegan (antes se perdían por no haber nada enfocable). Con
   // el menú abierto no tocamos nada: el menú maneja su propia navegación.
   useTVEventHandler((evt) => {
+    // Con la repisa abierta: ARRIBA la cierra (vuelve al HUD); izq/der/OK los
+    // maneja el foco nativo de la repisa.
+    if (shelfOpenRef.current) {
+      if (evt?.eventType === 'up') setShelfOpen(false)
+      return
+    }
     if (menuTabRef.current) return
     // Con el HUD VISIBLE, la cruceta navega los botones enfocables (motor de foco
-    // nativo): acá NO tocamos las flechas, para que izq/der no siga haciendo seek
-    // ni arriba abra el menú. El modo rápido es solo con el HUD OCULTO.
+    // nativo): acá NO tocamos las flechas, salvo ABAJO, que abre la repisa
+    // "A continuación". El modo rápido es solo con el HUD OCULTO.
     if (controlsVisibleRef.current) {
       if (evt?.eventType === 'playPause') togglePlay()
+      else if (evt?.eventType === 'down' && upNext.length > 0) setShelfOpen(true)
       return
     }
     switch (evt?.eventType) {
@@ -876,7 +990,7 @@ function VlcPlayback({
   // Botón "Siguiente episodio": último tramo del episodio. Con el HUD oculto va
   // abajo a la derecha (auto-enfocado); con el HUD visible sube (raised) para no
   // chocar con el transporte y queda navegable desde la tuerca.
-  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab
+  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab && !shelfOpen
 
   return (
     <View style={styles.playerRoot}>
@@ -954,7 +1068,7 @@ function VlcPlayback({
       {/* HUD: botones ENFOCABLES (igual que el motor expo-video). Con el HUD
           visible la cruceta navega entre ellos y OK activa; la tuerca abre el
           menú. El seek/revelar rápido por cruceta es solo con el HUD oculto. */}
-      {!menuTab && controlsVisible && (
+      {!menuTab && !shelfOpen && controlsVisible && (
         <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
           <LinearGradient colors={['rgba(0,0,0,0.6)', 'transparent']} style={styles.scrimTop} pointerEvents="none" />
           <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.scrimBottom} pointerEvents="none" />
@@ -1046,6 +1160,15 @@ function VlcPlayback({
           onBumpOffset={bumpOffset}
           onPickSource={(i) => { setMenuTab(null); onPickSource(i) }}
           onClose={() => setMenuTab(null)}
+        />
+      )}
+
+      {shelfOpen && upNext.length > 0 && (
+        <UpNextShelf
+          title={upNextTitle}
+          items={upNext}
+          initialFocus={initialShelfFocus}
+          onClose={closeShelf}
         />
       )}
     </View>
