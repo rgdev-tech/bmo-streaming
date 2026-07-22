@@ -59,6 +59,7 @@ import {
   fmt,
   isSpanish,
   describeSource,
+  audioLangLabel,
   stripEpisodeSuffix,
   resolvePlaybackUri,
   type MediaMeta,
@@ -1486,16 +1487,26 @@ function QualityTabContent({
   }
   return (
     <ScrollView style={styles.menuScroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.menuList}>
-      {sources.map((s, idx) => (
-        <ListItem
-          key={s.i}
-          label={describeSource(s)}
-          sub={s.label}
-          selected={s.i === activeSourceIndex}
-          hasTVPreferredFocus={idx === 0}
-          onPress={() => onPickSource(s.i)}
-        />
-      ))}
+      {sources.map((s, idx) => {
+        const lang = audioLangLabel(s.langs)
+        // Verde = latino / español (probable latino); ámbar = castellano (España,
+        // NO es lo que busca un usuario latino); gris = otros idiomas.
+        const tone =
+          lang === 'Latino' || lang === 'Español' ? 'es'
+          : lang === 'Castellano' ? 'cast'
+          : 'other'
+        return (
+          <ListItem
+            key={s.i}
+            label={describeSource(s)}
+            sub={s.label}
+            selected={s.i === activeSourceIndex}
+            hasTVPreferredFocus={idx === 0}
+            badge={lang ? { text: lang, tone } : undefined}
+            onPress={() => onPickSource(s.i)}
+          />
+        )
+      })}
     </ScrollView>
   )
 }
@@ -1566,12 +1577,15 @@ function TopIcon({
 // textos queden alineados estén o no seleccionados), etiqueta y subtítulo
 // opcional. Al enfocarse pinta el fondo blanco y el texto/tilde en oscuro.
 function ListItem({
-  label, sub, selected, hasTVPreferredFocus, onPress,
+  label, sub, selected, hasTVPreferredFocus, badge, onPress,
 }: {
   label: string
   sub?: string
   selected?: boolean
   hasTVPreferredFocus?: boolean
+  // Chip de idioma a la derecha: 'es' verde (latino/español), 'cast' ámbar
+  // (castellano), 'other' gris (otros idiomas).
+  badge?: { text: string; tone: 'es' | 'cast' | 'other' }
   onPress: () => void
 }) {
   return (
@@ -1591,6 +1605,19 @@ function ListItem({
               </Text>
             )}
           </View>
+          {badge && (
+            <View style={[
+              styles.langBadge,
+              badge.tone === 'es' ? styles.langBadgeEs : badge.tone === 'cast' ? styles.langBadgeCast : styles.langBadgeOther,
+            ]}>
+              <Text
+                style={[styles.langBadgeText, badge.tone === 'other' ? styles.langBadgeTextOther : styles.langBadgeTextDark]}
+                numberOfLines={1}
+              >
+                {badge.text}
+              </Text>
+            </View>
+          )}
         </View>
       )}
     </Pressable>
@@ -1971,6 +1998,22 @@ const styles = StyleSheet.create({
   listItemTextFocused: { color: '#000' },
   listItemSub: { fontSize: 12, color: colors.textDim },
   listItemSubFocused: { color: 'rgba(0,0,0,0.6)' },
+
+  // Chip de idioma del audio (selector de Calidad). Tiene su propio fondo, así
+  // que se lee igual sobre la fila normal o sobre la fila enfocada (blanca).
+  langBadge: {
+    alignSelf: 'center',
+    marginLeft: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  langBadgeEs: { backgroundColor: '#34C759' },              // verde = latino / español (probable latino)
+  langBadgeCast: { backgroundColor: '#FF9F0A' },            // ámbar = castellano (España)
+  langBadgeOther: { backgroundColor: 'rgba(120,120,128,0.7)' }, // gris = otros idiomas
+  langBadgeText: { fontSize: 13, fontWeight: '800' },
+  langBadgeTextDark: { color: '#000' },
+  langBadgeTextOther: { color: '#fff' },
 
   menuFooter: {
     paddingHorizontal: safe.horizontal,

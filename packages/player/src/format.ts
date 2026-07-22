@@ -64,11 +64,8 @@ export function describeSource(s: SourceOption): string {
   )
   if (s.hdr && s.hdr !== 'none') parts.push(s.hdr === 'dv' ? 'Dolby Vision' : 'HDR')
   if (s.codec) parts.push(s.codec === 'hevc' ? 'HEVC' : s.codec === 'h264' ? 'H.264' : s.codec.toUpperCase())
-  // Idioma del audio, si se conoce: es lo que el usuario más necesita ver de un
-  // vistazo para no probar fuente por fuente. Sin tag de idioma es "desconocido"
-  // (no lo mostramos) — la mayoría de esos son audio original.
-  const lang = audioLangLabel(s.langs)
-  if (lang) parts.push(lang)
+  // El idioma NO va acá: se muestra como badge de color aparte (ver audioLangLabel
+  // + el chip en el selector de Calidad), que es más visible que un texto más.
   if (s.sizeGB != null) parts.push(s.sizeGB >= 1 ? `${s.sizeGB.toFixed(1)} GB` : `${Math.round(s.sizeGB * 1024)} MB`)
   return parts.join('  ·  ')
 }
