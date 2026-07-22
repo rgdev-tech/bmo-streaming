@@ -24,7 +24,7 @@ function BackdropCard({ item }: { item: MediaItem }) {
       onPress={() => router.push(`/title/${isTv ? 'tv' : 'movie'}/${item.id}` as never)}
     >
       {uri ? (
-        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.placeholder]} />
       )}

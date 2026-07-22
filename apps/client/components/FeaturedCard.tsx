@@ -28,7 +28,7 @@ export function FeaturedCard({ item }: { item: MediaItem }) {
     >
       <View style={styles.imageWrap}>
         {uri ? (
-          <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+          <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
         ) : (
           <View style={[StyleSheet.absoluteFill, styles.placeholder]} />
         )}

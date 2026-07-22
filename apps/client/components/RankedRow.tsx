@@ -24,7 +24,7 @@ function RankedCard({ item, rank }: { item: MediaItem; rank: number }) {
     >
       <Text style={styles.num}>{rank}</Text>
       {uri ? (
-        <Image source={uri} style={styles.poster} contentFit="cover" transition={200} />
+        <Image source={uri} style={styles.poster} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
       ) : (
         <View style={[styles.poster, styles.placeholder]}>
           <Text style={styles.placeholderText} numberOfLines={3}>{titleOf(item)}</Text>

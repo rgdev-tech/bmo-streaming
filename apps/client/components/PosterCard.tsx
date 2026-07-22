@@ -40,7 +40,7 @@ export function PosterCard({
     >
       <View>
         {uri ? (
-          <Image source={uri} style={[styles.poster, posterStyle]} contentFit="cover" transition={200} />
+          <Image source={uri} style={[styles.poster, posterStyle]} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
         ) : (
           <View style={[styles.poster, posterStyle, styles.placeholder]}>
             <Text style={styles.placeholderText} numberOfLines={3}>

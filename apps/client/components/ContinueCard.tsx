@@ -75,7 +75,7 @@ export function ContinueCard({
       onPress={resume}
     >
       {img ? (
-        <Image source={img} style={styles.thumb} contentFit="cover" transition={150} />
+        <Image source={img} style={styles.thumb} contentFit="cover" transition={150} cachePolicy="memory-disk" recyclingKey={`${item.media_type}-${item.id}`} />
       ) : (
         <View style={[styles.thumb, styles.empty]} />
       )}

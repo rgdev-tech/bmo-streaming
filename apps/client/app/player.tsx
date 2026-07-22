@@ -772,14 +772,14 @@ function VlcPlayer({
   // Doble tap a la izquierda/derecha = retroceder/adelantar 10s (Netflix/
   // YouTube). Va sobre el mismo Pressable que ya maneja el tap simple
   // (mostrar/ocultar controles) — no un gesture-handler nuevo, porque
-  // Gesture.Tap() está confirmado roto en este setup (ver comentario más
-  // abajo en pinchGesture). CLAVE de UX: el tap simple alterna los controles
-  // AL INSTANTE (no espera a ver si viene un segundo tap — esa espera se
-  // sentía como un delay feo). Si resulta ser doble tap, revertimos ese
-  // toggle instantáneo y hacemos el seek — controlsBeforeTap guarda el estado
-  // previo para poder revertir.
+  // Gesture.Tap() está confirmado roto en este setup (ver comentario más abajo
+  // en pinchGesture). El doble tap para seek NO debe mostrar el HUD completo,
+  // solo el indicador ±10s — por eso mostrar el HUD desde oculto se difiere la
+  // ventana de doble tap (ver handleVideoPress).
   const lastTap = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
-  const controlsBeforeTap = useRef(true)
+  // Mostrar el HUD desde oculto se DIFIERE la ventana de doble tap: si llega un
+  // segundo toque (doble tap = seek), se cancela y el HUD nunca aparece.
+  const pendingShow = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [seekHint, setSeekHint] = useState<'left' | 'right' | null>(null)
   const seekHintOpacity = useRef(new Animated.Value(0)).current
   const seekHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -857,6 +857,7 @@ function VlcPlayer({
       if (hideTimer.current) clearTimeout(hideTimer.current)
       if (fillHintTimer.current) clearTimeout(fillHintTimer.current)
       if (seekHintTimer.current) clearTimeout(seekHintTimer.current)
+      if (pendingShow.current) clearTimeout(pendingShow.current)
     }
   }, [])
 
@@ -906,33 +907,43 @@ function VlcPlayer({
     }, 450)
   }
 
-  // Tap simple = mostrar/ocultar controles; doble tap en la mitad
-  // izquierda/derecha = retroceder/adelantar 10s. Comparten el mismo Pressable.
-  // El tap simple actúa YA (sin esperar la ventana de doble tap → sin delay).
-  // Si el usuario sí hace doble tap, el segundo tap revierte el toggle que hizo
-  // el primero (controlsBeforeTap) y hace el seek — la visibilidad de controles
-  // queda neta igual que antes del gesto. El único costo es un parpadeo breve
-  // de los controles durante el doble tap, aceptable a cambio de que el tap
-  // simple (el 95% de los toques) sea instantáneo.
+  // Tap simple = mostrar/ocultar controles; doble tap en la mitad izquierda/
+  // derecha = retroceder/adelantar 10s. Comparten el mismo Pressable.
+  //
+  // Con el HUD VISIBLE, un toque lo oculta al instante (no hay ambigüedad). Con
+  // el HUD OCULTO el toque es ambiguo (mostrar vs doble-tap-seek), así que
+  // DIFERIMOS el "mostrar" la ventana de doble tap: si llega el segundo toque,
+  // hacemos seek + hint y el HUD NUNCA aparece (sin el parpadeo de antes). El
+  // costo es que mostrar el HUD desde oculto tiene ~280ms de espera — a cambio de
+  // que el doble tap para adelantar/atrasar quede limpio, solo con el indicador.
   function handleVideoPress(e: GestureResponderEvent) {
     const side: 'left' | 'right' = e.nativeEvent.locationX < winWidth / 2 ? 'left' : 'right'
     const now = Date.now()
     const last = lastTap.current
 
+    // Segundo toque del mismo lado dentro de la ventana → DOBLE TAP: seek + hint,
+    // sin tocar el HUD (cancela el "mostrar" pendiente que dejó el primer toque).
     if (last && last.side === side && now - last.time < DOUBLE_TAP_MS) {
       lastTap.current = null
-      // Revertir el toggle instantáneo del primer tap.
-      if (hideTimer.current) clearTimeout(hideTimer.current)
-      setControlsVisible(controlsBeforeTap.current)
-      if (controlsBeforeTap.current) scheduleHide()
+      if (pendingShow.current) { clearTimeout(pendingShow.current); pendingShow.current = null }
       skipBy(side === 'right' ? 10 : -10)
       showSeekHint(side)
       return
     }
 
     lastTap.current = { time: now, side }
-    controlsBeforeTap.current = controlsVisible
-    toggleControls()
+
+    if (controlsVisible) {
+      toggleControls() // → ocultar, al instante
+    } else {
+      // Oculto: esperar la ventana de doble tap antes de mostrar.
+      if (pendingShow.current) clearTimeout(pendingShow.current)
+      pendingShow.current = setTimeout(() => {
+        pendingShow.current = null
+        setControlsVisible(true)
+        scheduleHide()
+      }, DOUBLE_TAP_MS)
+    }
   }
 
   function setFilledWithHint(next: boolean) {
