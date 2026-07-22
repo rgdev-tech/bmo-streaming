@@ -362,15 +362,16 @@ export function scoreStream(p: ParsedStream, m: MediaRef, lang: 'original' | 'la
     // Un dual/multi-audio con español suele ser un release de mejor calidad que
     // un re-encode solo-latino, y el cliente ya sabe auto-seleccionar la pista
     // en español de las pistas embebidas. Por eso puntúa casi igual.
-    // Orden importa: latino explícito > español ambiguo > castellano. El
-    // "Español"/"Spanish" a secas (sin decir latino ni castellano) en el mundo
-    // torrent suele ser un doblaje latino, así que puntúa alto — antes daba 0 y
-    // enterraba releases latinos mal tagueados. Castellano va por debajo: un
-    // usuario que pide latino NO quiere el doblaje de España.
-    parts.lang = p.langs.has('latino')
-      ? (p.langs.size > 1 ? 180 : 200)
-      : p.langs.has('spanish') && !p.langs.has('castellano') ? 90
-      : p.langs.has('castellano') ? 30
+    // El idioma es un DESEMPATE SUAVE, no un factor dominante. La prioridad es la
+    // reproducción INSTANTÁNEA: entre fuentes cacheadas (todas arrancan al toque)
+    // preferimos español/latino cuando la calidad es comparable, pero JAMÁS por
+    // encima de resolución/bitrate. Los pesos van por debajo del salto de
+    // resolución (1080↔480 = 35) para no elegir un latino 480p sobre un original
+    // 1080p. "Español" ambiguo (sin decir latino ni castellano) suele ser latino,
+    // así que va por encima del castellano (doblaje de España).
+    parts.lang = p.langs.has('latino') ? 25
+      : p.langs.has('spanish') && !p.langs.has('castellano') ? 15
+      : p.langs.has('castellano') ? 8
       : 0
   } else {
     // Pedimos audio original: penalizamos releases que claramente NO lo traen

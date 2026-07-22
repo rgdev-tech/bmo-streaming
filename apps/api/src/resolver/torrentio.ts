@@ -184,10 +184,16 @@ export type DebridRequest = {
 // la siguiente tanda. Así el orden importa sin renunciar al paralelismo.
 //
 // `attempt` se inyecta para poder testear la mecánica sin tocar la red.
+//
+// Tuneado para reproducción INSTANTÁNEA: los candidatos ya vienen filtrados a
+// cacheados (RD entrega su link en <1s), así que lanzamos 4 en paralelo de una y
+// gana el primero que resuelve — normalmente muy por debajo del waitMs. Ventanas
+// cortas para no quedarnos esperando si alguno se cuelga. (Antes: 2/4000→5/6000,
+// pensado cuando podían entrar no-cacheados lentos; ya no es el caso.)
 export type Wave = { count: number; waitMs: number }
 const WAVES: Wave[] = [
-  { count: 2, waitMs: 4000 },
-  { count: 5, waitMs: 6000 },
+  { count: 4, waitMs: 2500 },
+  { count: 8, waitMs: 4000 },
 ]
 
 export async function raceInWaves<C, R>(
