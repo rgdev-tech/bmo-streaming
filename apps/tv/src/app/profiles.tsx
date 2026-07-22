@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { useRouter } from 'expo-router'
@@ -12,23 +12,33 @@ import { ProfileAvatar } from '@/bmo/ProfileAvatar'
 import { useFocusScale } from '@/bmo/useFocusScale'
 import { colors, heroTitle, layout, rowHeading, safe } from '@/bmo/theme'
 
-// Grande a propósito. Esta pantalla no compite con nada: es un solo gesto, se
-// mira desde el sillón y es lo primero que ve el usuario al entrar. En TV, un
-// elemento único y pequeño en medio de una pantalla negra se lee como error de
-// maquetación, no como diseño sobrio.
-const AVATAR = 152
+// Grande a propósito (se mira desde el sillón, es lo primero al entrar), pero no
+// tanto que 5 fichas se salgan de pantalla y "Nuevo perfil" quede cortado: 124
+// deja entrar ~6 fichas centradas en 1080p, y el scroll-al-centro del foco cubre
+// el resto.
+const AVATAR = 124
 
 function ProfileTile({
   profile,
   onPress,
+  onFocusScroll,
 }: {
   profile: Profile
   onPress: (p: Profile) => void
+  // Avisa al contenedor la posición de esta ficha para centrarla al enfocarse.
+  onFocusScroll?: (x: number, w: number) => void
 }) {
   const { scale, onFocus, onBlur } = useFocusScale(1.08)
+  const box = useRef({ x: 0, w: 0 })
 
   return (
-    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={() => onPress(profile)} style={styles.tileHit}>
+    <Pressable
+      onLayout={(e) => { box.current = { x: e.nativeEvent.layout.x, w: e.nativeEvent.layout.width } }}
+      onFocus={() => { onFocus(); onFocusScroll?.(box.current.x, box.current.w) }}
+      onBlur={onBlur}
+      onPress={() => onPress(profile)}
+      style={styles.tileHit}
+    >
       {({ focused }) => (
         <Animated.View style={[styles.tile, { transform: [{ scale }] }]}>
           <ProfileAvatar avatar={profile.avatar} size={AVATAR} selected={focused} />
@@ -48,11 +58,24 @@ function ProfileTile({
   )
 }
 
-function AddTile({ onPress }: { onPress: () => void }) {
+function AddTile({
+  onPress,
+  onFocusScroll,
+}: {
+  onPress: () => void
+  onFocusScroll?: (x: number, w: number) => void
+}) {
   const { scale, onFocus, onBlur } = useFocusScale(1.08)
+  const box = useRef({ x: 0, w: 0 })
 
   return (
-    <Pressable onFocus={onFocus} onBlur={onBlur} onPress={onPress} style={styles.tileHit}>
+    <Pressable
+      onLayout={(e) => { box.current = { x: e.nativeEvent.layout.x, w: e.nativeEvent.layout.width } }}
+      onFocus={() => { onFocus(); onFocusScroll?.(box.current.x, box.current.w) }}
+      onBlur={onBlur}
+      onPress={onPress}
+      style={styles.tileHit}
+    >
       {({ focused }) => (
         <Animated.View style={[styles.tile, { transform: [{ scale }] }]}>
           <View style={[styles.add, focused && styles.addFocused, { width: AVATAR, height: AVATAR }]}>
@@ -120,6 +143,17 @@ export default function ProfilesScreen() {
   const [newName, setNewName] = useState('')
   const [newAvatar, setNewAvatar] = useState(DEFAULT_AVATAR)
   const [busy, setBusy] = useState(false)
+
+  // Scroll-al-centro de la fila de perfiles: al enfocar una ficha, se lleva al
+  // medio de la pantalla. Con pocos perfiles la fila entra entera y esto no hace
+  // nada (el scroll queda topado); con muchos, la ficha enfocada siempre queda
+  // centrada en vez de que las de los extremos queden cortadas.
+  const scrollRef = useRef<ScrollView>(null)
+  const viewportW = useRef(0)
+  const centerTile = useCallback((x: number, w: number) => {
+    if (!viewportW.current) return
+    scrollRef.current?.scrollTo({ x: Math.max(0, x + w / 2 - viewportW.current / 2), animated: true })
+  }, [])
 
   async function pick(p: Profile) {
     if (p.has_pin) {
@@ -246,18 +280,21 @@ export default function ProfilesScreen() {
       </View>
 
       {/* flexGrow + center en el contenido: con pocos perfiles la fila queda
-          centrada en pantalla, y si algún día son muchos el ScrollView se
-          activa solo sin que haya que cambiar nada. */}
+          centrada en pantalla. Si son muchos y se desborda, el scroll-al-centro
+          del foco (centerTile) mantiene la ficha enfocada siempre en el medio —
+          antes se desbordaba y "Nuevo perfil" quedaba cortado contra el borde. */}
       <ScrollView
+        ref={scrollRef}
+        onLayout={(e) => { viewportW.current = e.nativeEvent.layout.width }}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.tilesScroll}
         contentContainerStyle={styles.tiles}
       >
         {profiles.map((p) => (
-          <ProfileTile key={p.id} profile={p} onPress={pick} />
+          <ProfileTile key={p.id} profile={p} onPress={pick} onFocusScroll={centerTile} />
         ))}
-        <AddTile onPress={() => setCreating(true)} />
+        <AddTile onPress={() => setCreating(true)} onFocusScroll={centerTile} />
       </ScrollView>
     </View>
   )

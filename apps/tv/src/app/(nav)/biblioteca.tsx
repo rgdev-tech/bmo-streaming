@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import { FlatList, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect, useRouter } from 'expo-router'
 import type { MediaItem } from '@bmo/core/tmdb'
 import {
@@ -10,8 +10,13 @@ import {
   type Progress,
 } from '@bmo/core/library'
 import { ContinueRow } from '@/bmo/ContinueRow'
-import { PosterRow } from '@/bmo/PosterRow'
+import { PosterCard } from '@/bmo/PosterCard'
 import { colors, heroTitle, rowHeading, safe } from '@/bmo/theme'
+
+// Mi Lista va en grilla (no en fila horizontal): es una biblioteca para explorar
+// entera, no un carrusel. 6 columnas es lo que entra cómodo en el ancho de
+// contenido (960 − rail 58, menos padding) con pósters de tamaño normal.
+const GRID_COLS = 6
 
 /**
  * Lo guardado en la biblioteca son `LibraryItem` (solo lo mínimo para pintar
@@ -99,23 +104,30 @@ export default function BibliotecaScreen() {
     )
   }
 
+  const gridItems = list.map(asMediaItem)
+
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Biblioteca</Text>
-
-        <ContinueRow items={watching} onPressItem={resume} />
-
-        {!!list.length && (
-          <PosterRow
-            title="Mi Lista"
-            items={list.map(asMediaItem)}
-            onPressItem={openTitle}
-          />
-        )}
-
-        <View style={styles.tail} />
-      </ScrollView>
+      {/* Mi Lista como GRILLA vertical de 6 columnas. "Seguir viendo" (fila
+          horizontal) y los títulos van en la cabecera de la misma FlatList, así
+          todo scrollea junto en vertical sin anidar scrolls. */}
+      <FlatList
+        data={gridItems}
+        keyExtractor={(item) => `${item.media_type}-${item.id}`}
+        numColumns={GRID_COLS}
+        renderItem={({ item }) => <PosterCard item={item} onPress={openTitle} inGrid />}
+        showsVerticalScrollIndicator={false}
+        columnWrapperStyle={styles.gridRow}
+        contentContainerStyle={styles.gridContent}
+        ListHeaderComponent={
+          <View>
+            <Text style={styles.title}>Biblioteca</Text>
+            <ContinueRow items={watching} onPressItem={resume} />
+            {!!gridItems.length && <Text style={styles.sectionLabel}>Mi Lista</Text>}
+          </View>
+        }
+        ListFooterComponent={<View style={styles.tail} />}
+      />
     </View>
   )
 }
@@ -141,5 +153,24 @@ const styles = StyleSheet.create({
   },
   emptyTitle: rowHeading,
   emptyHint: { fontSize: 14, color: colors.textDim, textAlign: 'center' },
+
+  // Encabezado de "Mi Lista", alineado al margen del contenido igual que el resto.
+  sectionLabel: {
+    ...rowHeading,
+    paddingHorizontal: safe.horizontal,
+    marginTop: 6,
+    marginBottom: 14,
+  },
+  // El padding horizontal va en la FILA de la grilla (no en el contentContainer)
+  // para no duplicar el margen que la cabecera —título y "Seguir viendo"— ya trae.
+  gridContent: { paddingBottom: safe.bottom },
+  gridRow: {
+    paddingHorizontal: safe.horizontal,
+    // gap 12 (no cardGap 16): con 6 columnas de 124dp + padding 44, 16 se pasaba
+    // del ancho de contenido y RN envolvía la fila a 5 columnas. 12 deja las 6
+    // justas con holgura. El margen inferior separa las filas.
+    gap: 12,
+    marginBottom: 18,
+  },
   tail: { height: safe.bottom },
 })

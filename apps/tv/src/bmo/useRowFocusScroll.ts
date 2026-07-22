@@ -35,9 +35,20 @@ export function useRowFocusScroll<T>(leftOffset: number = safe.horizontal) {
     [leftOffset]
   )
 
-  // Si el ítem aún no está medido (raro: el foco solo llega a ítems renderizados),
-  // no reventamos — el próximo movimiento reintenta.
-  const onScrollToIndexFailed = useCallback(() => {}, [])
+  // El ítem destino aún no estaba medido: pasa al recorrer rápido, sobre todo al
+  // VOLVER a la izquierda hacia ítems que la virtualización recicló. Antes esto
+  // era un no-op y el póster enfocado quedaba descuadrado a mitad de pantalla
+  // hasta el próximo paso —el "brinco" que se sentía. Ahora lo posicionamos igual:
+  // como las tarjetas son de ancho UNIFORME, `averageItemLength` es el ancho de
+  // tarjeta, así que scrollToOffset(index × averageItemLength) deja el ítem
+  // exactamente donde lo pondría scrollToIndex (el paddingLeft de la fila =
+  // leftOffset y se cancela). Sin reintentos → sin saltos.
+  const onScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      ref.current?.scrollToOffset({ offset: info.index * info.averageItemLength, animated: false })
+    },
+    []
+  )
 
   return { ref, focusItem, onScrollToIndexFailed }
 }

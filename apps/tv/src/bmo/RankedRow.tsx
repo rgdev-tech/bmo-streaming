@@ -38,11 +38,17 @@ function RankedCard({
   return (
     <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>
       {({ focused }) => (
-        <Animated.View style={[styles.card, { transform: [{ scale }] }]}>
+        // La escala del foco va SOLO en el póster, no en el card entero: antes el
+        // número gigante (72px, con margen negativo que solapa el póster) escalaba
+        // junto y, al crecer/encogerse desde el centro, se corría y "saltaba" al
+        // mover el foco — el bug que solo se veía en esta fila. Con la escala en el
+        // póster, el número queda fijo y solo el arte responde al foco, como el
+        // resto de las filas.
+        <View style={styles.card}>
           {/* El número va debajo del póster y sobresale por la izquierda; el
               margen negativo del póster es lo que los hace solaparse. */}
           <Text style={styles.num}>{rank}</Text>
-          <View style={[styles.posterWrap, focused && styles.posterWrapFocused]}>
+          <Animated.View style={[styles.posterWrap, focused && styles.posterWrapFocused, { transform: [{ scale }] }]}>
             {uri ? (
               <Image source={uri} style={styles.poster} contentFit="cover" transition={200} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
             ) : (
@@ -52,8 +58,8 @@ function RankedCard({
                 </Text>
               </View>
             )}
-          </View>
-        </Animated.View>
+          </Animated.View>
+        </View>
       )}
     </Pressable>
   )
