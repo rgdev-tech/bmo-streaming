@@ -178,26 +178,34 @@ export type CatalogData = {
   providers?: ProviderRow[]
 }
 
+// Timeout de las peticiones a TMDB. Sin esto, una petición que se cuelga (red
+// inestable de Fire TV, DNS lento) dejaba el spinner girando PARA SIEMPRE: nunca
+// resolvía ni fallaba. 15s convierte ese cuelgue en un error recuperable — las
+// pantallas ofrecen "Reintentar". El resolve del stream NO usa esto (tiene su
+// propio timeout de 55s, el scraping tarda más).
+const TMDB_TIMEOUT = 15_000
+const t = <T>(path: string) => api<T>(path, TMDB_TIMEOUT)
+
 export const tmdb = {
-  home: () => api<HomeData>('/tmdb/home'),
-  collections: () => api<Collections>('/tmdb/collections'),
-  movies: () => api<CatalogData>('/tmdb/movies'),
-  series: () => api<CatalogData>('/tmdb/series'),
+  home: () => t<HomeData>('/tmdb/home'),
+  collections: () => t<Collections>('/tmdb/collections'),
+  movies: () => t<CatalogData>('/tmdb/movies'),
+  series: () => t<CatalogData>('/tmdb/series'),
   search: (q: string) =>
-    api<Paged<MediaItem>>(`/tmdb/search?q=${encodeURIComponent(q)}`),
-  categories: () => api<Category[]>('/tmdb/categories'),
+    t<Paged<MediaItem>>(`/tmdb/search?q=${encodeURIComponent(q)}`),
+  categories: () => t<Category[]>('/tmdb/categories'),
   discover: (type: 'movie' | 'tv', genreId: string | number) =>
-    api<Paged<MediaItem>>(`/tmdb/discover/${type}/${genreId}`),
+    t<Paged<MediaItem>>(`/tmdb/discover/${type}/${genreId}`),
   genre: (type: 'movie' | 'tv', id: string | number) =>
-    api<GenreDetail>(`/tmdb/genre/${type}/${id}`),
-  studio: (key: string) => api<StudioDetail>(`/tmdb/studio/${key}`),
-  movie: (id: string) => api<MediaDetails>(`/tmdb/movie/${id}`),
-  tv: (id: string) => api<MediaDetails>(`/tmdb/tv/${id}`),
+    t<GenreDetail>(`/tmdb/genre/${type}/${id}`),
+  studio: (key: string) => t<StudioDetail>(`/tmdb/studio/${key}`),
+  movie: (id: string) => t<MediaDetails>(`/tmdb/movie/${id}`),
+  tv: (id: string) => t<MediaDetails>(`/tmdb/tv/${id}`),
   season: (id: string, season: number) =>
-    api<SeasonDetail>(`/tmdb/tv/${id}/season/${season}`),
+    t<SeasonDetail>(`/tmdb/tv/${id}/season/${season}`),
   logo: (type: 'movie' | 'tv', id: number) =>
-    api<{ logo: string | null }>(`/tmdb/images/${type}/${id}`),
-  person: (id: string) => api<PersonDetails>(`/tmdb/person/${id}`),
+    t<{ logo: string | null }>(`/tmdb/images/${type}/${id}`),
+  person: (id: string) => t<PersonDetails>(`/tmdb/person/${id}`),
 }
 
 export function logoUrl(path: string | null, size: 'w500' = 'w500') {

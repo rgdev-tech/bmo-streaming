@@ -7,6 +7,7 @@ import { PosterRow } from './PosterRow'
 import { RankedRow } from './RankedRow'
 import { BackdropRow } from './BackdropRow'
 import { RowsList, type RowSection } from './RowsList'
+import { FocusButton } from './FocusButton'
 import { colors, rowHeading } from './theme'
 
 /**
@@ -22,7 +23,7 @@ export function CatalogScreen({
   kind: 'movies' | 'series'
 }) {
   const router = useRouter()
-  const { data, loading, error } = useAsync<CatalogData>(
+  const { data, loading, error, refetch } = useAsync<CatalogData>(
     () => (kind === 'movies' ? tmdb.movies() : tmdb.series()),
     [kind],
     `catalog:${kind}`
@@ -47,7 +48,8 @@ export function CatalogScreen({
     return (
       <View style={styles.center}>
         <Text style={styles.errorTitle}>No pude cargar {title.toLowerCase()}</Text>
-        <Text style={styles.errorHint}>Verificá que el API esté corriendo: bun run dev:api</Text>
+        <Text style={styles.errorHint}>Revisá tu conexión a internet e intentá de nuevo.</Text>
+        <FocusButton label="Reintentar" primary hasTVPreferredFocus onPress={refetch} />
       </View>
     )
   }

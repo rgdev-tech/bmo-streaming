@@ -167,7 +167,11 @@ function EpisodeRow({
   progress?: number
   onPress?: (ep: Episode) => void
 }) {
-  const still = stillUrl(ep.still_path, 'original')
+  // El still se muestra a 200×113 dp (un thumbnail): w300 lo cubre nítido. Pedir
+  // 'original' (a menudo 1920×1080 ≈ 8MB por bitmap, y una temporada tiene decenas)
+  // era un decode ~40× más grande de lo necesario — pura presión de RAM en el
+  // Fire TV, justo antes de entrar al reproductor.
+  const still = stillUrl(ep.still_path, 'w300')
   // La barra solo tiene sentido a medias: al 0 no aporta y al 100 lo dice el tilde.
   const showBar = progress != null && progress > 0.02 && progress < 0.98
   const year = ep.air_date ? ep.air_date.slice(0, 4) : null

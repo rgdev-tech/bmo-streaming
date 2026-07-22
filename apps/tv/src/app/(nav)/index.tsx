@@ -10,11 +10,12 @@ import { PosterRow } from '@/bmo/PosterRow'
 import { RankedRow } from '@/bmo/RankedRow'
 import { BackdropRow } from '@/bmo/BackdropRow'
 import { RowsList, type RowSection } from '@/bmo/RowsList'
+import { FocusButton } from '@/bmo/FocusButton'
 import { colors, rowHeading } from '@/bmo/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
-  const { data, loading, error } = useAsync(() => tmdb.home(), [], 'home')
+  const { data, loading, error, refetch } = useAsync(() => tmdb.home(), [], 'home')
 
   // "Seguir viendo" arriba de todo: al volver de reproducir algo, este effect
   // corre de nuevo (useFocusEffect) y la fila queda al día. Se pinta con el caché
@@ -86,9 +87,8 @@ export default function HomeScreen() {
     return (
       <View style={styles.center}>
         <Text style={styles.errorTitle}>No pude cargar el catálogo</Text>
-        <Text style={styles.errorHint}>
-          Verificá que el API esté corriendo: bun run dev:api
-        </Text>
+        <Text style={styles.errorHint}>Revisá tu conexión a internet e intentá de nuevo.</Text>
+        <FocusButton label="Reintentar" primary hasTVPreferredFocus onPress={refetch} />
       </View>
     )
   }
