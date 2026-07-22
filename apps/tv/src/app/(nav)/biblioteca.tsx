@@ -48,7 +48,6 @@ export default function BibliotecaScreen() {
         await syncLibrary()
         const [l1, w1] = await Promise.all([getMyList(), getContinueWatching()])
         if (!alive) return
-        console.log(`[biblioteca] tras sync: ${l1.length} en Mi Lista, ${w1.length} en seguir viendo`)
         setList(l1)
         setWatching(w1)
       }

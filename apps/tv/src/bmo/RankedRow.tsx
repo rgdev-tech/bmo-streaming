@@ -31,7 +31,9 @@ function RankedCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
-  const uri = posterUrl(item.poster_path, 'w500')
+  // Póster de 124 dp (igual que PosterCard normal): w342 alcanza y pesa la mitad
+  // que w500 — mismo criterio que el resto de las tarjetas chicas.
+  const uri = posterUrl(item.poster_path, 'w342')
 
   return (
     <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress?.(item)} style={styles.hit}>

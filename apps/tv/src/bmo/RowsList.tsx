@@ -61,10 +61,17 @@ export function RowsList({
       showsVerticalScrollIndicator={false}
       // En TV, detachar vistas fuera de pantalla les saca el foco: mejor mantener
       // montadas las cercanas (windowSize) y no clippear.
+      //
+      // windowSize 5 (antes 7): en catálogos con muchas filas de género, 7 dejaba
+      // montadas casi todas a la vez (cada una un FlatList con imágenes), lo que
+      // presiona memoria/GC en el emulador. 5 virtualiza más y sigue teniendo un
+      // par de filas de colchón arriba y abajo del viewport para que el foco no
+      // caiga en una fila sin montar. maxToRenderPerBatch un poco más alto para
+      // que, al recorrer rápido, las filas nuevas se llenen antes de verse en blanco.
       removeClippedSubviews={false}
-      windowSize={7}
+      windowSize={5}
       initialNumToRender={5}
-      maxToRenderPerBatch={3}
+      maxToRenderPerBatch={4}
       onScrollToIndexFailed={() => {}}
     />
   )
