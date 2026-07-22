@@ -40,8 +40,21 @@ export function isSpanish(t: TrackLike): boolean {
   return /\b(?:spa|esp|spanish|español|castellano|latino)\b/i.test(t.label ?? '')
 }
 
-// Etiqueta legible de una fuente: "4K · HDR · HEVC · 12.4 GB". El nombre de
-// archivo crudo va debajo como línea secundaria.
+// Etiqueta del idioma de audio de una fuente, priorizando el español (lo que el
+// usuario busca). null = la fuente no trae ningún tag de idioma (probable original).
+export function audioLangLabel(langs: string[]): string | null {
+  if (langs.includes('latino')) return 'Latino'
+  if (langs.includes('castellano')) return 'Castellano'
+  if (langs.includes('spanish')) return 'Español'
+  if (langs.includes('english')) return 'Inglés'
+  if (langs.includes('portuguese')) return 'Portugués'
+  if (langs.includes('italian')) return 'Italiano'
+  if (langs.includes('french')) return 'Francés'
+  return null
+}
+
+// Etiqueta legible de una fuente: "4K · HDR · HEVC · Latino · 12.4 GB". El nombre
+// de archivo crudo va debajo como línea secundaria.
 export function describeSource(s: SourceOption): string {
   const parts: string[] = []
   parts.push(
@@ -51,7 +64,11 @@ export function describeSource(s: SourceOption): string {
   )
   if (s.hdr && s.hdr !== 'none') parts.push(s.hdr === 'dv' ? 'Dolby Vision' : 'HDR')
   if (s.codec) parts.push(s.codec === 'hevc' ? 'HEVC' : s.codec === 'h264' ? 'H.264' : s.codec.toUpperCase())
-  if (s.langs.includes('latino')) parts.push('Latino')
+  // Idioma del audio, si se conoce: es lo que el usuario más necesita ver de un
+  // vistazo para no probar fuente por fuente. Sin tag de idioma es "desconocido"
+  // (no lo mostramos) — la mayoría de esos son audio original.
+  const lang = audioLangLabel(s.langs)
+  if (lang) parts.push(lang)
   if (s.sizeGB != null) parts.push(s.sizeGB >= 1 ? `${s.sizeGB.toFixed(1)} GB` : `${Math.round(s.sizeGB * 1024)} MB`)
   return parts.join('  ·  ')
 }

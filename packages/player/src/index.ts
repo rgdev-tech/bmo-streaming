@@ -9,6 +9,7 @@ export {
   fmt,
   isSpanish,
   describeSource,
+  audioLangLabel,
   stripEpisodeSuffix,
   episodeLabel,
   resolvePlaybackUri,
