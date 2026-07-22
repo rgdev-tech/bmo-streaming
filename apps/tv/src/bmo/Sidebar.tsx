@@ -43,6 +43,14 @@ export function Sidebar() {
   const pathname = usePathname()
   const { profile } = useAuth()
 
+  // Ruta de ARRANQUE, capturada una sola vez. El foco preferido del rail se ancla
+  // a esto (no al pathname vivo): si dependiera del pathname, cada navegación
+  // re-evaluaría hasTVPreferredFocus y el rail RE-AGARRARÍA el foco, pisando el
+  // auto-foco del contenido de la pantalla nueva (por eso el teclado de Buscar
+  // no tomaba el foco al entrar y el rail quedaba tapándolo). El realce del ítem
+  // activo sigue siendo dinámico (prop `active`); solo el foco inicial se fija.
+  const initialFocusPath = useRef(pathname).current
+
   // Cuenta de ítems enfocados en vez de un booleano: al moverse entre ítems el
   // blur del anterior llega DESPUÉS del focus del siguiente, así que un booleano
   // haría parpadear el rail cerrándose y abriéndose en cada paso.
@@ -118,10 +126,11 @@ export function Sidebar() {
             section={s}
             active={pathname === s.path}
             expanded={expanded}
-            // El foco arranca en la sección activa. Sin esto cae en la primera
-            // tarjeta del catálogo, el ScrollView la trae a la vista y el hero
-            // desaparece antes de que el usuario toque nada.
-            hasTVPreferredFocus={pathname === s.path}
+            // El foco arranca en la sección activa (solo al montar el rail; ver
+            // initialFocusPath). Sin esto cae en la primera tarjeta del catálogo,
+            // el ScrollView la trae a la vista y el hero desaparece antes de que
+            // el usuario toque nada.
+            hasTVPreferredFocus={initialFocusPath === s.path}
             onFocusChange={bumpFocus}
             onPress={() => router.replace(s.path)}
           />
