@@ -40,14 +40,23 @@ async function safeFetch(url: string, init: RequestInit = {}): Promise<Response 
   }
 }
 
+// El imdb id de un título es INMUTABLE, pero tmdbService.externalIds no cachea y
+// imdbIdOf se llama en cada resolve de cache-miss (a veces más de una vez por
+// flujo). Un caché de 24h + dedup de promesas quita ese round-trip a TMDB del
+// camino crítico del arranque. Los null (título sin imdb) no se cachean (TTLCache
+// no persiste nulls), así que se reintentan.
+const imdbCache = new TTLCache<string | null>(24 * 60 * 60_000)
+
 // Torrentio indexa por IMDb id, no por TMDB id.
 export async function imdbIdOf(type: 'movie' | 'tv', tmdbId: number): Promise<string | null> {
-  try {
-    const d = (await tmdbService.externalIds(type, tmdbId)) as { imdb_id?: string }
-    return d?.imdb_id ?? null
-  } catch {
-    return null
-  }
+  return imdbCache.resolve(`${type}:${tmdbId}`, async () => {
+    try {
+      const d = (await tmdbService.externalIds(type, tmdbId)) as { imdb_id?: string }
+      return d?.imdb_id ?? null
+    } catch {
+      return null
+    }
+  })
 }
 
 function buildStreamUrl(imdbId: string, type: 'movie' | 'tv', season?: number, episode?: number): string {

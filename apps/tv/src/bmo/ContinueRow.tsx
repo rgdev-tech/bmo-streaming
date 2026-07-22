@@ -1,8 +1,10 @@
+import { useRef } from 'react'
 import { Animated, FlatList, Pressable, StyleSheet, Text, TVFocusGuideView, View } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Ionicons } from '@expo/vector-icons'
 import { backdropUrl, posterUrl } from '@bmo/core/tmdb'
+import { prewarmTitle } from '@bmo/core/stream'
 import type { Progress } from '@bmo/core/library'
 import { useFocusScale } from './useFocusScale'
 import { useRowFocusScroll } from './useRowFocusScroll'
@@ -26,8 +28,27 @@ function ContinueCard({
   const pct = item.duration > 0 ? Math.min(1, item.position / item.duration) : 0
   const left = Math.max(0, Math.round((item.duration - item.position) / 60))
 
+  // "Seguir viendo" lleva DIRECTO al reproductor (no pasa por la ficha, que es
+  // donde precalienta el resto de la app). Al enfocar una tarjeta, precalentamos
+  // la fuente del episodio exacto en segundo plano: para cuando el usuario dé OK,
+  // el resolve ya está en el caché del API y el video arranca casi al instante.
+  // Con debounce de 400ms para no calentar las tarjetas que solo se pasan de largo
+  // al recorrer la fila. El resolve del API deduplica, así que no hay trabajo doble.
+  const prewarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const schedulePrewarm = () => {
+    clearTimeout(prewarmTimer.current)
+    prewarmTimer.current = setTimeout(() => {
+      prewarmTitle(item.id, item.media_type === 'tv', item.season, item.episode)
+    }, 400)
+  }
+
   return (
-    <Pressable onFocus={() => { onScaleFocus(); onFocus?.() }} onBlur={onBlur} onPress={() => onPress(item)} style={styles.hit}>
+    <Pressable
+      onFocus={() => { onScaleFocus(); onFocus?.(); schedulePrewarm() }}
+      onBlur={() => { onBlur(); clearTimeout(prewarmTimer.current) }}
+      onPress={() => onPress(item)}
+      style={styles.hit}
+    >
       {({ focused }) => (
         <Animated.View style={[styles.card, focused && styles.cardFocused, { transform: [{ scale }] }]}>
           {uri && (
