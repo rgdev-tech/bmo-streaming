@@ -21,7 +21,8 @@ const IMG_H = Math.round(CARD_W * 0.56)
 function CarouselCard({ item }: { item: MediaItem }) {
   const router = useRouter()
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
-  const uri = backdropUrl(item.backdrop_path, 'w780')
+  // Carrusel casi a todo el ancho → ~1074px en 3x: w1280 nítido (w780 blando).
+  const uri = backdropUrl(item.backdrop_path, 'w1280')
   const genres = genreNames(item.genre_ids, 3)
   const type = isTv ? 'Serie' : 'Película'
 

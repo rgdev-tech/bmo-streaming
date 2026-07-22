@@ -18,7 +18,9 @@ export function PosterCard({
   onRemove?: () => void
 }) {
   const router = useRouter()
-  const uri = posterUrl(item.poster_path)
+  // w500 (no el default w342): la tarjeta es 124pt+ y en pantallas 3x (Retina)
+  // eso son ~372px — w342 quedaba blando. El iPhone tiene RAM/GPU de sobra.
+  const uri = posterUrl(item.poster_path, 'w500')
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
   // Solo marcamos "Próximamente" si HAY una fecha y es futura.
   // (Items sin fecha — p.ej. los guardados en Mi Lista — no se marcan.)

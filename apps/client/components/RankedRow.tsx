@@ -12,7 +12,7 @@ const NUM_W = 36
 
 function RankedCard({ item, rank }: { item: MediaItem; rank: number }) {
   const router = useRouter()
-  const uri = posterUrl(item.poster_path)
+  const uri = posterUrl(item.poster_path, 'w500')
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
 
   return (

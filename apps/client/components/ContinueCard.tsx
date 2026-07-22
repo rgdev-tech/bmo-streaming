@@ -33,7 +33,8 @@ export function ContinueCard({
   onRemove?: () => void
 }) {
   const router = useRouter()
-  const img = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path)
+  // Tarjeta de 300pt → ~900px en 3x: w1280 la deja nítida (w780 quedaba blando).
+  const img = backdropUrl(item.backdrop_path, 'w1280') ?? posterUrl(item.poster_path, 'w500')
   const ratio = item.duration > 0 ? item.position / item.duration : 0
 
   function resume() {

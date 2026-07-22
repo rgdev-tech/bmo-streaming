@@ -13,7 +13,8 @@ const CARD_H = CARD_W * 0.56
 export function FeaturedCard({ item }: { item: MediaItem }) {
   const router = useRouter()
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
-  const uri = backdropUrl(item.backdrop_path, 'w780')
+  // Card casi a todo el ancho → ~1074px en 3x: w1280 nítido (w780 quedaba blando).
+  const uri = backdropUrl(item.backdrop_path, 'w1280')
   const genres = genreNames(item.genre_ids, 3)
   const type = isTv ? 'Serie' : 'Película'
 
