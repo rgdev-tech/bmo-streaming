@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
   Animated,
@@ -38,6 +38,8 @@ import {
   type AudioLang,
   type SourceOption,
 } from '@bmo/core/stream'
+import { tmdb, type MediaDetails } from '@bmo/core/tmdb'
+import { useAsync } from '@bmo/core/useAsync'
 import { findActiveCue, type SrtCue } from '@bmo/core/srt'
 import {
   SUBTITLE_FONT_SIZE,
@@ -65,6 +67,7 @@ import { FocusButton } from '@/bmo/FocusButton'
 import { colors, heroTitle, safe } from '@/bmo/theme'
 
 const SEEK_STEP = 10 // segundos por pulsación de la cruceta
+const NEXT_EP_THRESHOLD = 60 // el botón aparece en el último minuto del episodio
 
 // Pestañas del menú de opciones (mismas que el reproductor del teléfono).
 // Vista del menú de opciones: 'main' = las dos columnas simultáneas
@@ -137,6 +140,46 @@ export default function PlayerScreen() {
     stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, src.audioLang)
   }, [src.info, isTv, id, seasonN, episodeN, src.audioLang])
 
+  // Detalles de la serie para el botón "Siguiente episodio": necesitamos saber si
+  // existe un episodio siguiente (y cuál). Reusa la MISMA clave de caché que la
+  // ficha ('title:tv:id'), así casi siempre es un hit instantáneo.
+  const { data: tvDetails } = useAsync<MediaDetails | null>(
+    () => (isTv ? tmdb.tv(id) : Promise.resolve(null)),
+    [isTv, id],
+    isTv ? `title:tv:${id}` : undefined
+  )
+
+  // Próximo episodio: el siguiente de la misma temporada, o el 1 de la siguiente
+  // si este era el último. null = no hay (última temporada terminada) → sin botón.
+  const nextEp = useMemo(() => {
+    if (!isTv || !tvDetails || seasonN == null || episodeN == null) return null
+    const seasons = tvDetails.seasons ?? []
+    const count = seasons.find((s) => s.season_number === seasonN)?.episode_count ?? 0
+    if (episodeN < count) return { season: seasonN, episode: episodeN + 1 }
+    const nextSeason = seasons.find((s) => s.season_number === seasonN + 1 && s.episode_count > 0)
+    return nextSeason ? { season: nextSeason.season_number, episode: 1 } : null
+  }, [isTv, tvDetails, seasonN, episodeN])
+
+  // Ir al próximo episodio: router.replace con los params nuevos. Mismo route, así
+  // que actualiza params (no remonta el PlayerScreen) → usePlaybackSource re-resuelve
+  // por season/episode y el motor hace el swap por uri. El resolve ya viene
+  // precalentado (prewarm de arriba), así que arranca casi al instante.
+  const goNext = useCallback(() => {
+    if (!nextEp) return
+    router.replace({
+      pathname: '/player',
+      params: {
+        type: 'tv',
+        id,
+        title: `${stripEpisodeSuffix(params.title ?? '')} · T${nextEp.season}:E${nextEp.episode}`,
+        poster: params.poster ?? '',
+        backdrop: params.backdrop ?? '',
+        season: String(nextEp.season),
+        episode: String(nextEp.episode),
+      },
+    })
+  }, [nextEp, id, params.title, params.poster, params.backdrop, router])
+
   if (src.error) {
     return (
       <View style={styles.center}>
@@ -184,7 +227,9 @@ export default function PlayerScreen() {
       sourcesLoading={src.sourcesLoading}
       activeSourceIndex={src.pickedSource}
       offsetKey={`${params.type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
+      hasNext={!!nextEp}
       onExit={() => router.back()}
+      onNext={goNext}
       onSourceFailed={src.onSourceFailed}
       onChangeAudioLang={src.changeAudioLang}
       onPickSource={src.pickSource}
@@ -207,7 +252,10 @@ type PlaybackProps = {
   sourcesLoading: boolean
   activeSourceIndex: number | null
   offsetKey: string
+  // Hay un episodio siguiente (series). Habilita el botón flotante "Siguiente episodio".
+  hasNext: boolean
   onExit: () => void
+  onNext: () => void
   onSourceFailed: (failedSource: string, message: string) => void
   onChangeAudioLang: (lang: AudioLang) => void
   onPickSource: (i: number) => void
@@ -240,7 +288,9 @@ function Playback({
   sourcesLoading,
   activeSourceIndex,
   offsetKey,
+  hasNext,
   onExit,
+  onNext,
   onSourceFailed,
   onChangeAudioLang,
   onPickSource,
@@ -467,6 +517,10 @@ function Playback({
   // mostrar título y episodio en dos líneas (como la referencia).
   const baseTitle = stripEpisodeSuffix(title)
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
+  // Botón "Siguiente episodio": último tramo del episodio. Con el HUD oculto va
+  // abajo a la derecha (auto-enfocado); con el HUD visible sube (raised) para no
+  // chocar con el transporte y queda navegable desde la tuerca.
+  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab
 
   return (
     <View style={styles.playerRoot}>
@@ -519,14 +573,19 @@ function Playback({
 
       {/* Capa de interacción: Pressable full-screen enfocable que retiene el foco
           (para que useTVEventHandler reciba la cruceta). OK = pausa + controles.
-          Se remonta al cerrar el menú, recuperando el foco vía hasTVPreferredFocus. */}
+          Cede el foco al botón "Siguiente episodio" cuando este aparece (para que
+          quede accionable con OK); el seek/revelar por cruceta sigue por el handler
+          global. Se remonta al cerrar el menú, recuperando el foco. */}
       {!menuTab && !controlsVisible && (
         <Pressable
           style={StyleSheet.absoluteFill}
-          hasTVPreferredFocus
+          hasTVPreferredFocus={!showNext}
           onPress={revealControls}
         />
       )}
+
+      {/* Botón flotante "Siguiente episodio": auto-enfoca con el HUD oculto. */}
+      <NextEpisodeButton visible={showNext} raised={controlsVisible} autoFocus={showNext && !controlsVisible} onPress={onNext} />
 
       {/* HUD: botones ENFOCABLES. Con el HUD visible la cruceta navega entre
           ellos (izq/der) y OK activa; la tuerca abre el menú. El transporte
@@ -640,8 +699,8 @@ function Playback({
  */
 function VlcPlayback({
   info, startAt, meta, title, srtCues, offsetKey,
-  audioLang, sources, sourcesLoading, activeSourceIndex,
-  onExit, onSourceFailed, onChangeAudioLang, onPickSource, onPosition,
+  audioLang, sources, sourcesLoading, activeSourceIndex, hasNext,
+  onExit, onNext, onSourceFailed, onChangeAudioLang, onPickSource, onPosition,
 }: PlaybackProps) {
   const isTv = meta.media_type === 'tv'
   const uri = info.streamUrl // este motor solo maneja fuentes 'file'
@@ -814,6 +873,10 @@ function VlcPlayback({
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
   const baseTitle = stripEpisodeSuffix(title)
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
+  // Botón "Siguiente episodio": último tramo del episodio. Con el HUD oculto va
+  // abajo a la derecha (auto-enfocado); con el HUD visible sube (raised) para no
+  // chocar con el transporte y queda navegable desde la tuerca.
+  const showNext = hasNext && duration > 0 && remaining <= NEXT_EP_THRESHOLD && !menuTab
 
   return (
     <View style={styles.playerRoot}>
@@ -875,15 +938,18 @@ function VlcPlayback({
 
       {/* Capa de interacción: Pressable full-screen enfocable que retiene el foco
           (así useTVEventHandler recibe la cruceta). OK = pausa + mostrar
-          controles. Se remonta al cerrar el menú (condicional en !menuTab), así
-          recupera el foco solo vía hasTVPreferredFocus. */}
+          controles. Cede el foco al botón "Siguiente episodio" cuando aparece. Se
+          remonta al cerrar el menú (condicional en !menuTab). */}
       {!menuTab && !controlsVisible && (
         <Pressable
           style={StyleSheet.absoluteFill}
-          hasTVPreferredFocus
+          hasTVPreferredFocus={!showNext}
           onPress={revealControls}
         />
       )}
+
+      {/* Botón flotante "Siguiente episodio": auto-enfoca con el HUD oculto. */}
+      <NextEpisodeButton visible={showNext} raised={controlsVisible} autoFocus={showNext && !controlsVisible} onPress={onNext} />
 
       {/* HUD: botones ENFOCABLES (igual que el motor expo-video). Con el HUD
           visible la cruceta navega entre ellos y OK activa; la tuerca abre el
@@ -1529,6 +1595,52 @@ function IconBtn({
   )
 }
 
+/**
+ * Botón flotante "Siguiente episodio" (series). Aparece abajo a la derecha en el
+ * último tramo del episodio y lleva directo al próximo (que ya viene precalentado).
+ *
+ * `autoFocus`: cuando el HUD está oculto, el botón toma el foco solo (el sink lo
+ * cede), así queda accionable de inmediato con OK. El seek/revelar por cruceta
+ * sigue andando (useTVEventHandler es global). Con el HUD visible no auto-enfoca:
+ * manda el transporte, y el botón queda visible/navegable.
+ */
+function NextEpisodeButton({
+  visible,
+  raised,
+  autoFocus,
+  onPress,
+}: {
+  visible: boolean
+  // Con el HUD VISIBLE sube (para no chocar con la tuerca/transporte de la franja
+  // inferior); con el HUD oculto va abajo a la derecha.
+  raised: boolean
+  autoFocus: boolean
+  onPress: () => void
+}) {
+  const scale = useRef(new Animated.Value(1)).current
+  const animate = (to: number) =>
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 60, bounciness: 0 }).start()
+
+  if (!visible) return null
+
+  return (
+    <Pressable
+      style={[styles.nextHit, raised && styles.nextHitRaised]}
+      hasTVPreferredFocus={autoFocus}
+      onFocus={() => animate(1.06)}
+      onBlur={() => animate(1)}
+      onPress={onPress}
+    >
+      {({ focused }) => (
+        <Animated.View style={[styles.nextBtn, focused && styles.nextBtnFocused, { transform: [{ scale }] }]}>
+          <MaterialIcons name="skip-next" size={24} color={focused ? '#000' : '#fff'} />
+          <Text style={[styles.nextText, focused && styles.nextTextFocused]}>Siguiente episodio</Text>
+        </Animated.View>
+      )}
+    </Pressable>
+  )
+}
+
 const styles = StyleSheet.create({
   center: {
     flex: 1,
@@ -1645,6 +1757,37 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
   },
+
+  // ── Botón flotante "Siguiente episodio" ────────────────────────────────────
+  // Abajo a la derecha con el HUD oculto. El overlay del subtítulo va centrado,
+  // este a la derecha: no se pisan (y de todos modos sale en los créditos).
+  nextHit: { position: 'absolute', right: safe.horizontal, bottom: safe.bottom + 36 },
+  // Con el HUD visible sube por encima del bloque inferior (meta + timeline +
+  // transporte) para no chocar con la tuerca; queda enfocable desde la tuerca (↑).
+  nextHitRaised: { bottom: safe.bottom + 200 },
+  nextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 14,
+    paddingRight: 18,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.55)',
+  },
+  nextBtnFocused: {
+    backgroundColor: '#fff',
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+  },
+  nextText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  nextTextFocused: { color: '#000' },
 
   // ── Menú de opciones (estilo HBO: pantalla completa, columnas simultáneas) ──
   menuRoot: {
