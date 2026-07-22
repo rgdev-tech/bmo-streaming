@@ -120,7 +120,11 @@ export default function TitleScreen() {
   }
 
   const certification = certificationOf(data)
-  const backdrop = backdropUrl(data.backdrop_path, 'original')
+  // w1280 y no 'original': el panel es ~1920px, 'original' suele ser 3840px — un
+  // decode ~4× más pesado en RAM, que en dispositivos con poca memoria (Fire TV
+  // ~2GB) suma presión inútil justo antes de entrar al reproductor. Mismo criterio
+  // que el Hero.
+  const backdrop = backdropUrl(data.backdrop_path, 'w1280')
   const heroHeight = Math.round(height * 0.62)
 
   // Series: el botón refleja dónde quedó. "Ver" cuando nunca vio nada,

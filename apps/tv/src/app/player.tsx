@@ -12,6 +12,7 @@ import {
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
+import { Image } from 'expo-image'
 import { useEventListener } from 'expo'
 import {
   useVideoPlayer,
@@ -111,6 +112,17 @@ export default function PlayerScreen() {
     season: seasonN,
     episode: episodeN,
   }
+
+  // Reproducir es lo más hambriento de RAM de toda la app: VLC decodifica HEVC
+  // por SOFTWARE (fuentes 'file'), y en dispositivos con poca memoria (Fire TV
+  // Stick ~2GB, o el emulador) el catálogo entero cacheado en memoria por
+  // expo-image empuja al proceso sobre el límite y el Low Memory Killer de
+  // Android mata la app a los pocos segundos de empezar. Al montar el player
+  // soltamos esa caché en memoria (las imágenes siguen en disco: al volver se
+  // repintan sin volver a la red) para dejarle esa RAM al decodificador.
+  useEffect(() => {
+    Image.clearMemoryCache().catch(() => {})
+  }, [])
 
   // Subtítulo español descargado + parseado (overlay JS con estilo propio).
   const srtCues = useSpanishSubs(src.info)
