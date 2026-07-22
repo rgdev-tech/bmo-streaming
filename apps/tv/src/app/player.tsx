@@ -1762,9 +1762,10 @@ const styles = StyleSheet.create({
   // Abajo a la derecha con el HUD oculto. El overlay del subtítulo va centrado,
   // este a la derecha: no se pisan (y de todos modos sale en los créditos).
   nextHit: { position: 'absolute', right: safe.horizontal, bottom: safe.bottom + 36 },
-  // Con el HUD visible sube por encima del bloque inferior (meta + timeline +
-  // transporte) para no chocar con la tuerca; queda enfocable desde la tuerca (↑).
-  nextHitRaised: { bottom: safe.bottom + 200 },
+  // Con el HUD visible sube, pero solo lo justo para quedar por encima del tiempo
+  // restante y la timeline (lado derecho) — no tan arriba. El título va a la
+  // izquierda, así que no se pisan.
+  nextHitRaised: { bottom: safe.bottom + 150 },
   nextBtn: {
     flexDirection: 'row',
     alignItems: 'center',
