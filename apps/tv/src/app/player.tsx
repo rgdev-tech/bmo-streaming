@@ -271,7 +271,12 @@ function Playback({
       contentType: info.type === 'hls' ? 'hls' : 'auto',
     },
     (p) => {
-      p.timeUpdateEventInterval = 0.5
+      // 1s (antes 0.5): cada tick re-renderiza TODO el HUD (botones, gradientes,
+      // timeline). A 2×/s ese repintado competía con la navegación del foco y se
+      // sentía lento en render por software. 1×/s es el estándar de los players
+      // (la barra avanza igual de suave a escala de una peli) y halvea el trabajo.
+      // Al hacer seek, setPosition actualiza la barra al instante igual.
+      p.timeUpdateEventInterval = 1
       // Arranque más rápido en Android (Media3/ExoPlayer): en vez de esperar a
       // llenar un buffer grande antes de la primera imagen, empezamos con ~2s
       // (minBufferForPlayback) y priorizamos tiempo sobre tamaño para que los
@@ -823,7 +828,9 @@ function VlcPlayback({
         }}
         paused={paused}
         resizeMode={filled ? 'cover' : 'none'}
-        progressUpdateInterval={500}
+        // 1s, mismo criterio que el motor expo-video: menos re-render del HUD
+        // durante la marcha = navegación del foco más ágil.
+        progressUpdateInterval={1000}
         selectedAudioTrack={selectedAudioTrack}
         selectedTextTrack={selectedTextTrack}
         textTrackDelay={textTrackDelay}
@@ -1493,8 +1500,12 @@ function IconBtn({
   onFocus?: () => void
 }) {
   const scale = useRef(new Animated.Value(1)).current
+  // Realce de foco INMEDIATO y sin rebote: en TV el foco tiene que "asentarse"
+  // al instante para sentirse profesional (Netflix/Disney+). El bounce anterior
+  // (bounciness 7) se leía como un control "blando/lento". speed alto + sin
+  // rebote = el botón crece de golpe apenas llega el foco.
   const animate = (to: number) =>
-    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 40, bounciness: 7 }).start()
+    Animated.spring(scale, { toValue: to, useNativeDriver: true, speed: 60, bounciness: 0 }).start()
   const size = big ? 64 : 48
   return (
     <Pressable
