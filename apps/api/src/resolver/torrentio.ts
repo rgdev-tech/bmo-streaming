@@ -14,8 +14,18 @@ import { tmdbService } from '../tmdb/tmdb.service'
 import { TTLCache } from './cache'
 import {
   rankCandidates, selectRunnable,
-  type MediaRef, type ScoredCandidate, type TorrentioStream,
+  type AudioTag, type MediaRef, type ScoredCandidate, type TorrentioStream,
 } from './torrentio.parse'
+
+// Etiqueta de idioma del audio para el cliente. "Español" cubre el ambiguo
+// ("Español"/"Spanish" a secas, probable latino) y el castellano — es audio en
+// español y el cliente ya auto-selecciona la pista en español de las embebidas.
+// El modo latino del resolver trata 'Original' distinto a 'Español' (ver scrape).
+function debridLanguageLabel(langs: Set<AudioTag>): string {
+  if (langs.has('latino')) return 'Español Latino'
+  if (langs.has('spanish')) return 'Español'
+  return 'Original'
+}
 
 const PROXY_URL = process.env.STREAM_PROXY_URL
 const DEBRID_KEY = process.env.DEBRID_KEY
@@ -306,7 +316,7 @@ export async function resolveDebridStream(
       return {
         url: out.url,
         label: cp.filename,
-        language: cp.langs.has('latino') ? 'Español Latino' : 'Original',
+        language: debridLanguageLabel(cp.langs),
         hasLatinoAlternative: r.hasLatinoAlternative,
       }
     } catch {
@@ -331,7 +341,7 @@ export async function resolveDebridStream(
   return {
     url: winner.url,
     label: p.filename,
-    language: p.langs.has('latino') ? 'Español Latino' : 'Original',
+    language: debridLanguageLabel(p.langs),
     hasLatinoAlternative: r.hasLatinoAlternative,
   }
 }

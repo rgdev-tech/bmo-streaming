@@ -168,6 +168,20 @@ describe('parseLangs', () => {
     expect(l.has('castellano')).toBe(true)
     expect(l.has('latino')).toBe(false)
   })
+
+  test.each([
+    'Movie.Audio.Latino.1080p.mkv', 'Movie.Doblada.1080p.mkv', 'Movie.Doblaje.1080p.mkv',
+    'Movie.es-419.1080p.mkv', 'Movie.LatAm.1080p.mkv', 'Movie 🇨🇱 1080p.mkv', 'Movie 🇵🇪 1080p.mkv',
+  ])('%s marca latino (patrones ampliados)', (name) => {
+    expect(parseLangs(name).has('latino')).toBe(true)
+  })
+
+  test('"Español" a secas = spanish ambiguo, NO latino ni castellano', () => {
+    const l = parseLangs('Movie.Español.1080p.mkv')
+    expect(l.has('spanish')).toBe(true)
+    expect(l.has('latino')).toBe(false)
+    expect(l.has('castellano')).toBe(false)
+  })
 })
 
 describe('rejectionOf — rechazos duros', () => {
@@ -343,6 +357,15 @@ describe('scoreStream — desglose por término', () => {
     expect(Math.abs(dual.parts.lang - only.parts.lang)).toBeLessThanOrEqual(20)
   })
 
+  test('pidiendo latino, "Español" ambiguo puntúa alto (probable latino) y por encima de castellano y original', () => {
+    const amb = scoreStream(parse('M.2020.1080p.Español.x264.mkv'), movieRef({ year: 2020 }), 'latino')
+    const cast = scoreStream(parse('M.2020.1080p.Castellano.x264.mkv'), movieRef({ year: 2020 }), 'latino')
+    const eng = scoreStream(parse('M.2020.1080p.English.x264.mkv'), movieRef({ year: 2020 }), 'latino')
+    expect(amb.parts.lang).toBeGreaterThan(0)
+    expect(amb.parts.lang).toBeGreaterThan(cast.parts.lang)
+    expect(amb.parts.lang).toBeGreaterThan(eng.parts.lang)
+  })
+
   test('cacheado suma; no cacheado no', () => {
     const cached = scoreStream(parse(FILE.inception1080, { name: '[RD+] Torrentio' }), movieRef({ year: 2010 }), 'original')
     const not = scoreStream(parse(FILE.inception1080, { name: '[RD download] Torrentio' }), movieRef({ year: 2010 }), 'original')
@@ -385,6 +408,11 @@ describe('rankCandidates — integración', () => {
       movieRef({ year: 2020 }), 'original'
     )
     expect(r.hasLatinoAlternative).toBe(false)
+  })
+
+  test('hasLatinoAlternative cuenta el "Español" ambiguo, no solo el latino explícito', () => {
+    const r = rankCandidates([stream('M.2020.1080p.Español.x264.mkv')], movieRef({ year: 2020 }), 'original')
+    expect(r.hasLatinoAlternative).toBe(true)
   })
 })
 

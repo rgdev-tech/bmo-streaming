@@ -380,6 +380,10 @@ async function scrape(
     // por haber fallado al reproducir): cobertura y calidad muy superiores a
     // los scrapers HTTP. 'realdebrid' se trata como una fuente más para el
     // mecanismo de exclude del cliente.
+    // En modo latino, si RD solo consigue Original cacheado, lo guardamos acá
+    // como red de seguridad y seguimos a los scrapers (que sí tienen latino
+    // real). Solo se usa si ningún scraper trae latino. Ver el cierre abajo.
+    let debridFallback: StreamResult | null = null
     if (debridEnabled && !exclude.includes('realdebrid')) {
       try {
         const debrid = await resolveDebridStream({ type, tmdbId, lang, media: ref, season, episode })
@@ -393,10 +397,20 @@ async function scrape(
             language: debrid.language,
             hasLatinoAlternative: debrid.hasLatinoAlternative,
           }
-          console.error(`[resolve] OK via realdebrid (${debrid.label}) en ${Date.now() - t0}ms`)
-          return result
+          // Los torrents con audio latino rara vez están cacheados en RD (la caché
+          // está dominada por releases en inglés/original), pero Cuevana y cía sí
+          // tienen latino. Así que en modo latino NO aceptamos un Original de RD de
+          // una: probamos scrapers latino primero y esto queda de fallback.
+          if (lang === 'latino' && debrid.language === 'Original') {
+            debridFallback = result
+            console.error(`[resolve] RD solo Original en modo latino (${Date.now() - t0}ms) → probando scrapers latino`)
+          } else {
+            console.error(`[resolve] OK via realdebrid (${debrid.label}) en ${Date.now() - t0}ms`)
+            return result
+          }
+        } else {
+          console.error(`[resolve] realdebrid sin resultado (${Date.now() - t0}ms), cae a scrapers`)
         }
-        console.error(`[resolve] realdebrid sin resultado (${Date.now() - t0}ms), cae a scrapers`)
       } catch (e) {
         console.error(`[resolve] realdebrid error: ${(e as Error).message}`)
       }
@@ -430,6 +444,14 @@ async function scrape(
       result = candidate
       winner = output.sourceId
       break
+    }
+
+    // Modo latino: preferimos el scraper SOLO si consiguió latino real; si trajo
+    // Original (o nada), el Original cacheado de RD es instantáneo y de mejor
+    // calidad que un scraper-original flakey.
+    if (lang === 'latino' && debridFallback && (!result || result.language === 'Original')) {
+      console.error(`[resolve] scrapers sin latino → uso Original cacheado de RD (${Date.now() - t0}ms)`)
+      return debridFallback
     }
 
     if (!result) {

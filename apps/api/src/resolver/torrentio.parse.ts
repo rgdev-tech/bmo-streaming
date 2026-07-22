@@ -181,7 +181,7 @@ export function parseSeeders(text: string): number | null {
 //
 // Los \b son obligatorios: sin ellos "TRANSLATED" y "Platinum" matchean "lat".
 const LANG_PATTERNS: [AudioTag, RegExp][] = [
-  ['latino', /\b(?:latino|latin|lat|esp[\s._-]?lat|spa[\s._-]?lat|dual[\s._-]?lat)\b|🇲🇽|🇦🇷|🇨🇴/i],
+  ['latino', /\b(?:latino|latinoamerican[oa]|latin|latam|lat|esp[\s._-]?lat|spa[\s._-]?lat|dual[\s._-]?lat|audio[\s._-]?lat(?:ino)?|doblad[oa]|doblaje|es[\s._-]?419)\b|🇲🇽|🇦🇷|🇨🇴|🇨🇱|🇵🇪|🇻🇪|🇪🇨|🇧🇴|🇩🇴|🇺🇾|🇵🇾|🇬🇹/i],
   ['castellano', /\b(?:castellano|cast)\b|🇪🇸/i],
   ['spanish', /\b(?:spanish|espanol|español|spa|esp)\b/i],
   ['english', /\b(?:english|eng|ing)\b|🇬🇧|🇺🇸/i],
@@ -362,9 +362,16 @@ export function scoreStream(p: ParsedStream, m: MediaRef, lang: 'original' | 'la
     // Un dual/multi-audio con español suele ser un release de mejor calidad que
     // un re-encode solo-latino, y el cliente ya sabe auto-seleccionar la pista
     // en español de las pistas embebidas. Por eso puntúa casi igual.
+    // Orden importa: latino explícito > español ambiguo > castellano. El
+    // "Español"/"Spanish" a secas (sin decir latino ni castellano) en el mundo
+    // torrent suele ser un doblaje latino, así que puntúa alto — antes daba 0 y
+    // enterraba releases latinos mal tagueados. Castellano va por debajo: un
+    // usuario que pide latino NO quiere el doblaje de España.
     parts.lang = p.langs.has('latino')
       ? (p.langs.size > 1 ? 180 : 200)
-      : p.langs.has('castellano') ? 30 : 0
+      : p.langs.has('spanish') && !p.langs.has('castellano') ? 90
+      : p.langs.has('castellano') ? 30
+      : 0
   } else {
     // Pedimos audio original: penalizamos releases que claramente NO lo traen
     // (el caso "Superman 2160p iTA EnG": ganaba un release italiano).
@@ -453,7 +460,12 @@ export function rankCandidates(
   // ofrecemos al usuario "cambiar a latino" si la única opción latina era un
   // AV1 que igual no iba a reproducir. Pero sí se lo ofrecemos cuando existe y
   // simplemente puntuó bajo.
-  const hasLatinoAlternative = kept.some((p) => p.langs.has('latino'))
+  // Cuenta latino explícito y "Español" ambiguo (probable latino), no castellano:
+  // el botón "cambiar a latino" del cliente debe aparecer también cuando hay un
+  // release en español sin la palabra "Latino" (que antes quedaba invisible).
+  const hasLatinoAlternative = kept.some(
+    (p) => p.langs.has('latino') || (p.langs.has('spanish') && !p.langs.has('castellano'))
+  )
 
   const cacheSignal = cacheSignalHealth(kept)
   const cacheCounts = {
