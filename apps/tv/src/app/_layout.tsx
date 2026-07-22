@@ -72,6 +72,13 @@ function RootNavigator() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.bg },
+          // Fundido entre vistas en vez del corte seco / slide por defecto: entrar
+          // a una ficha, persona o al reproductor se siente cohesivo y premium,
+          // como las apps de streaming de referencia. Rápido (200ms) para que sume
+          // pulido sin restar agilidad. El cambio de pestañas del rail va por
+          // Slot (instantáneo) y no pasa por acá.
+          animation: 'fade',
+          animationDuration: 200,
         }}
       />
     </>
