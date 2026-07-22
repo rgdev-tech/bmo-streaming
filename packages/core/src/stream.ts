@@ -54,11 +54,20 @@ const langQ = (lang: AudioLang) => (lang === 'latino' ? '&lang=latino' : '')
 // Fuentes que fallaron al reproducir → el servidor las salta y prueba la siguiente
 const exQ = (exclude?: string[]) => (exclude && exclude.length ? `&exclude=${exclude.join(',')}` : '')
 
+// Capacidad de decode del dispositivo. Cada app la setea al arrancar: apps/tv
+// (Fire TV Stick, poca RAM) llama setHwTier('low') → el resolver le evita 4K y
+// HEVC 10-bit (que caen a decode por software y matan la app por OOM). El resto
+// queda en 'high' (iPhone: sin restricción). Se manda en TODAS las URLs de
+// resolución para que el server rankee/filtre acorde.
+let hwTier: 'low' | 'high' = 'high'
+export function setHwTier(t: 'low' | 'high') { hwTier = t }
+const hwQ = () => (hwTier === 'low' ? '&hw=low' : '')
+
 export const stream = {
   resolveMovie: (id: string | number, lang: AudioLang = 'original', exclude?: string[]) =>
-    api<ResolveInfo>(`/resolve/movie/${id}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
+    api<ResolveInfo>(`/resolve/movie/${id}?lang=${lang}${exQ(exclude)}${hwQ()}`, RESOLVE_TIMEOUT),
   resolveTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original', exclude?: string[]) =>
-    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}?lang=${lang}${exQ(exclude)}`, RESOLVE_TIMEOUT),
+    api<ResolveInfo>(`/resolve/tv/${id}/${season}/${episode}?lang=${lang}${exQ(exclude)}${hwQ()}`, RESOLVE_TIMEOUT),
 
   // Selector de calidad: se listan las fuentes disponibles y se elige por
   // ÍNDICE. El servidor no expone las URLs de Torrentio porque llevan la clave
@@ -66,29 +75,29 @@ export const stream = {
   sources: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number, lang: AudioLang = 'original') =>
     api<SourceOption[]>(
       type === 'tv'
-        ? `/resolve/sources/tv/${id}/${season ?? 1}/${episode ?? 1}?lang=${lang}`
-        : `/resolve/sources/movie/${id}?lang=${lang}`,
+        ? `/resolve/sources/tv/${id}/${season ?? 1}/${episode ?? 1}?lang=${lang}${hwQ()}`
+        : `/resolve/sources/movie/${id}?lang=${lang}${hwQ()}`,
       RESOLVE_TIMEOUT
     ),
   pickSource: (type: 'movie' | 'tv', id: string | number, i: number, season?: number, episode?: number, lang: AudioLang = 'original') =>
     api<ResolveInfo>(
       type === 'tv'
-        ? `/resolve/pick/tv/${id}/${season ?? 1}/${episode ?? 1}?i=${i}&lang=${lang}`
-        : `/resolve/pick/movie/${id}?i=${i}&lang=${lang}`,
+        ? `/resolve/pick/tv/${id}/${season ?? 1}/${episode ?? 1}?i=${i}&lang=${lang}${hwQ()}`
+        : `/resolve/pick/movie/${id}?i=${i}&lang=${lang}${hwQ()}`,
       RESOLVE_TIMEOUT
     ),
 
   // Master HLS proxeado por nuestro servidor (variantes + segmentos + subs)
   masterMovie: (id: string | number, lang: AudioLang = 'original', exclude?: string[]) =>
-    `${API_URL}/stream/master.m3u8?type=movie&id=${id}${langQ(lang)}${exQ(exclude)}`,
+    `${API_URL}/stream/master.m3u8?type=movie&id=${id}${langQ(lang)}${exQ(exclude)}${hwQ()}`,
   masterTv: (id: string | number, season: number, episode: number, lang: AudioLang = 'original', exclude?: string[]) =>
-    `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}${langQ(lang)}${exQ(exclude)}`,
+    `${API_URL}/stream/master.m3u8?type=tv&id=${id}&season=${season}&episode=${episode}${langQ(lang)}${exQ(exclude)}${hwQ()}`,
 
   // Pre-resuelve un stream en segundo plano (calienta el cache del API).
   prewarm: (type: 'movie' | 'tv', id: string | number, season?: number, episode?: number, lang: AudioLang = 'original') => {
     const p = type === 'tv'
-      ? api(`/resolve/tv/${id}/${season ?? 1}/${episode ?? 1}?lang=${lang}`)
-      : api(`/resolve/movie/${id}?lang=${lang}`)
+      ? api(`/resolve/tv/${id}/${season ?? 1}/${episode ?? 1}?lang=${lang}${hwQ()}`)
+      : api(`/resolve/movie/${id}?lang=${lang}${hwQ()}`)
     p.catch(() => {})
   },
 }

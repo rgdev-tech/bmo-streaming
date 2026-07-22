@@ -10,7 +10,7 @@ import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
 import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio } from './torrentio'
-import type { MediaRef } from './torrentio.parse'
+import type { HwTier, MediaRef } from './torrentio.parse'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
 
@@ -361,7 +361,8 @@ async function scrape(
   lang: AudioLang,
   season?: number,
   episode?: number,
-  exclude: string[] = []
+  exclude: string[] = [],
+  hwTier: HwTier = 'high'
 ): Promise<StreamResult | null> {
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) {
@@ -383,7 +384,7 @@ async function scrape(
     // velocidad. 'realdebrid' se trata como una fuente más para el exclude.
     if (debridEnabled && !exclude.includes('realdebrid')) {
       try {
-        const debrid = await resolveDebridStream({ type, tmdbId, lang, media: ref, season, episode })
+        const debrid = await resolveDebridStream({ type, tmdbId, lang, media: ref, season, episode, hwTier })
         if (debrid) {
           const result: StreamResult = {
             url: debrid.url,
@@ -456,12 +457,16 @@ export function resolveStream(
   season?: number,
   episode?: number,
   lang: AudioLang = 'original',
-  exclude: string[] = []
+  exclude: string[] = [],
+  hwTier: HwTier = 'high'
 ): Promise<StreamResult | null> {
   const base = type === 'tv' ? `tv:${tmdbId}:${season}:${episode}` : `movie:${tmdbId}`
   const ex = [...exclude].sort().join(',')
-  const key = ex ? `${base}:${lang}:x=${ex}` : `${base}:${lang}`
-  return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode, exclude))
+  // El hwTier entra en la clave: un Fire TV ('low') y un iPhone ('high') pueden
+  // resolver el mismo título a fuentes distintas, no deben compartir caché.
+  const hw = hwTier === 'low' ? ':hw=low' : ''
+  const key = (ex ? `${base}:${lang}:x=${ex}` : `${base}:${lang}`) + hw
+  return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode, exclude, hwTier))
 }
 
 // Diagnóstico de subtítulos: hace el fetch crudo a Wyzie y reporta qué pasó.
@@ -508,11 +513,12 @@ export async function debugSubs(
 
 export async function listSources(
   type: 'movie' | 'tv', tmdbId: number,
-  season?: number, episode?: number, lang: AudioLang = 'original'
+  season?: number, episode?: number, lang: AudioLang = 'original',
+  hwTier: HwTier = 'high'
 ) {
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return []
-  return listDebridSources({ type, tmdbId, lang, media: built.ref, season, episode })
+  return listDebridSources({ type, tmdbId, lang, media: built.ref, season, episode, hwTier })
 }
 
 // Resuelve UNA fuente concreta elegida por el usuario. No pasa por el caché de
@@ -521,14 +527,15 @@ export async function listSources(
 // arrancara con esa fuente sin que nadie la haya pedido.
 export async function resolvePickedSource(
   type: 'movie' | 'tv', tmdbId: number, pick: number,
-  season?: number, episode?: number, lang: AudioLang = 'original'
+  season?: number, episode?: number, lang: AudioLang = 'original',
+  hwTier: HwTier = 'high'
 ): Promise<StreamResult | null> {
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return null
 
   const subsP = fetchSubtitles(type, tmdbId, season, episode)
   const debrid = await resolveDebridStream(
-    { type, tmdbId, lang, media: built.ref, season, episode },
+    { type, tmdbId, lang, media: built.ref, season, episode, hwTier },
     pick
   )
   if (!debrid) return null

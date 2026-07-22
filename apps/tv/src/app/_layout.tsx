@@ -5,7 +5,15 @@ import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import { AuthProvider, useAuth } from '@bmo/core/auth'
 import { supabaseConfigured } from '@bmo/core/supabase'
+import { setHwTier } from '@bmo/core/stream'
 import { colors } from '@/bmo/theme'
+
+// Esta app corre en Fire TV / Android TV (Stick de poca RAM, sin decoder 4K/
+// HEVC-10bit por hardware). Le avisamos al resolver que somos hardware flojo:
+// así nos evita esas fuentes (que caen a decode por software y matan la app por
+// OOM) y solo nos sirve 1080p H.264/HEVC-8bit reproducible. Va a nivel de módulo
+// para que aplique antes de cualquier resolución.
+setHwTier('low')
 
 // Mantener el splash NATIVO (negro + "BMO") hasta que montemos el splash JS
 // animado por encima: así no hay parpadeo blanco entre el arranque nativo y el JS.

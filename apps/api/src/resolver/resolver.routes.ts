@@ -4,9 +4,16 @@ import {
   listSources, resolvePickedSource, type AudioLang,
 } from './resolver.service'
 import { langCode } from './hls'
+import type { HwTier } from './torrentio.parse'
 
 function parseLang(v?: string): AudioLang {
   return v === 'latino' ? 'latino' : 'original'
+}
+
+// Capacidad de decode del dispositivo. 'low' = Fire TV Stick y afines (poca RAM,
+// sin decoder 4K/HEVC-10bit por hardware) → el resolver les evita ese contenido.
+function parseHwTier(v?: string): HwTier {
+  return v === 'low' ? 'low' : 'high'
 }
 
 // Fuentes a saltar (las que el cliente ya intentó y fallaron al reproducir)
@@ -106,41 +113,41 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   // Real-Debrid en el path).
   .get(
     '/sources/movie/:id',
-    ({ params, query }) => listSources('movie', Number(params.id), undefined, undefined, parseLang(query.lang)),
-    { params: t.Object({ id: t.String() }), query: t.Object({ lang: t.Optional(t.String()) }) }
+    ({ params, query }) => listSources('movie', Number(params.id), undefined, undefined, parseLang(query.lang), parseHwTier(query.hw)),
+    { params: t.Object({ id: t.String() }), query: t.Object({ lang: t.Optional(t.String()), hw: t.Optional(t.String()) }) }
   )
   .get(
     '/sources/tv/:id/:season/:episode',
-    ({ params, query }) => listSources('tv', Number(params.id), Number(params.season), Number(params.episode), parseLang(query.lang)),
+    ({ params, query }) => listSources('tv', Number(params.id), Number(params.season), Number(params.episode), parseLang(query.lang), parseHwTier(query.hw)),
     {
       params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }),
-      query: t.Object({ lang: t.Optional(t.String()) }),
+      query: t.Object({ lang: t.Optional(t.String()), hw: t.Optional(t.String()) }),
     }
   )
   .get(
     '/pick/movie/:id',
     async ({ params, query, set }) => {
-      const result = await resolvePickedSource('movie', Number(params.id), Number(query.i), undefined, undefined, parseLang(query.lang))
+      const result = await resolvePickedSource('movie', Number(params.id), Number(query.i), undefined, undefined, parseLang(query.lang), parseHwTier(query.hw))
       const summary = summarize(result)
       if (!summary) { set.status = 404; return { error: 'Esa fuente no se pudo abrir' } }
       return summary
     },
     {
       params: t.Object({ id: t.String() }),
-      query: t.Object({ i: t.String(), lang: t.Optional(t.String()) }),
+      query: t.Object({ i: t.String(), lang: t.Optional(t.String()), hw: t.Optional(t.String()) }),
     }
   )
   .get(
     '/pick/tv/:id/:season/:episode',
     async ({ params, query, set }) => {
-      const result = await resolvePickedSource('tv', Number(params.id), Number(query.i), Number(params.season), Number(params.episode), parseLang(query.lang))
+      const result = await resolvePickedSource('tv', Number(params.id), Number(query.i), Number(params.season), Number(params.episode), parseLang(query.lang), parseHwTier(query.hw))
       const summary = summarize(result)
       if (!summary) { set.status = 404; return { error: 'Esa fuente no se pudo abrir' } }
       return summary
     },
     {
       params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }),
-      query: t.Object({ i: t.String(), lang: t.Optional(t.String()) }),
+      query: t.Object({ i: t.String(), lang: t.Optional(t.String()), hw: t.Optional(t.String()) }),
     }
   )
 
@@ -149,7 +156,7 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     async ({ params, query, set }) => {
       const lang = parseLang(query.lang)
       const exclude = parseExclude(query.exclude)
-      const result = await resolveStream('movie', Number(params.id), undefined, undefined, lang, exclude)
+      const result = await resolveStream('movie', Number(params.id), undefined, undefined, lang, exclude, parseHwTier(query.hw))
       console.error(`[resolve] movie ${params.id} (${lang}) →`, result?.source ?? 'null')
       const summary = summarize(result)
       if (!summary) {
@@ -160,7 +167,7 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
     },
     {
       params: t.Object({ id: t.String() }),
-      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) }),
+      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()), hw: t.Optional(t.String()) }),
     }
   )
 
@@ -175,7 +182,8 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
         Number(params.season),
         Number(params.episode),
         lang,
-        exclude
+        exclude,
+        parseHwTier(query.hw)
       )
       const summary = summarize(result)
       if (!summary) {
@@ -190,6 +198,6 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
         season: t.String(),
         episode: t.String(),
       }),
-      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()) }),
+      query: t.Object({ lang: t.Optional(t.String()), exclude: t.Optional(t.String()), hw: t.Optional(t.String()) }),
     }
   )

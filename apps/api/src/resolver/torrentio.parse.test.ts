@@ -231,6 +231,36 @@ describe('rejectionOf — rechazos duros', () => {
   })
 })
 
+describe('rejectionOf — hardware flojo (hwTier low: Fire TV Stick)', () => {
+  test('4K se descarta en low, pero NO en high', () => {
+    const p = parse('Movie.2020.2160p.BluRay.x264.mkv')
+    expect(rejectionOf(p, movieRef({ year: 2020 }), 'low')).toBe('too-heavy')
+    expect(rejectionOf(p, movieRef({ year: 2020 }), 'high')).toBeNull()
+  })
+
+  test('HEVC 10-bit se descarta en low, pero NO en high', () => {
+    const p = parse('Movie.2020.1080p.BluRay.x265.10bit.mkv')
+    expect(rejectionOf(p, movieRef({ year: 2020 }), 'low')).toBe('too-heavy')
+    expect(rejectionOf(p, movieRef({ year: 2020 }), 'high')).toBeNull()
+  })
+
+  test('1080p H.264 pasa en low (lo que el Stick decodifica por hardware)', () => {
+    expect(rejectionOf(parse('Movie.2020.1080p.BluRay.x264.mkv'), movieRef({ year: 2020 }), 'low')).toBeNull()
+  })
+
+  test('rankCandidates(low) filtra 4K y 10-bit, deja el 1080p H.264', () => {
+    const r = rankCandidates([
+      stream('Movie.2020.2160p.x265.10bit.mkv'),
+      stream('Movie.2020.1080p.x265.10bit.mkv'),
+      stream('Movie.2020.1080p.x264.mkv'),
+    ], movieRef({ year: 2020 }), 'original', 'low')
+    expect(r.ranked).toHaveLength(1)
+    expect(r.ranked[0].parsed.resolution).toBe(1080)
+    expect(r.ranked[0].parsed.codec).toBe('h264')
+    expect(r.rejected.filter((x) => x.reason === 'too-heavy')).toHaveLength(2)
+  })
+})
+
 describe('procedencia del release', () => {
   test('un PRE-HD "1080p" pierde contra un BluRay 1080p', () => {
     // Caso real: en Superman (2025) ganaba este rip pre-estreno de Tamil,

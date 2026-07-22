@@ -14,7 +14,7 @@ import { tmdbService } from '../tmdb/tmdb.service'
 import { TTLCache } from './cache'
 import {
   rankCandidates, selectRunnable,
-  type AudioTag, type MediaRef, type ScoredCandidate, type TorrentioStream,
+  type AudioTag, type HwTier, type MediaRef, type ScoredCandidate, type TorrentioStream,
 } from './torrentio.parse'
 
 // Etiqueta de idioma del audio para el cliente. "Español" cubre el ambiguo
@@ -174,6 +174,8 @@ export type DebridRequest = {
   media: MediaRef
   season?: number
   episode?: number
+  // Capacidad de decode del dispositivo (Fire TV Stick = 'low' → sin 4K/10-bit).
+  hwTier?: HwTier
 }
 
 // Carrera por olas en vez de lanzar todos los candidatos de una.
@@ -273,7 +275,7 @@ async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
   const imdbId = await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return []
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
-  return selectRunnable(rankCandidates(streams, req.media, req.lang))
+  return selectRunnable(rankCandidates(streams, req.media, req.lang, req.hwTier))
 }
 
 export async function resolveDebridStream(
@@ -290,7 +292,7 @@ export async function resolveDebridStream(
 
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
   const tFetch = Date.now() - t0
-  const r = rankCandidates(streams, req.media, req.lang)
+  const r = rankCandidates(streams, req.media, req.lang, req.hwTier)
 
   if (r.cacheSignal === 'absent' && streams.length > 0) {
     // Torrentio cambió el formato del marcador de cacheado: seguimos andando

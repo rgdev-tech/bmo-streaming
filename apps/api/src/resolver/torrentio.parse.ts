@@ -73,6 +73,14 @@ export type MediaRef = {
 export type Rejection =
   | 'no-url' | 'not-video' | 'av1'
   | 'wrong-year' | 'wrong-season' | 'wrong-episode'
+  | 'too-heavy'
+
+// Capacidad de decodificación del dispositivo que pide el stream:
+//  - 'high': iPhone / TV con hardware capaz → sin restricciones extra.
+//  - 'low':  Fire TV Stick y similares de poca RAM → solo lo que decodifican por
+//    HARDWARE (1080p H.264/HEVC-8bit). El 4K y el HEVC 10-bit caen a software y
+//    revientan la memoria (el LMK de Android mata la app). Se rechazan de plano.
+export type HwTier = 'low' | 'high'
 
 export type ScoredCandidate = {
   parsed: ParsedStream
@@ -300,7 +308,7 @@ export function titleOverlap(filename: string, m: MediaRef): number {
 
 // SOLO descartes categóricos: contenido equivocado o imposible de reproducir.
 // Todo lo demás (calidad, tamaño, idioma) es preferencia y va al score.
-export function rejectionOf(p: ParsedStream, m: MediaRef): Rejection | null {
+export function rejectionOf(p: ParsedStream, m: MediaRef, hwTier: HwTier = 'high'): Rejection | null {
   if (!p.resolveUrl) return 'no-url'
   if (NON_VIDEO_EXT_RE.test(p.filename)) return 'not-video'
 
@@ -308,6 +316,14 @@ export function rejectionOf(p: ParsedStream, m: MediaRef): Rejection | null {
   // posteriores; por software un 4K AV1 es imposible en un teléfono. Reproduce
   // negro o directamente falla, así que no es una preferencia: es inservible.
   if (p.codec === 'av1') return 'av1'
+
+  // Dispositivo de poca RAM (Fire TV Stick): lo que no decodifica por HARDWARE
+  // cae a software y lo mata por OOM. El 4K y el HEVC 10-bit son los culpables —
+  // se descartan para que solo le llegue 1080p H.264/HEVC-8bit reproducible.
+  if (hwTier === 'low') {
+    if (p.resolution === 2160) return 'too-heavy'
+    if (p.codec === 'hevc' && p.bitDepth === 10) return 'too-heavy'
+  }
 
   if (m.type === 'tv') {
     // Nada de validar año en series: el año del archivo es el de emisión del
@@ -445,14 +461,15 @@ export type RankResult = {
 export function rankCandidates(
   streams: TorrentioStream[],
   m: MediaRef,
-  lang: 'original' | 'latino'
+  lang: 'original' | 'latino',
+  hwTier: HwTier = 'high'
 ): RankResult {
   const parsed = streams.map(parseStream)
   const rejected: { label: string; reason: Rejection }[] = []
   const kept: ParsedStream[] = []
 
   for (const p of parsed) {
-    const reason = rejectionOf(p, m)
+    const reason = rejectionOf(p, m, hwTier)
     if (reason) rejected.push({ label: p.filename || '(sin nombre)', reason })
     else kept.push(p)
   }

@@ -27,8 +27,7 @@ function BackdropCard({
   onFocus?: () => void
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale(1.05)
-  // Si no hay backdrop se cae al póster antes que dejar un hueco gris. w300 basta
-  // para 248 dp y pesa mucho menos que w780 (decode/GPU en el emulador).
+  // Si no hay backdrop se cae al póster antes que dejar un hueco gris.
   const uri = backdropUrl(item.backdrop_path, 'w780') ?? posterUrl(item.poster_path, 'w500')
 
   return (

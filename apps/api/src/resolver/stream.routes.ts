@@ -24,7 +24,7 @@ function normalizeVtt(raw: string): string {
 
 const playlistCache = new TTLCache<string>(60 * 60 * 1000) // 1h
 
-type Query = { type: string; id: string; season?: string; episode?: string; lang?: string; exclude?: string }
+type Query = { type: string; id: string; season?: string; episode?: string; lang?: string; exclude?: string; hw?: string }
 
 function resolveFromQuery(q: Query) {
   return resolveStream(
@@ -33,12 +33,13 @@ function resolveFromQuery(q: Query) {
     q.season ? Number(q.season) : undefined,
     q.episode ? Number(q.episode) : undefined,
     q.lang === 'latino' ? 'latino' : 'original',
-    q.exclude ? q.exclude.split(',').map((s) => s.trim()).filter(Boolean) : []
+    q.exclude ? q.exclude.split(',').map((s) => s.trim()).filter(Boolean) : [],
+    q.hw === 'low' ? 'low' : 'high'
   )
 }
 
 function qs(q: Query) {
-  return `type=${q.type}&id=${q.id}&season=${q.season ?? ''}&episode=${q.episode ?? ''}&lang=${q.lang ?? ''}&exclude=${q.exclude ?? ''}`
+  return `type=${q.type}&id=${q.id}&season=${q.season ?? ''}&episode=${q.episode ?? ''}&lang=${q.lang ?? ''}&exclude=${q.exclude ?? ''}&hw=${q.hw ?? ''}`
 }
 
 function baseUrl(request: Request): string {
@@ -286,6 +287,7 @@ export const streamRoutes = new Elysia({ prefix: '/stream' })
         type: t.String(), id: t.String(),
         season: t.Optional(t.String()), episode: t.Optional(t.String()),
         lang: t.Optional(t.String()), exclude: t.Optional(t.String()),
+        hw: t.Optional(t.String()),
       }),
     }
   )
