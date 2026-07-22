@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@bmo/core": "file:../../packages/core",
+    "@bmo/player": "file:../../packages/player",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@supabase/supabase-js": "^2.110.7",
@@ -32,6 +33,7 @@
     "expo-status-bar": "~56.0.4",
     "expo-symbols": "~56.0.5",
     "expo-system-ui": "~56.0.5",
+    "expo-updates": "~56.0.22",
     "expo-video": "~56.1.4",
     "expo-web-browser": "~56.0.5",
     "react": "19.2.3",

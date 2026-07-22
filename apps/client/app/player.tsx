@@ -24,7 +24,9 @@ import {
   type SubtitleStyle as SubtitleStyleT,
 } from '@/lib/subtitleStyle'
 import { decodeSrtBytes, parseSrt, findActiveCue, type SrtCue } from '@/lib/srt'
-import { saveProgress, getProgress, setUpNext, type Progress } from '@/lib/library'
+import { getProgress, setUpNext, type Progress } from '@/lib/library'
+// Guardado de progreso y helpers compartidos con apps/tv (headless).
+import { useProgressSaver, describeSource, fmt } from '@bmo/player'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
 import { Touchable } from '@/components/Touchable'
@@ -37,7 +39,6 @@ import type {
 const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
 const NEXT_PILL_S = 50      // segundos finales en que aparece el pill "Siguiente"
-const SAVE_EVERY_MS = 5000  // throttle de guardado de progreso (evita I/O por segundo)
 
 // Descarga el subtítulo en español a disco (caché), lo parsea y devuelve las
 // cues listas para renderizar como overlay en JS — no va a VLCKit: el estilo
@@ -482,23 +483,6 @@ export default function PlayerScreen() {
   )
 }
 
-// Etiqueta legible de una fuente: "4K · HDR · HEVC · 12.4 GB". El nombre de
-// archivo crudo va debajo como línea secundaria — sirve para distinguir dos
-// opciones parecidas, pero no es lo que el usuario lee primero.
-function describeSource(s: SourceOption): string {
-  const parts: string[] = []
-  parts.push(
-    s.resolution === 2160 ? '4K'
-    : s.resolution ? `${s.resolution}p`
-    : 'Calidad desconocida'
-  )
-  if (s.hdr && s.hdr !== 'none') parts.push(s.hdr === 'dv' ? 'Dolby Vision' : 'HDR')
-  if (s.codec) parts.push(s.codec === 'hevc' ? 'HEVC' : s.codec === 'h264' ? 'H.264' : s.codec.toUpperCase())
-  if (s.langs.includes('latino')) parts.push('Latino')
-  if (s.sizeGB != null) parts.push(s.sizeGB >= 1 ? `${s.sizeGB.toFixed(1)} GB` : `${Math.round(s.sizeGB * 1024)} MB`)
-  return parts.join('  ·  ')
-}
-
 // ── Pantalla de carga: mínima, rápida, con selector de audio discreto ───────
 
 function LoadingScreen({
@@ -611,8 +595,10 @@ function NativePlayer({
 }) {
   const insets = useSafeAreaInsets()
   const videoRef = useRef<VideoView>(null)
-  const lastSave = useRef(0)
+  // progressRef local: onFullscreenExit lo lee para la fracción vista. El
+  // guardado (throttle + final al desmontar) lo maneja useProgressSaver.
   const progressRef = useRef({ time: 0, duration: 0 })
+  const { report: reportProgress } = useProgressSaver(meta)
   const [duration, setDuration] = useState(0)
   const [position, setPosition] = useState(0)
   const [inFullscreen, setInFullscreen] = useState(false)
@@ -647,22 +633,10 @@ function NativePlayer({
     progressRef.current = { time: currentTime, duration: dur }
     setPosition(currentTime)
     if (dur > 0) setDuration(dur)
-    const now = Date.now()
-    if (dur > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-      lastSave.current = now
-      saveProgress({ ...meta, position: currentTime, duration: dur })
-    }
+    reportProgress(currentTime, dur)
   })
 
   useEventListener(player, 'playToEnd', () => onEnded())
-
-  // Al desmontar → guarda el progreso final (el cierre lo maneja onFullscreenExit)
-  useEffect(() => {
-    return () => {
-      const { time, duration: d } = progressRef.current
-      if (d > 0) saveProgress({ ...meta, position: time, duration: d })
-    }
-  }, [])
 
   const remaining = Math.max(0, duration - position)
   const showPill = hasNext && duration > 0 && remaining > 1 && remaining <= NEXT_PILL_S
@@ -775,8 +749,10 @@ function VlcPlayer({
   const dropdownTop = topBarTop + 44
   const dropdownHeight = Math.min(280, winHeight - dropdownTop - 70)
   const vlcRef = useRef<VideoVLCRef>(null)
-  const lastSave = useRef(0)
+  // progressRef local: lo usan seekTo, la detección de fin y la fracción vista.
+  // El guardado (throttle + final al desmontar) lo maneja useProgressSaver.
   const progressRef = useRef({ time: 0, duration: 0 })
+  const { report: reportProgress } = useProgressSaver(meta)
   const startedRef = useRef(false)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const seeking = useRef(false)
@@ -1077,11 +1053,7 @@ function VlcPlayer({
     onPosition?.(data.currentTime)
     setPosition(data.currentTime)
     if (data.seekableDuration > 0) setDuration(data.seekableDuration)
-    const now = Date.now()
-    if (data.seekableDuration > 0 && data.currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-      lastSave.current = now
-      saveProgress({ ...meta, position: data.currentTime, duration: data.seekableDuration })
-    }
+    reportProgress(data.currentTime, data.seekableDuration)
   }
 
   function handleError(data: OnVideoErrorData) {
@@ -1092,11 +1064,10 @@ function VlcPlayer({
     setBuffering(data.isBuffering)
   }
 
-  // Al desmontar → guarda el progreso final
+  // Al desmontar → limpia el timer de gracia del seek (el progreso final lo
+  // guarda useProgressSaver).
   useEffect(() => {
     return () => {
-      const { time, duration: d } = progressRef.current
-      if (d > 0) saveProgress({ ...meta, position: time, duration: d })
       if (seekGraceTimer.current) clearTimeout(seekGraceTimer.current)
     }
   }, [])
@@ -1263,7 +1234,7 @@ function VlcPlayer({
 
           {/* Barra inferior: scrubber + tiempos */}
           <View style={[styles.vlcBottomBar, { bottom: insets.bottom + 12 }]}>
-            <Text style={styles.vlcTime}>{fmtTime(position)}</Text>
+            <Text style={styles.vlcTime}>{fmt(position)}</Text>
             <Slider
               style={styles.vlcSlider}
               value={position}
@@ -1275,7 +1246,7 @@ function VlcPlayer({
               onSlidingStart={() => { seeking.current = true }}
               onSlidingComplete={(v) => { seekTo(v) }}
             />
-            <Text style={styles.vlcTime}>{fmtTime(duration)}</Text>
+            <Text style={styles.vlcTime}>{fmt(duration)}</Text>
           </View>
         </View>
       )}
@@ -1631,15 +1602,6 @@ function SubtitleStyleRow<T extends string>({
       </View>
     </View>
   )
-}
-
-function fmtTime(s: number): string {
-  if (!isFinite(s) || s < 0) s = 0
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = Math.floor(s % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-  return `${m}:${String(sec).padStart(2, '0')}`
 }
 
 // ── Pantalla siguiente episodio (al terminar) ───────────────────────────────

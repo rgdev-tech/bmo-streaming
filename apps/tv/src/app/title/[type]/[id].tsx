@@ -37,7 +37,8 @@ export default function TitleScreen() {
 
   const { data, loading, error } = useAsync<MediaDetails>(
     () => (isTv ? tmdb.tv(id) : tmdb.movie(id)),
-    [type, id]
+    [type, id],
+    `title:${type}:${id}`
   )
 
   const [inList, setInList] = useState(false)

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bunx tsc *)",
+      "Bash(npx tsc *)",
+      "Bash(bun run *)",
+      "Bash(node -c app/player.tsx)",
+      "Bash(node_modules/.bin/tsc --noEmit -p .)",
+      "Bash(adb devices *)",
+      "Bash(adb shell *)",
+      "Read(//Users/diegoguzzo/**)",
+      "Bash(kill 14219 14242)",
+      "Bash(adb disconnect *)"
+    ]
+  }
+}

@@ -12,7 +12,7 @@ const PHOTO = 190
 export default function PersonScreen() {
   const router = useRouter()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { data, loading, error } = useAsync<PersonDetails>(() => tmdb.person(id), [id])
+  const { data, loading, error } = useAsync<PersonDetails>(() => tmdb.person(id), [id], `person:${id}`)
 
   function openTitle(item: MediaItem) {
     const t = item.media_type === 'tv' || (!!item.name && !item.title) ? 'tv' : 'movie'

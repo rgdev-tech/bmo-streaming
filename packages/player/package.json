@@ -1,0 +1,20 @@
+{
+  "name": "@bmo/player",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//react-pin": "Mismo criterio que @bmo/core: react va PINNEADO y como peerDependency (no dependency) para no reintroducir el doble React ('Invalid hook call'). @bmo/core también es peer: cada app ya lo provee (client vía workspace:*, tv vía file: con npm/disableHierarchicalLookup). Este paquete es SOLO lógica/hooks headless — no depende de react-native ni expo.",
+  "peerDependencies": {
+    "react": "19.1.0",
+    "@bmo/core": "*"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  }
+}

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@bmo/core": "workspace:*",
+    "@bmo/player": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/slider": "5.0.1",
     "@supabase/supabase-js": "^2.110.7",

@@ -7,9 +7,13 @@ const repoRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// @bmo/core vive en packages/core (fuera de este proyecto), enlazado por `file:`.
-// Metro necesita vigilar esa carpeta para que el hot reload lo tome.
-config.watchFolders = [path.resolve(repoRoot, 'packages/core')];
+// @bmo/core y @bmo/player viven en packages/* (fuera de este proyecto),
+// enlazados por `file:`. Metro necesita vigilar esas carpetas para tomarlos
+// (transformar su TS y el hot reload).
+config.watchFolders = [
+  path.resolve(repoRoot, 'packages/core'),
+  path.resolve(repoRoot, 'packages/player'),
+];
 
 // CRÍTICO: apps/tv está FUERA del workspace de bun y usa react-native-tvos,
 // mientras que packages/core/node_modules tiene el react-native común (0.81.5)

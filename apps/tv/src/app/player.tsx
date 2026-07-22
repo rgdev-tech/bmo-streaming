@@ -32,109 +32,43 @@ import type {
 } from '../../vendor/react-native-video-vlc/src'
 import { Ionicons, MaterialIcons } from '@expo/vector-icons'
 import {
-  getProgress,
-  saveProgress,
-  type Progress,
-} from '@bmo/core/library'
-import {
-  stream,
-  getAudioLang,
-  setAudioLang as persistAudioLang,
   type ResolveInfo,
   type AudioLang,
-  type Subtitle,
   type SourceOption,
 } from '@bmo/core/stream'
-import { parseSrt, findActiveCue, decodeSrtBytes, type SrtCue } from '@bmo/core/srt'
+import { findActiveCue, type SrtCue } from '@bmo/core/srt'
 import {
-  getSubtitleStyle,
-  setSubtitleStyle,
-  getSubtitleOffset,
-  setSubtitleOffset,
-  DEFAULT_SUBTITLE_STYLE,
   SUBTITLE_FONT_SIZE,
   SUBTITLE_COLOR_CSS,
   type SubtitleStyle,
 } from '@bmo/core/subtitleStyle'
+// Lógica de reproducción compartida con apps/client (headless): resolución de
+// fuente + fallback, subtítulos, preferencias, progreso, auto-hide del HUD.
+// Acá solo queda la UI de TV (cruceta, foco) y el montaje de los motores.
+import {
+  usePlaybackSource,
+  useSpanishSubs,
+  useSubtitlePrefs,
+  useProgressSaver,
+  useAutoHideControls,
+  useSeekHint,
+  fmt,
+  isSpanish,
+  describeSource,
+  stripEpisodeSuffix,
+  resolvePlaybackUri,
+  type MediaMeta,
+} from '@bmo/player'
 import { FocusButton } from '@/bmo/FocusButton'
 import { colors, heroTitle, safe } from '@/bmo/theme'
 
-const SAVE_EVERY_MS = 5000
 const SEEK_STEP = 10 // segundos por pulsación de la cruceta
-const CONTROLS_TIMEOUT = 4000 // se ocultan solos tras este tiempo sin tocar nada
-// Cuántas fuentes distintas probamos antes de rendirnos. Cada fallo de
-// reproducción (incluido un códec que el dispositivo no decodifica, p.ej. HEVC
-// en hardware sin soporte) excluye esa fuente y re-resuelve la siguiente.
-const MAX_SOURCE_FALLBACKS = 4
 
 // Pestañas del menú de opciones (mismas que el reproductor del teléfono).
 // Vista del menú de opciones: 'main' = las dos columnas simultáneas
 // (Subtítulos + Audio, estilo HBO); el resto son los "paneles" de extras que se
 // abren desde los iconos de la barra superior.
 type MenuTabKey = 'main' | 'style' | 'quality' | 'screen'
-
-function fmt(sec: number) {
-  if (!isFinite(sec) || sec < 0) sec = 0
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  const mm = String(m).padStart(h ? 2 : 1, '0')
-  const ss = String(s).padStart(2, '0')
-  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-}
-
-// ¿Esta pista (audio o subtítulo) es española? Se mira el código de idioma
-// (ISO 639) y, como respaldo, la etiqueta legible — muchos MKV no titulan las
-// pistas pero sí las etiquetan por idioma.
-function isSpanish(t: { language?: string; label?: string }): boolean {
-  const lang = (t.language ?? '').toLowerCase()
-  if (lang.startsWith('es') || lang.startsWith('spa')) return true
-  return /\b(?:spa|esp|spanish|español|castellano|latino)\b/i.test(t.label ?? '')
-}
-
-// Etiqueta legible de una fuente: "4K · HDR · HEVC · 12.4 GB". El nombre de
-// archivo crudo va debajo como línea secundaria.
-function describeSource(s: SourceOption): string {
-  const parts: string[] = []
-  parts.push(
-    s.resolution === 2160 ? '4K'
-    : s.resolution ? `${s.resolution}p`
-    : 'Calidad desconocida'
-  )
-  if (s.hdr && s.hdr !== 'none') parts.push(s.hdr === 'dv' ? 'Dolby Vision' : 'HDR')
-  if (s.codec) parts.push(s.codec === 'hevc' ? 'HEVC' : s.codec === 'h264' ? 'H.264' : s.codec.toUpperCase())
-  if (s.langs.includes('latino')) parts.push('Latino')
-  if (s.sizeGB != null) parts.push(s.sizeGB >= 1 ? `${s.sizeGB.toFixed(1)} GB` : `${Math.round(s.sizeGB * 1024)} MB`)
-  return parts.join('  ·  ')
-}
-
-// Baja el subtítulo español y lo parsea EN MEMORIA (sin escribir a disco: en TV
-// no tenemos expo-file-system y solo necesitamos las cues para el overlay JS).
-// Se lee como bytes crudos y se decodifica con decodeSrtBytes, igual que el
-// teléfono, para no romper acentos cuando el .srt viene en latin1.
-async function fetchSpanishSubs(subs: Subtitle[]): Promise<SrtCue[]> {
-  const esSubs = subs.filter((s) => s.lang === 'es')
-  for (const s of esSubs) {
-    for (const url of [s.url, ...(s.altUrls ?? [])]) {
-      try {
-        const res = await fetch(url)
-        if (!res.ok) continue
-        const ct = res.headers.get('content-type') ?? ''
-        // Un .srt real nunca es text/html; una página de bloqueo de Cloudflare sí.
-        if (/text\/html/i.test(ct)) continue
-        const buf = await res.arrayBuffer()
-        const bytes = new Uint8Array(buf)
-        let binary = ''
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-        const cues = parseSrt(decodeSrtBytes(binary))
-        if (cues.length) return cues
-      } catch {
-        // siguiente url
-      }
-    }
-  }
-  return []
-}
 
 export default function PlayerScreen() {
   const router = useRouter()
@@ -153,180 +87,51 @@ export default function PlayerScreen() {
   const seasonN = params.season ? Number(params.season) : undefined
   const episodeN = params.episode ? Number(params.episode) : undefined
 
-  const [info, setInfo] = useState<ResolveInfo | null>(null)
-  const [startAt, setStartAt] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  // Fuentes ya intentadas que fallaron al reproducir. Se pasan como `exclude` al
-  // resolver, que las saltea y devuelve la siguiente. Cambiarlo dispara una
-  // nueva resolución (ver el effect de abajo) y remonta el <Playback>.
-  const [excluded, setExcluded] = useState<string[]>([])
-
-  // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
-  // Default 'latino' — coincide con el default de getAudioLang(), así no dispara
-  // un resolve de más con 'original' antes de leer la preferencia real.
-  const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
-  useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
-
-  // Selector de calidad: fuente elegida a mano (índice) — cambia la resolución
-  // por la vía `pick`, sin pasar por el resolve automático.
-  const [pickedSource, setPickedSource] = useState<number | null>(null)
-  const [sources, setSources] = useState<SourceOption[]>([])
-  const [sourcesLoading, setSourcesLoading] = useState(false)
-
-  // Subtítulo en español descargado + parseado (overlay JS con estilo propio).
-  const [srtCues, setSrtCues] = useState<SrtCue[]>([])
-
-  // Última posición conocida, para conservarla al cambiar de fuente/calidad.
-  const lastPositionRef = useRef(0)
+  // Toda la orquestación (resolver la mejor fuente, fallback por `exclude`,
+  // elección manual de calidad, idioma de audio) vive en @bmo/player, compartida
+  // con el teléfono. Acá solo la cableamos a la UI de TV.
+  const src = usePlaybackSource({
+    type: isTv ? 'tv' : 'movie',
+    id,
+    season: seasonN,
+    episode: episodeN,
+  })
 
   // Datos para persistir progreso, idénticos a los que guarda apps/client, para
-  // que "Seguir viendo" y el punto de retomar sean compartidos entre teléfono
-  // y TV — las claves de almacenamiento son las mismas.
-  const meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'> = {
+  // que "Seguir viendo" y el punto de retomar sean compartidos entre teléfono y
+  // TV — las claves de almacenamiento son las mismas. Solo el título base, sin el
+  // sufijo "· T_:E_" (la temporada/episodio ya van en season/episode).
+  const meta: MediaMeta = {
     id: Number(id),
     media_type: isTv ? 'tv' : 'movie',
-    // Guardamos SOLO el título base, sin el sufijo "· T_:E_": la temporada y el
-    // episodio ya van en season/episode. Si lo guardáramos con sufijo, cada
-    // pantalla que lo re-muestra le agrega otro y se acumula ("· T9:E2 · T9:E2…").
-    // El regex saca uno o más sufijos al final (limpia también títulos ya viciados).
-    title: (params.title ?? '').replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, ''),
+    title: stripEpisodeSuffix(params.title ?? ''),
     poster_path: params.poster ?? null,
     backdrop_path: params.backdrop ?? null,
     season: seasonN,
     episode: episodeN,
   }
 
-  // ── Resolución de la fuente ────────────────────────────────────────────────
-  // Corre en el primer render y cada vez que cambia `excluded` (una fuente
-  // falló) o `audioLang`. Vuelve al loader mientras re-resuelve, así el
-  // <Playback> se desmonta y vuelve a montar con la URI nueva. La elección
-  // manual de calidad NO pasa por acá (es imperativa, en pickSource).
-  useEffect(() => {
-    let cancelled = false
-    // NO ponemos info=null acá: eso desmontaba <Playback> (y su VideoPlayer) en
-    // cada re-resolución, y ese remount rápido es lo que provocaba el crash
-    // "Cannot use shared object that was already released" (carrera nativo↔JS: la
-    // mutación Fabric de setear el prop `player` llegaba después de que el JS ya
-    // había liberado ese player en el unmount). Manteniendo la fuente anterior
-    // hasta que llega la nueva, <Playback> NO se remonta: el cambio de `uri`
-    // fluye por useVideoPlayer, que libera el player viejo en un effect (después
-    // de commitear el nuevo al VideoView), sin carrera. Solo el primer arranque
-    // muestra el loader, porque `info` ya nace en null.
+  // Subtítulo español descargado + parseado (overlay JS con estilo propio).
+  const srtCues = useSpanishSubs(src.info)
 
-    async function resolve() {
-      const pos = await getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN)
-      if (cancelled) return
-      setStartAt(pos)
-
-      const res = isTv
-        ? await stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang, excluded)
-        : await stream.resolveMovie(id, audioLang, excluded)
-      if (cancelled) return
-      setInfo(res)
-    }
-
-    resolve().catch((e) => !cancelled && setError(String(e?.message ?? e)))
-    return () => {
-      cancelled = true
-    }
-  }, [id, isTv, seasonN, episodeN, excluded, audioLang])
-
-  // ── Lista de fuentes (para el menú de calidad) ─────────────────────────────
-  // Se pide en segundo plano DESPUÉS de que hay stream: es info para un menú que
-  // quizá nunca se abra, no debe competir con el arranque de la reproducción.
-  const ready = !!info
-  useEffect(() => {
-    if (!ready) return
-    let cancelled = false
-    setSourcesLoading(true)
-    stream.sources(isTv ? 'tv' : 'movie', id, seasonN, episodeN, audioLang)
-      .then((list) => { if (!cancelled) setSources(list) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setSourcesLoading(false) })
-    return () => { cancelled = true }
-  }, [ready, isTv, id, seasonN, episodeN, audioLang])
-
-  // ── Subtítulo español (overlay JS) ─────────────────────────────────────────
-  // Se baja en paralelo, sin bloquear el arranque; el overlay lo recoge apenas
-  // llega. Se re-baja por fuente (cada info nuevo trae sus propios subtítulos).
-  useEffect(() => {
-    if (!info) { setSrtCues([]); return }
-    if (info.type !== 'file') { setSrtCues([]); return }
-    let cancelled = false
-    fetchSpanishSubs(info.subtitles ?? [])
-      .then((cues) => { if (!cancelled) setSrtCues(cues) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [info])
-
-  // Una fuente falló al reproducir (URL muerta, señuelo que pasó el filtro, o un
-  // códec que este dispositivo no decodifica). Si queda margen, la excluimos y
-  // re-resolvemos; si no, mostramos el error. La granularidad del `exclude` es
-  // por fuente (no por archivo): excluir 'realdebrid' cae a los scrapers HTTP,
-  // que suelen servir H.264/HLS reproducibles donde el MKV/HEVC no lo era.
-  const handleSourceFailed = useCallback(
-    (failedSource: string, message: string) => {
-      if (
-        !failedSource ||
-        excluded.includes(failedSource) ||
-        excluded.length >= MAX_SOURCE_FALLBACKS
-      ) {
-        setError(message)
-        return
-      }
-      setExcluded((prev) => (prev.includes(failedSource) ? prev : [...prev, failedSource]))
-    },
-    [excluded]
-  )
-
-  // Cambia el idioma de audio: persiste, resetea calidad/exclusiones y deja que
-  // el effect re-resuelva desde cero con la nueva preferencia.
-  const changeAudioLang = useCallback((lang: AudioLang) => {
-    setAudioLangState((prev) => {
-      if (prev === lang) return prev
-      persistAudioLang(lang)
-      setPickedSource(null)
-      setExcluded([])
-      return lang
-    })
-  }, [])
-
-  // Cambia de fuente por índice (menú de calidad): re-resuelve por la vía `pick`
-  // y remonta el player desde la posición actual (no cuesta el progreso).
-  const pickSource = useCallback(
-    async (i: number) => {
-      setPickedSource(i)
-      // Igual que en el re-resolve: no desmontamos el player (no info=null). El
-      // cambio de fuente entra por `uri` y useVideoPlayer hace el swap seguro.
-      try {
-        const res = await stream.pickSource(isTv ? 'tv' : 'movie', id, i, seasonN, episodeN, audioLang)
-        setStartAt(lastPositionRef.current)
-        setInfo(res)
-      } catch {
-        setError('No se pudo abrir esa fuente')
-      }
-    },
-    [isTv, id, seasonN, episodeN, audioLang]
-  )
-
-  if (error) {
+  if (src.error) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorTitle}>No pude reproducir</Text>
         <Text style={styles.errorHint} numberOfLines={3}>
-          {error}
+          {src.error}
         </Text>
         <FocusButton label="Volver" primary hasTVPreferredFocus onPress={() => router.back()} />
       </View>
     )
   }
 
-  if (!info) {
+  if (!src.info) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={colors.text} />
         <Text style={styles.loadingText}>
-          {excluded.length ? 'Probando otra fuente…' : 'Buscando la mejor fuente…'}
+          {src.excluded.length ? 'Probando otra fuente…' : 'Buscando la mejor fuente…'}
         </Text>
       </View>
     )
@@ -337,30 +142,30 @@ export default function PlayerScreen() {
   //    que decodifica por software y reproduce lo que ExoPlayer no puede.
   //  - 'hls' (master proxeado por nuestro API) → expo-video/ExoPlayer, que
   //    maneja HLS nativo mejor. Mismos props para ambos (swap limpio).
-  const Engine = info.type === 'file' ? VlcPlayback : Playback
+  const Engine = src.info.type === 'file' ? VlcPlayback : Playback
 
   return (
     <Engine
       // Sin `key` de remount a propósito: los cambios de fuente (fallback por
       // `excluded` o elección manual) fluyen por la prop `info` → `uri`, y el
       // motor hace el swap de forma segura. Remontar acá era lo que causaba la
-      // carrera "already released" (ver el resolve effect).
-      info={info}
-      excluded={excluded}
-      audioLang={audioLang}
-      startAt={startAt}
+      // carrera "already released" (ver usePlaybackSource).
+      info={src.info}
+      excluded={src.excluded}
+      audioLang={src.audioLang}
+      startAt={src.startAt}
       meta={meta}
       title={params.title ?? ''}
       srtCues={srtCues}
-      sources={sources}
-      sourcesLoading={sourcesLoading}
-      activeSourceIndex={pickedSource}
+      sources={src.sources}
+      sourcesLoading={src.sourcesLoading}
+      activeSourceIndex={src.pickedSource}
       offsetKey={`${params.type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
       onExit={() => router.back()}
-      onSourceFailed={handleSourceFailed}
-      onChangeAudioLang={changeAudioLang}
-      onPickSource={pickSource}
-      onPosition={(t) => { lastPositionRef.current = t }}
+      onSourceFailed={src.onSourceFailed}
+      onChangeAudioLang={src.changeAudioLang}
+      onPickSource={src.pickSource}
+      onPosition={src.reportPosition}
     />
   )
 }
@@ -372,7 +177,7 @@ type PlaybackProps = {
   excluded: string[]
   audioLang: AudioLang
   startAt: number
-  meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
+  meta: MediaMeta
   title: string
   srtCues: SrtCue[]
   sources: SourceOption[]
@@ -434,12 +239,7 @@ function Playback({
   // la siguiente. El master HLS re-resuelve en el servidor, así que le pasamos
   // el mismo `exclude` para que elija la misma fuente ya validada acá.
   const isTv = meta.media_type === 'tv'
-  const uri =
-    info.type === 'hls'
-      ? isTv
-        ? stream.masterTv(meta.id, meta.season ?? 1, meta.episode ?? 1, audioLang, excluded)
-        : stream.masterMovie(meta.id, audioLang, excluded)
-      : info.streamUrl
+  const uri = resolvePlaybackUri(info, meta, audioLang, excluded)
 
   const player = useVideoPlayer(
     {
@@ -466,7 +266,6 @@ function Playback({
   const [playing, setPlaying] = useState(true)
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState(0)
-  const [controlsVisible, setControlsVisible] = useState(true)
   const [buffering, setBuffering] = useState(true)
 
   // Menú de opciones (Audio / Subtítulos / Estilo / Calidad). null = cerrado.
@@ -477,8 +276,6 @@ function Playback({
   // registra una sola vez y no debe capturar un menuTab viejo).
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
-  const controlsVisibleRef = useRef(controlsVisible)
-  controlsVisibleRef.current = controlsVisible
 
   // Pistas nativas expuestas por expo-video (ExoPlayer): audio y subtítulos
   // embebidos / del HLS. La selección de audio va directo al player; la de
@@ -487,25 +284,20 @@ function Playback({
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([])
   const [currentAudioId, setCurrentAudioId] = useState<string | undefined>(undefined)
 
-  // Subtítulo: 'external' = el .srt español que bajamos y dibujamos nosotros
-  // (estilo/sincronía ajustables); 'none' = apagado; string = id de una pista
-  // nativa (la pinta ExoPlayer). Si hay español disponible arranca ahí.
-  const [subMode, setSubMode] = useState<'external' | 'none' | string>('none')
-  const subModeChosenByUser = useRef(false)
+  // HUD auto-ocultable, badge de seek, preferencias de subtítulo y guardado de
+  // progreso: todo compartido con el teléfono vía @bmo/player. `reveal` se
+  // aliasa a `revealControls` para no tocar el JSX del HUD.
+  const { controlsVisible, reveal: revealControls, hide: hideControls, controlsVisibleRef } =
+    useAutoHideControls({ menuOpen: menuTab !== null })
+  const { seekHint, flashSeek } = useSeekHint()
+  const { subStyle, subOffset, subMode, chooseSubMode, changeSubStyle, bumpOffset } =
+    useSubtitlePrefs({ offsetKey, srtCues, subtitleTracks })
+  const { report: reportProgress } = useProgressSaver(meta)
 
-  // Estilo y sincronía del overlay español (solo afecta al modo 'external').
-  const [subStyle, setSubStyleState] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE)
-  useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
-  const [subOffset, setSubOffsetState] = useState(0)
-  useEffect(() => { getSubtitleOffset(offsetKey).then(setSubOffsetState) }, [offsetKey])
-
-  const progressRef = useRef({ time: 0, duration: 0 })
-  const lastSave = useRef(0)
   const started = useRef(false)
   // Un solo reporte de fallo por montaje: el player puede emitir varios eventos
   // 'error' seguidos, pero la fuente se excluye una sola vez.
   const reportedFail = useRef(false)
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Antes, el remount por fuente reseteaba estos flags solo. Ahora que <Playback>
   // NO se remonta (para evitar la carrera "already released"), los reseteamos a
@@ -519,31 +311,6 @@ function Playback({
 
   // "Llenar pantalla" (recorta bordes) vs "Ajustar" (ve el frame completo).
   const [filled, setFilled] = useState(false)
-  // Badge transitorio de seek (±Ns), sin el HUD completo (ver VlcPlayback).
-  const [seekHint, setSeekHint] = useState(0)
-  const seekHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  const revealControls = useCallback(() => {
-    setControlsVisible(true)
-    clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(() => setControlsVisible(false), CONTROLS_TIMEOUT)
-  }, [])
-
-  useEffect(() => {
-    revealControls()
-    return () => clearTimeout(hideTimer.current)
-  }, [revealControls])
-
-  // Con el menú abierto los controles no se esconden solos (el menú se ancla a
-  // esta capa) y quedan a la vista; al cerrarlo, reprograma el auto-hide.
-  useEffect(() => {
-    if (menuTab) {
-      clearTimeout(hideTimer.current)
-      setControlsVisible(true)
-    } else {
-      revealControls()
-    }
-  }, [menuTab, revealControls])
 
   // Atrás cierra el menú si está abierto (consume el evento); si no, deja que
   // el back del sistema saque del reproductor.
@@ -556,8 +323,7 @@ function Playback({
       if (t === 'main') { setMenuTab(null); return true }
       // Con el HUD visible, Atrás lo oculta (no sale); recién sin HUD, sale.
       if (controlsVisibleRef.current) {
-        clearTimeout(hideTimer.current)
-        setControlsVisible(false)
+        hideControls()
         return true
       }
       return false
@@ -604,37 +370,11 @@ function Playback({
 
   useEventListener(player, 'timeUpdate', ({ currentTime }) => {
     const dur = player.duration
-    progressRef.current = { time: currentTime, duration: dur }
     setPosition(currentTime)
     onPosition(currentTime)
     if (dur > 0) setDuration(dur)
-
-    const now = Date.now()
-    if (dur > 0 && currentTime > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-      lastSave.current = now
-      saveProgress({ ...meta, position: currentTime, duration: dur })
-    }
+    reportProgress(currentTime, dur)
   })
-
-  // Guarda el progreso final al salir, aunque no haya pasado el intervalo.
-  useEffect(() => {
-    return () => {
-      const { time, duration: d } = progressRef.current
-      if (d > 0) saveProgress({ ...meta, position: time, duration: d })
-    }
-    // meta es estable dentro de esta pantalla; deps vacías a propósito.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Elección automática de subtítulo (una vez, sin pisar una elección manual):
-  // 1) el .srt externo si llegó; 2) una pista nativa en español. Ambas deps
-  // porque cualquiera puede llegar primero (descarga vs onLoad de pistas).
-  useEffect(() => {
-    if (subModeChosenByUser.current) return
-    if (srtCues.length > 0) { setSubMode('external'); return }
-    const es = subtitleTracks.find(isSpanish)
-    if (es?.id) setSubMode(es.id)
-  }, [srtCues, subtitleTracks])
 
   // Aplica el modo de subtítulo al player: para 'external'/'none' no hay pista
   // nativa (la externa la dibujamos nosotros); para un id, se busca la pista.
@@ -647,32 +387,10 @@ function Playback({
     player.subtitleTrack = t ?? null
   }, [subMode, subtitleTracks, player])
 
-  const chooseSubMode = useCallback((mode: 'external' | 'none' | string) => {
-    subModeChosenByUser.current = true
-    setSubMode(mode)
-  }, [])
-
   const selectAudioTrack = useCallback((t: AudioTrack) => {
     player.audioTrack = t
     setCurrentAudioId(t.id)
   }, [player])
-
-  const changeSubStyle = useCallback((patch: Partial<SubtitleStyle>) => {
-    setSubStyleState((prev) => {
-      const next = { ...prev, ...patch }
-      setSubtitleStyle(next)
-      return next
-    })
-  }, [])
-
-  const bumpOffset = useCallback((delta: number) => {
-    setSubOffsetState((prev) => {
-      // Tope: más de ±30s ya no es desincronización, es el subtítulo equivocado.
-      const next = Math.round(Math.min(30, Math.max(-30, prev + delta)) * 10) / 10
-      setSubtitleOffset(offsetKey, next)
-      return next
-    })
-  }, [offsetKey])
 
   const togglePlay = useCallback(() => {
     if (player.playing) player.pause()
@@ -688,12 +406,6 @@ function Playback({
     },
     [player]
   )
-
-  const flashSeek = useCallback((delta: number) => {
-    setSeekHint((prev) => prev + delta)
-    clearTimeout(seekHintTimer.current)
-    seekHintTimer.current = setTimeout(() => setSeekHint(0), 900)
-  }, [])
 
   // Control por cruceta directa: OK lo maneja el Pressable-sink de abajo (que
   // retiene el foco para que estos direccionales SÍ lleguen); acá el resto. Con
@@ -725,7 +437,7 @@ function Playback({
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
   // El título viene con el sufijo "· T_:E_" desde el detalle; lo separamos para
   // mostrar título y episodio en dos líneas (como la referencia).
-  const baseTitle = title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')
+  const baseTitle = stripEpisodeSuffix(title)
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
 
   return (
@@ -912,21 +624,13 @@ function VlcPlayback({
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState(0)
   const [buffering, setBuffering] = useState(true)
-  const [controlsVisible, setControlsVisible] = useState(true)
   const [filled, setFilled] = useState(false)
-  // Badge transitorio de seek (±Ns acumulados): al saltar con la cruceta NO
-  // aparece el HUD completo, solo este indicador chico que se desvanece solo.
-  const [seekHint, setSeekHint] = useState(0)
-  const seekHintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Menú de opciones (Audio/Subtítulos/Estilo/Calidad/Pantalla), idéntico al del
   // motor expo-video. null = cerrado. La tuerca de la barra lo abre.
   const [menuTab, setMenuTab] = useState<MenuTabKey | null>(null)
   const menuTabRef = useRef(menuTab)
   menuTabRef.current = menuTab
-  // Espejo del HUD visible para leerlo en el handler de Atrás (registrado una vez).
-  const controlsVisibleRef = useRef(controlsVisible)
-  controlsVisibleRef.current = controlsVisible
 
   // Pistas nativas que expone VLC en onLoad (audio/subtítulos con id NUMÉRICO).
   // Las adaptamos a la forma AudioTrack/SubtitleTrack (id como string) para
@@ -936,22 +640,19 @@ function VlcPlayback({
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([])
   const [currentAudioId, setCurrentAudioId] = useState<string | undefined>(undefined)
 
-  // Subtítulo: 'external' = overlay del .srt español que dibujamos nosotros;
-  // 'none' = apagado; string = id de pista nativa (la pinta VLC). Igual criterio
-  // que el motor expo-video: si hay español disponible arranca ahí.
-  const [subMode, setSubMode] = useState<'external' | 'none' | string>('none')
-  const subModeChosenByUser = useRef(false)
+  // HUD auto-ocultable, badge de seek, preferencias de subtítulo y guardado de
+  // progreso: compartidos con el teléfono vía @bmo/player (idénticos al motor
+  // expo-video). `reveal` se aliasa a `revealControls` para no tocar el JSX.
+  const { controlsVisible, reveal: revealControls, hide: hideControls, controlsVisibleRef } =
+    useAutoHideControls({ menuOpen: menuTab !== null })
+  const { seekHint, flashSeek } = useSeekHint()
+  const { subStyle, subOffset, subMode, chooseSubMode, changeSubStyle, bumpOffset } =
+    useSubtitlePrefs({ offsetKey, srtCues, subtitleTracks })
+  const { report: reportProgress } = useProgressSaver(meta)
 
-  // Overlay del subtítulo español (mismo estilo/sincronía que el motor expo-video).
-  const [subStyle, setSubStyleState] = useState<SubtitleStyle>(DEFAULT_SUBTITLE_STYLE)
-  useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
-  const [subOffset, setSubOffsetState] = useState(0)
-  useEffect(() => { getSubtitleOffset(offsetKey).then(setSubOffsetState) }, [offsetKey])
-
+  // progressRef local: lo usan seekBy y la detección de fin, no solo el guardado.
   const progressRef = useRef({ time: 0, duration: 0 })
-  const lastSave = useRef(0)
   const reportedFail = useRef(false)
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const firstUri = useRef(uri)
   // Última marca de tiempo vista: si avanza entre ticks, estamos reproduciendo
   // (no buffering). El nativo solo emite onBuffer(true) y nunca false, así que
@@ -968,26 +669,6 @@ function VlcPlayback({
     vlcRef.current?.setSource({ uri, headers: referer ? { Referer: referer } : undefined })
   }, [uri, referer])
 
-  const revealControls = useCallback(() => {
-    setControlsVisible(true)
-    clearTimeout(hideTimer.current)
-    hideTimer.current = setTimeout(() => setControlsVisible(false), CONTROLS_TIMEOUT)
-  }, [])
-  useEffect(() => {
-    revealControls()
-    return () => clearTimeout(hideTimer.current)
-  }, [revealControls])
-
-  // Con el menú abierto los controles no se esconden solos; al cerrarlo, reprograma el auto-hide.
-  useEffect(() => {
-    if (menuTab) {
-      clearTimeout(hideTimer.current)
-      setControlsVisible(true)
-    } else {
-      revealControls()
-    }
-  }, [menuTab, revealControls])
-
   // Atrás: desde un extra (Estilo/Calidad/Pantalla) vuelve a las columnas; desde
   // 'main' cierra el menú; sin menú, deja salir del reproductor.
   useEffect(() => {
@@ -997,8 +678,7 @@ function VlcPlayback({
       if (t === 'main') { setMenuTab(null); return true }
       // Con el HUD visible, Atrás lo oculta (no sale); recién sin HUD, sale.
       if (controlsVisibleRef.current) {
-        clearTimeout(hideTimer.current)
-        setControlsVisible(false)
+        hideControls()
         return true
       }
       return false
@@ -1014,13 +694,6 @@ function VlcPlayback({
     vlcRef.current?.seek(next)
     setPosition(next)
     progressRef.current.time = next
-  }, [])
-
-  // Muestra el badge de seek acumulando el salto; se borra solo tras un ratito.
-  const flashSeek = useCallback((delta: number) => {
-    setSeekHint((prev) => prev + delta)
-    clearTimeout(seekHintTimer.current)
-    seekHintTimer.current = setTimeout(() => setSeekHint(0), 900)
   }, [])
 
   const handleLoad = useCallback((e: OnLoadData) => {
@@ -1041,15 +714,6 @@ function VlcPlayback({
     if (selAudio) setCurrentAudioId(String(selAudio.id))
   }, [])
 
-  // Auto-selección de subtítulo (una vez, sin pisar una elección manual):
-  // 1) el overlay .srt español si llegó; 2) una pista nativa en español.
-  useEffect(() => {
-    if (subModeChosenByUser.current) return
-    if (srtCues.length > 0) { setSubMode('external'); return }
-    const es = subtitleTracks.find(isSpanish)
-    if (es?.id) setSubMode(es.id)
-  }, [srtCues, subtitleTracks])
-
   const handleProgress = useCallback((e: OnProgressData) => {
     const t = e.currentTime
     const dur = e.seekableDuration
@@ -1061,12 +725,8 @@ function VlcPlayback({
     setPosition(t)
     onPosition(t)
     if (dur > 0) setDuration(dur)
-    const now = Date.now()
-    if (dur > 0 && t > 0 && now - lastSave.current > SAVE_EVERY_MS) {
-      lastSave.current = now
-      saveProgress({ ...meta, position: t, duration: dur })
-    }
-  }, [meta, onPosition])
+    reportProgress(t, dur)
+  }, [reportProgress, onPosition])
 
   const handleError = useCallback((e: OnVideoErrorData) => {
     if (reportedFail.current) return
@@ -1096,33 +756,6 @@ function VlcPlayback({
   const selectAudioTrack = useCallback((t: AudioTrack) => {
     if (t.id != null) setCurrentAudioId(t.id)
   }, [])
-  const chooseSubMode = useCallback((mode: 'external' | 'none' | string) => {
-    subModeChosenByUser.current = true
-    setSubMode(mode)
-  }, [])
-  const changeSubStyle = useCallback((patch: Partial<SubtitleStyle>) => {
-    setSubStyleState((prev) => {
-      const next = { ...prev, ...patch }
-      setSubtitleStyle(next)
-      return next
-    })
-  }, [])
-  const bumpOffset = useCallback((delta: number) => {
-    setSubOffsetState((prev) => {
-      const next = Math.round(Math.min(30, Math.max(-30, prev + delta)) * 10) / 10
-      setSubtitleOffset(offsetKey, next)
-      return next
-    })
-  }, [offsetKey])
-
-  // Guarda el progreso final al salir.
-  useEffect(() => {
-    return () => {
-      const { time, duration: d } = progressRef.current
-      if (d > 0) saveProgress({ ...meta, position: time, duration: d })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Control por cruceta directa (no por botones enfocables): OK lo maneja el
   // Pressable-sink de abajo; acá el resto. El sink retiene el foco, así estos
@@ -1151,7 +784,7 @@ function VlcPlayback({
   const remaining = Math.max(0, duration - position)
   // El overlay JS solo se dibuja en modo 'external'; las pistas nativas las pinta VLC.
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
-  const baseTitle = title.replace(/(?:\s*·\s*T\d+:E\d+)+\s*$/, '')
+  const baseTitle = stripEpisodeSuffix(title)
   const episodeLabel = isTv ? `T${meta.season ?? 1} · E${meta.episode ?? 1}` : undefined
 
   return (

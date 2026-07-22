@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { tmdb, type MediaItem } from '@bmo/core/tmdb'
-import { useAsync } from '@bmo/core/useAsync'
+import { useAsync, prefetchAsync } from '@bmo/core/useAsync'
 import { getContinueWatching, syncLibrary, type Progress } from '@bmo/core/library'
 import { HeroCarousel, HERO_ITEMS } from '@/bmo/HeroCarousel'
 import { ContinueRow } from '@/bmo/ContinueRow'
@@ -14,7 +14,7 @@ import { colors, rowHeading } from '@/bmo/theme'
 
 export default function HomeScreen() {
   const router = useRouter()
-  const { data, loading, error } = useAsync(() => tmdb.home())
+  const { data, loading, error } = useAsync(() => tmdb.home(), [], 'home')
 
   // "Seguir viendo" arriba de todo: al volver de reproducir algo, este effect
   // corre de nuevo (useFocusEffect) y la fila queda al día. Se pinta con el caché
@@ -36,7 +36,15 @@ export default function HomeScreen() {
   )
   // Las colecciones por plataforma van en su propia petición: son lentas y no
   // deben frenar el primer pintado. La home ya se ve mientras estas llegan.
-  const { data: collections } = useAsync(() => tmdb.collections())
+  const { data: collections } = useAsync(() => tmdb.collections(), [], 'collections')
+
+  // Apenas el Inicio tiene datos, precargamos en silencio las pestañas vecinas
+  // (Películas y Series) para que el primer salto a ellas también sea instantáneo.
+  useEffect(() => {
+    if (!data) return
+    prefetchAsync('catalog:movies', () => tmdb.movies())
+    prefetchAsync('catalog:series', () => tmdb.series())
+  }, [data])
 
   // TMDB marca el tipo con media_type solo en trending; en las listas de
   // películas/series viene ausente, así que se deduce por la forma del item

@@ -7,5 +7,5 @@ comandos importnates
 2. cd ~/rgdev-projects/bmo-streaming/apps/client 
 bunx expo run:ios --device
 "comando y ruta para instalar el simulador en el telefono IOS"
-3. cd apps/tv && npx expo run:android --device BMO_TV
+3. cd /Users/diegoguzzo/rgdev-projects/bmo-streaming/apps/tv && EXPO_TV=1 npx expo run:android --device BMO_TV
 "comando para levantar el simulador del android tv desde la computadora"

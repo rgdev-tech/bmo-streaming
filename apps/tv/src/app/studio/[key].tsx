@@ -12,7 +12,7 @@ import { colors, rowHeading, safe, screenTitle } from '@/bmo/theme'
 export default function StudioScreen() {
   const router = useRouter()
   const { key } = useLocalSearchParams<{ key: string }>()
-  const { data, loading, error } = useAsync<StudioDetail>(() => tmdb.studio(key), [key])
+  const { data, loading, error } = useAsync<StudioDetail>(() => tmdb.studio(key), [key], `studio:${key}`)
 
   // Los colores de marca están del lado del cliente, no los manda el API.
   const brand = STUDIO_BRANDS.find((b) => b.key === key)

@@ -1,10 +1,15 @@
-import { useEffect } from 'react'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native'
 import { Stack, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
+import * as SplashScreen from 'expo-splash-screen'
 import { AuthProvider, useAuth } from '@bmo/core/auth'
 import { supabaseConfigured } from '@bmo/core/supabase'
 import { colors } from '@/bmo/theme'
+
+// Mantener el splash NATIVO (negro + "BMO") hasta que montemos el splash JS
+// animado por encima: así no hay parpadeo blanco entre el arranque nativo y el JS.
+SplashScreen.preventAutoHideAsync().catch(() => {})
 
 /**
  * Decide a dónde mandar al usuario según sesión y perfil. Mismo criterio que
@@ -73,11 +78,50 @@ function RootNavigator() {
   )
 }
 
+/**
+ * Splash de marca animado. Continúa el splash NATIVO (negro + "BMO") y hace la
+ * SALIDA: el logo escala suave y toda la capa se desvanece hacia la app. Da la
+ * sensación de app nativa en vez del splash azul de Expo. Como dibuja el mismo
+ * logo que el nativo, ocultar el nativo al montar no genera parpadeo.
+ */
+function AnimatedSplash({ onDone }: { onDone: () => void }) {
+  const overlay = useRef(new Animated.Value(1)).current
+  const scale = useRef(new Animated.Value(1)).current
+
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {})
+    Animated.sequence([
+      Animated.delay(450),
+      Animated.parallel([
+        Animated.timing(scale, { toValue: 1.16, duration: 650, useNativeDriver: true }),
+        Animated.timing(overlay, { toValue: 0, duration: 650, useNativeDriver: true }),
+      ]),
+    ]).start(() => onDone())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <Animated.View
+      style={[StyleSheet.absoluteFill, styles.brandSplash, { opacity: overlay }]}
+      pointerEvents="none"
+    >
+      <Animated.Image
+        source={require('../../assets/images/splash-bmo.png')}
+        resizeMode="contain"
+        style={[styles.brandLogo, { transform: [{ scale }] }]}
+      />
+    </Animated.View>
+  )
+}
+
 export default function RootLayout() {
+  const [splashDone, setSplashDone] = useState(false)
+
   return (
     <AuthProvider>
       <StatusBar hidden />
       <RootNavigator />
+      {!splashDone && <AnimatedSplash onDone={() => setSplashDone(true)} />}
     </AuthProvider>
   )
 }
@@ -89,4 +133,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  brandSplash: {
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandLogo: { width: 260, height: 110 },
 })

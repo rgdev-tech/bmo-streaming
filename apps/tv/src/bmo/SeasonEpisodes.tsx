@@ -236,7 +236,11 @@ export function SeasonEpisodes({
     .sort((a, b) => a.season_number - b.season_number)
 
   const [selected, setSelected] = useState(real[0]?.season_number ?? 1)
-  const { data, loading } = useAsync(() => tmdb.season(tvId, selected), [tvId, selected])
+  const { data, loading } = useAsync(
+    () => tmdb.season(tvId, selected),
+    [tvId, selected],
+    `season:${tvId}:${selected}`
+  )
 
   // Vistos y progreso se releen al volver a la pantalla, no solo al montar.
   const [watched, setWatched] = useState<Set<string>>(new Set())

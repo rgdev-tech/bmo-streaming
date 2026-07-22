@@ -24,7 +24,8 @@ export function CatalogScreen({
   const router = useRouter()
   const { data, loading, error } = useAsync<CatalogData>(
     () => (kind === 'movies' ? tmdb.movies() : tmdb.series()),
-    [kind]
+    [kind],
+    `catalog:${kind}`
   )
 
   function openTitle(item: MediaItem) {

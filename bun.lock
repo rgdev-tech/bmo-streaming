@@ -41,6 +41,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@bmo/core": "workspace:*",
+        "@bmo/player": "workspace:*",
         "@react-native-async-storage/async-storage": "2.2.0",
         "@react-native-community/slider": "5.0.1",
         "@supabase/supabase-js": "^2.110.7",
@@ -100,6 +101,18 @@
         "react": "19.1.0",
         "react-native": "*",
         "react-native-url-polyfill": "*",
+      },
+    },
+    "packages/player": {
+      "name": "@bmo/player",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/react": "~19.1.10",
+        "typescript": "~5.9.2",
+      },
+      "peerDependencies": {
+        "@bmo/core": "*",
+        "react": "19.1.0",
       },
     },
   },
@@ -302,6 +315,8 @@
     "@bmo/client": ["@bmo/client@workspace:apps/client"],
 
     "@bmo/core": ["@bmo/core@workspace:packages/core"],
+
+    "@bmo/player": ["@bmo/player@workspace:packages/player"],
 
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
 

@@ -1,6 +1,7 @@
 {
   "expo": {
-    "icon": "./assets/images/icon.png",
+    "owner": "rgdev-tech",
+    "icon": "./assets/tv_icons/icon-bmo-black.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
@@ -26,10 +27,10 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#000000",
           "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "image": "./assets/images/splash-bmo.png",
+            "imageWidth": 260
           }
         }
       ],
@@ -37,7 +38,7 @@
         "@react-native-tvos/config-tv",
         {
           "androidTVBanner": "./assets/tv_icons/banner-bmo-16x9.png",
-          "androidTVIcon": "./assets/tv_icons/icon-760x760.png",
+          "androidTVIcon": "./assets/tv_icons/icon-bmo-black.png",
           "appleTVImages": {
             "icon": "./assets/tv_icons/icon-1280x768.png",
             "iconSmall": "./assets/tv_icons/icon-400x240.png",
@@ -56,6 +57,21 @@
       "reactCompiler": true
     },
     "name": "BMO TV",
-    "slug": "bmo-tv"
+    "slug": "bmo-tv",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5dd86c85-50ce-4ff2-a875-b9b4efb5c608"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/5dd86c85-50ce-4ff2-a875-b9b4efb5c608",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
+    }
   }
 }
