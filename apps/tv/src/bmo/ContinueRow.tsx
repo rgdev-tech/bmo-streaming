@@ -98,7 +98,7 @@ export function ContinueRow({
           <ContinueCard
             item={item}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll() }}
+            onFocus={() => { focusItem(index); rowScroll(layout.backdropHeight) }}
           />
         )}
         showsHorizontalScrollIndicator={false}

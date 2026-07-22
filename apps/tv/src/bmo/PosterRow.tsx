@@ -46,7 +46,7 @@ export function PosterRow({
             item={item}
             size={size}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll() }}
+            onFocus={() => { focusItem(index); rowScroll(size === 'large' ? layout.posterHeightLg : layout.posterHeight) }}
           />
         )}
         showsHorizontalScrollIndicator={false}

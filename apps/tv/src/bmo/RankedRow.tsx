@@ -86,7 +86,7 @@ export function RankedRow({
             item={item}
             rank={index + 1}
             onPress={onPressItem}
-            onFocus={() => { focusItem(index); rowScroll() }}
+            onFocus={() => { focusItem(index); rowScroll(layout.posterHeight) }}
           />
         )}
         showsHorizontalScrollIndicator={false}

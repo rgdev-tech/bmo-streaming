@@ -1,7 +1,7 @@
 import { useCallback, useRef, type ReactElement, type ReactNode } from 'react'
 import { FlatList, StyleSheet, View, type ListRenderItemInfo } from 'react-native'
 import { RowScrollContext, ROW_SCROLL_TOP_INSET } from './RowScrollContext'
-import { safe } from './theme'
+import { layout, safe } from './theme'
 
 export type RowSection = { key: string; node: ReactNode }
 
@@ -25,12 +25,17 @@ export function RowsList({
   const listRef = useRef<FlatList<RowSection>>(null)
   const lastIndex = useRef(-1)
 
-  const scrollToRow = useCallback((index: number) => {
+  const scrollToRow = useCallback((index: number, itemHeight = layout.posterHeight) => {
     if (lastIndex.current === index) return
     lastIndex.current = index
+    // Compensa el alto de la tarjeta contra el de referencia (póster normal), para
+    // que el CENTRO del ítem enfocado caiga siempre en la misma línea vertical.
+    // Una fila más alta (large) sube un poco su tope; una más baja (apaisada) lo
+    // baja. Sin esto, el foco saltaba de altura entre filas de distinto tamaño.
+    const viewOffset = ROW_SCROLL_TOP_INSET - (itemHeight - layout.posterHeight) / 2
     listRef.current?.scrollToIndex({
       index,
-      viewOffset: ROW_SCROLL_TOP_INSET,
+      viewOffset,
       viewPosition: 0,
       // Instantáneo (sin animar), mismo criterio que el scroll horizontal
       // (useRowFocusScroll): al bajar rápido con la cruceta, animar cada salto
@@ -43,7 +48,7 @@ export function RowsList({
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<RowSection>) => (
-      <RowScrollContext.Provider value={() => scrollToRow(index)}>
+      <RowScrollContext.Provider value={(itemHeight) => scrollToRow(index, itemHeight)}>
         {item.node}
       </RowScrollContext.Provider>
     ),
