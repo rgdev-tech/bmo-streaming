@@ -39,6 +39,14 @@ const DEBRID_KEY = process.env.DEBRID_KEY
 // Sin la variable, MediaFusion queda deshabilitado y todo funciona igual que
 // antes (solo Torrentio). Riesgo cero para el comportamiento actual.
 const MEDIAFUSION_URL = process.env.MEDIAFUSION_URL
+// MediaFusion configurado con "Only Show Cached Streams" ON (recomendado) solo
+// devuelve torrents YA cacheados en el debrid. En ese modo, TODOS sus streams
+// son cacheados por definición, pero MediaFusion no siempre lo marca por stream
+// (es implícito). Con este flag (default true) etiquetamos sus streams como
+// cacheados para que el filtro `selectRunnable` no los descarte por no leer un
+// marcador. Ponlo en 'false' SOLO si desactivas ese toggle en MediaFusion (si
+// no, resolveríamos torrents no cacheados y ensuciaríamos la cuota de RD).
+const MEDIAFUSION_CACHED_ONLY = process.env.MEDIAFUSION_CACHED_ONLY !== 'false'
 
 const TORRENTIO_BASE = 'https://torrentio.strem.fun'
 const FETCH_TIMEOUT = 12_000
@@ -73,7 +81,9 @@ const SOURCES: StremioSource[] = [
     name: 'mediafusion',
     enabled: !!MEDIAFUSION_URL,
     streamUrl: (imdbId, type, season, episode) => {
-      const base = MEDIAFUSION_URL!.replace(/\/$/, '')
+      // Tolerante: acepta la URL con o sin `/manifest.json` al final (es lo que
+      // copia el usuario del panel) y sin barra final.
+      const base = MEDIAFUSION_URL!.replace(/\/manifest\.json\/?$/i, '').replace(/\/$/, '')
       const kind = type === 'tv' ? 'series' : 'movie'
       return `${base}/stream/${kind}/${stremioId(imdbId, type, season, episode)}.json`
     },
@@ -148,7 +158,17 @@ async function fetchFromSource(
   if (!r) return []
   try {
     const data = (await r.json()) as { streams?: TorrentioStream[] }
-    return (data.streams ?? []).map((s) => ({ ...s, _source: src.name }))
+    const cachedOnly = src.name === 'mediafusion' && MEDIAFUSION_CACHED_ONLY
+    return (data.streams ?? []).map((s) => {
+      const tagged: TorrentioStream = { ...s, _source: src.name }
+      // Modo cached-only: si el stream no trae ya un marcador ⚡, se lo
+      // anteponemos al `name` para que parseCacheState lo lea como cacheado
+      // (reusa el parser puro sin ramas nuevas). Ver MEDIAFUSION_CACHED_ONLY.
+      if (cachedOnly && !(tagged.name ?? '').includes('⚡')) {
+        tagged.name = `⚡ ${tagged.name ?? ''}`
+      }
+      return tagged
+    })
   } catch {
     return []
   }

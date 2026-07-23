@@ -26,7 +26,7 @@ import {
 import { decodeSrtBytes, parseSrt, findActiveCue, type SrtCue } from '@/lib/srt'
 import { getProgress, setUpNext, type Progress } from '@/lib/library'
 // Guardado de progreso y helpers compartidos con apps/tv (headless).
-import { useProgressSaver, describeSource, fmt } from '@bmo/player'
+import { useProgressSaver, describeSource, audioLangLabel, fmt } from '@bmo/player'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
 import { Touchable } from '@/components/Touchable'
@@ -1473,6 +1473,14 @@ function VlcPlayer({
                     ) : (
                       sources.map((s) => {
                         const active = s.i === activeSourceIndex
+                        // Badge de idioma de la fuente (igual que en la TV): verde =
+                        // latino/español (probable latino), ámbar = castellano
+                        // (España, no lo que busca un usuario latino), gris = otros.
+                        const lang = audioLangLabel(s.langs)
+                        const tone =
+                          lang === 'Latino' || lang === 'Español' ? 'es'
+                          : lang === 'Castellano' ? 'cast'
+                          : 'other'
                         return (
                           <Touchable
                             key={s.i}
@@ -1487,6 +1495,16 @@ function VlcPlayer({
                               </Text>
                               <Text style={styles.vlcQualitySub} numberOfLines={1}>{s.label}</Text>
                             </View>
+                            {lang && (
+                              <View style={[
+                                styles.vlcLangBadge,
+                                tone === 'es' ? styles.vlcLangBadgeEs : tone === 'cast' ? styles.vlcLangBadgeCast : styles.vlcLangBadgeOther,
+                              ]}>
+                                <Text style={[styles.vlcLangBadgeText, tone === 'other' ? styles.vlcLangBadgeTextOther : styles.vlcLangBadgeTextDark]}>
+                                  {lang}
+                                </Text>
+                              </View>
+                            )}
                             {active && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
                           </Touchable>
                         )
@@ -1838,6 +1856,14 @@ const styles = StyleSheet.create({
   // columna para no empujar al checkmark fuera de la tarjeta.
   vlcQualityInfo: { flex: 1, gap: 2 },
   vlcQualitySub: { color: 'rgba(255,255,255,0.38)', fontSize: 11.5 },
+  // Badge de idioma de la fuente (mismos colores que la TV).
+  vlcLangBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  vlcLangBadgeEs: { backgroundColor: '#34C759' },              // verde = latino / español (probable latino)
+  vlcLangBadgeCast: { backgroundColor: '#FF9F0A' },            // ámbar = castellano (España)
+  vlcLangBadgeOther: { backgroundColor: 'rgba(120,120,128,0.7)' }, // gris = otros idiomas
+  vlcLangBadgeText: { fontSize: 12, fontWeight: '800' },
+  vlcLangBadgeTextDark: { color: '#000' },
+  vlcLangBadgeTextOther: { color: '#fff' },
   vlcPickerTab: {
     paddingVertical: 9, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
