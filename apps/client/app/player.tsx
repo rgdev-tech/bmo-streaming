@@ -135,16 +135,19 @@ export default function PlayerScreen() {
   const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
   useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
-  // La pantalla entera (LoadingScreen incluida) está forzada a landscape desde
-  // el mount (ver el useEffect de abajo) — así que TODA salida, sea cual sea
-  // la fuente, tiene que revertir a portrait antes de navegar. Si dejáramos
-  // que el cleanup del useEffect de desmontaje lo haga solo, el revert se
-  // dispara en un momento impredecible respecto a la transición de salida del
-  // modal, y se ve la pantalla "rebotar" horizontal→vertical→horizontal en
-  // vez de un giro limpio. Relockeamos portrait ACÁ, antes de navegar — el
-  // giro pasa mientras el player todavía se ve entero y la transición de
-  // salida ya arranca en portrait, sin pelearse con ninguna otra rotación.
+  // La rotación entrada/salida se CUBRE con un overlay negro. iOS no puede
+  // sincronizar el fade del modal (fullScreenModal) con el lockAsync imperativo,
+  // así que sin esto se ve el contenido landscape achatado en un frame portrait
+  // mientras gira — el "bug" visual. Con `oriented=false` pintamos negro por
+  // encima de TODO hasta que el giro asentó (ver el effect de landscape). Al
+  // salir, lo volvemos a poner ANTES de rotar y navegar, así el giro de vuelta a
+  // portrait pasa detrás del negro y no se ve el reflow.
+  const [oriented, setOriented] = useState(false)
+
   async function exitToBack() {
+    setOriented(false)
+    // Un respiro para que el negro pinte antes de disparar la rotación.
+    await new Promise((r) => setTimeout(r, 50))
     await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
     router.back()
   }
@@ -254,19 +257,29 @@ export default function PlayerScreen() {
   const vlcUri = localIsFile ? localUri! : streamUrl
 
   // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer ni por tipo
-  // de fuente. Se fuerza landscape UNA vez al entrar a esta pantalla (deps
-  // vacías) — así la LoadingScreen (spinner + selector de audio) ya aparece
-  // horizontal, en vez de esperar a que resuelva el stream para recién ahí
-  // rotar. Sin gating por isVlcSource: antes solo se forzaba para VLC (el
-  // NativePlayer rotaba solo, vía su propio fullscreen de Apple) — ahora que
-  // el landscape arranca desde la carga, el mismo lock sirve para los dos;
-  // el revert a portrait queda reservado para la salida real (exitToBack,
-  // antes de navegar) y para el desmontaje de la pantalla entera (cleanup de
-  // abajo). Cambiar de episodio (o de idioma de audio) desmonta y remonta el
-  // player, pero como este lock no depende de isVlcSource no se re-dispara ni
-  // parpadea en esa transición.
+  // de fuente (el mismo lock sirve para VLC y para el fullscreen nativo de Apple).
+  // La carga mientras resuelve es solo un spinner centrado (orientación-agnóstico),
+  // y el reflow del giro lo tapa el overlay negro (ver `oriented`).
+  // Fuerza landscape al entrar y marca `oriented` cuando el giro ASENTÓ, para
+  // levantar el overlay negro recién ahí (no antes, o se ve el reflow). Detecta
+  // el asentamiento por tres vías: si ya estábamos en landscape (no dispara
+  // change), el evento de cambio de orientación, y un timeout de red de seguridad.
   useEffect(() => {
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+    let done = false
+    const finish = () => { if (!done) { done = true; setOriented(true) } }
+    const isLandscape = (o: ScreenOrientation.Orientation) =>
+      o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+      o === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
+    ;(async () => {
+      const cur = await ScreenOrientation.getOrientationAsync()
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+      if (isLandscape(cur)) finish()
+    })()
+    const sub = ScreenOrientation.addOrientationChangeListener((e) => {
+      if (isLandscape(e.orientationInfo.orientation)) finish()
+    })
+    const t = setTimeout(finish, 550)
+    return () => { ScreenOrientation.removeOrientationChangeListener(sub); clearTimeout(t) }
   }, [])
 
   useEffect(() => {
@@ -469,112 +482,23 @@ export default function PlayerScreen() {
           onError={(msg) => setError(msg || 'Player error')}
         />
       ) : (
-        <LoadingScreen
-          title={baseTitle}
-          episodeLabel={isTv && season ? `T${season}:E${episode}` : undefined}
-          backdrop={params.backdrop ?? null}
-          audioLang={audioLang}
-          showAudioSwitch={!localUri}
-          onChangeAudioLang={changeAudioLang}
-          onClose={exitToBack}
-        />
+        // Carga mínima: solo un spinner centrado. Se ve bien en cualquier
+        // orientación (no hay layout que reflowee al girar) — antes era una
+        // pantalla completa posicionada para landscape que aparecía achatada en
+        // vertical durante el giro y "bugueaba" todo.
+        <View style={styles.loadingSpinnerWrap}>
+          <ActivityIndicator color="#fff" size="large" />
+          <Pressable style={styles.loadingBack} onPress={exitToBack} hitSlop={12}>
+            <SymbolView name="chevron.left" tintColor="rgba(255,255,255,0.9)" style={styles.loadingBackIcon} />
+          </Pressable>
+        </View>
       )}
+
+      {/* Cubre el reflow durante la rotación (entrada y salida): negro por encima
+          de todo hasta que el giro asentó. Sin esto se ve el layout landscape
+          achatado en un frame portrait mientras iOS gira la pantalla. */}
+      {!oriented && <View pointerEvents="none" style={styles.orientationCover} />}
     </GestureHandlerRootView>
-  )
-}
-
-// ── Pantalla de carga: mínima, rápida, con selector de audio discreto ───────
-
-function LoadingScreen({
-  title, episodeLabel, backdrop, audioLang, showAudioSwitch, onChangeAudioLang, onClose,
-}: {
-  title: string
-  episodeLabel?: string
-  backdrop: string | null
-  audioLang: AudioLang
-  showAudioSwitch: boolean
-  onChangeAudioLang: (lang: AudioLang) => void
-  onClose: () => void
-}) {
-  const fade = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    Animated.timing(fade, { toValue: 1, duration: 350, delay: 200, useNativeDriver: true }).start()
-  }, [])
-
-  // El bloqueo a horizontal se aplica en un efecto, o sea DESPUÉS del primer
-  // render: se alcanzaba a pintar un frame en vertical y el layout reacomodaba
-  // a la vista, que es el "salta de vertical a horizontal" feo. Mientras no
-  // haya girado se muestra solo negro; el contenido entra con un fundido una
-  // vez que la orientación se asentó.
-  const { width: winW, height: winH } = useWindowDimensions()
-  const isLandscape = winW > winH
-  const settle = useRef(new Animated.Value(0)).current
-  useEffect(() => {
-    if (!isLandscape) return
-    Animated.timing(settle, { toValue: 1, duration: 220, useNativeDriver: true }).start()
-  }, [isLandscape])
-
-  const backdropUri = backdropUrl(backdrop, 'w780')
-
-  if (!isLandscape) return <View style={styles.loadingRoot} />
-
-  return (
-    <Animated.View style={[styles.loadingRoot, { opacity: settle }]}>
-      {backdropUri && (
-        <Image source={backdropUri} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={30} />
-      )}
-      <View style={styles.loadingScrim} />
-
-      {/* Salida: sin esto, un título que tarda en resolver dejaba al usuario
-          encerrado hasta que fallara o terminara. */}
-      <Touchable
-        scaleTo={0.88}
-        haptic="light"
-        style={styles.loadingClose}
-        onPress={onClose}
-        hitSlop={12}
-      >
-        <BlurView intensity={55} tint="dark" style={styles.loadingCloseBlur}>
-          <SymbolView name="xmark" tintColor="#fff" style={styles.loadingCloseIcon} />
-        </BlurView>
-      </Touchable>
-
-      <View style={styles.loadingCenter}>
-        <ActivityIndicator color="#fff" size="small" />
-        {!!title && (
-          <Text style={styles.loadingTitle} numberOfLines={1}>
-            {title}{episodeLabel ? `  ·  ${episodeLabel}` : ''}
-          </Text>
-        )}
-      </View>
-
-      {/* Selector de audio: discreto, aparece un instante después para no competir
-          visualmente con el spinner — la carga arranca sola con la preferencia guardada.
-          bottom fijo, sin insets.bottom: esta pantalla ahora se muestra en el landscape
-          forzado por lockAsync (ver PlayerScreen) desde el primer frame, y ese landscape
-          no es una rotación física real — el safe-area-context a veces arrastra el inset
-          de portrait ahí (mismo problema ya documentado en VlcPlayer para la barra
-          superior y el overlay de subtítulos). */}
-      {showAudioSwitch && (
-        <Animated.View style={[styles.langSwitch, { bottom: 40, opacity: fade }]}>
-          <BlurView intensity={70} tint="systemChromeMaterialDark" style={styles.langSegmented}>
-            {(['original', 'latino'] as const).map((opt) => (
-              <Touchable
-                key={opt}
-                scaleTo={0.94}
-                haptic="selection"
-                style={[styles.langOption, audioLang === opt && styles.langOptionActive]}
-                onPress={() => onChangeAudioLang(opt)}
-              >
-                <Text style={[styles.langOptionText, audioLang === opt && styles.langOptionTextActive]}>
-                  {opt === 'original' ? 'Original' : 'Español Latino'}
-                </Text>
-              </Touchable>
-            ))}
-          </BlurView>
-        </Animated.View>
-      )}
-    </Animated.View>
   )
 }
 
@@ -1684,6 +1608,12 @@ function NextEpisodeScreen({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+  // Tapa negra sobre todo mientras la pantalla rota (entrada/salida del player).
+  orientationCover: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', zIndex: 1000 },
+  // Carga mínima: spinner centrado, orientación-agnóstico.
+  loadingSpinnerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' },
+  loadingBack: { position: 'absolute', top: 50, left: 20, padding: 6 },
+  loadingBackIcon: { width: 26, height: 26 },
   fill: { flex: 1, backgroundColor: '#000' },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
