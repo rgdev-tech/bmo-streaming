@@ -466,7 +466,10 @@ export async function debugTorrentio(
   tmdbId: number,
   media: MediaRef,
   season?: number,
-  episode?: number
+  episode?: number,
+  // Modo de ranking: 'latino' boostea audio latino/español como en la
+  // reproducción real; 'original' (default) no lo hace.
+  lang: 'original' | 'latino' = 'original',
 ): Promise<any> {
   const imdbId = await imdbIdOf(type, tmdbId)
   if (!imdbId) return { error: 'no se pudo obtener imdb_id', debridEnabled }
@@ -492,12 +495,13 @@ export async function debugTorrentio(
   )
 
   const streams = await fetchStreams(imdbId, type, season, episode)
-  const r = rankCandidates(streams, media, 'original')
+  const r = rankCandidates(streams, media, lang)
   const runnable = selectRunnable(r)
 
   return {
     imdbId,
     debridEnabled,
+    mode: lang,
     media,
     sources: perSource,
     totalStreams: streams.length,

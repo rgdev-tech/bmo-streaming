@@ -98,12 +98,12 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   // Diagnóstico: candidatos de Torrentio (mp4 rankeados) sin resolver el link final
   .get(
     '/debug/debrid/movie/:id',
-    ({ params }) => debugDebrid('movie', Number(params.id)),
+    ({ params, query }) => debugDebrid('movie', Number(params.id), undefined, undefined, (query as { lang?: string }).lang),
     { params: t.Object({ id: t.String() }) }
   )
   .get(
     '/debug/debrid/tv/:id/:season/:episode',
-    ({ params }) => debugDebrid('tv', Number(params.id), Number(params.season), Number(params.episode)),
+    ({ params, query }) => debugDebrid('tv', Number(params.id), Number(params.season), Number(params.episode), (query as { lang?: string }).lang),
     { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
   )
 

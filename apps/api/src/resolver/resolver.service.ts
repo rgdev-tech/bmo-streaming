@@ -557,11 +557,14 @@ export async function debugDebrid(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
-  episode?: number
+  episode?: number,
+  // `?lang=latino` rankea como lo haría la reproducción en latino (boost al
+  // audio latino/español). Default 'original' — sin boost, como estaba.
+  lang?: string
 ): Promise<any> {
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return { error: 'buildMedia falló (¿TMDB_API_KEY?)' }
-  return debugTorrentio(type, tmdbId, built.ref, season, episode)
+  return debugTorrentio(type, tmdbId, built.ref, season, episode, lang === 'latino' ? 'latino' : 'original')
 }
 
 // Diagnóstico detallado: corre runAll capturando el resultado de CADA source.
