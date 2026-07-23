@@ -33,27 +33,38 @@ export default function StudioScreen() {
   const { data, loading, error, refetch } = useAsync(() => tmdb.studio(key!), [key])
 
   const brand = STUDIO_BRANDS.find((b) => b.key === key)
-  const kind: 'movie' | 'tv' = data?.type === 'tv' ? 'tv' : 'movie'
+  // `primary` = tipo que luce la marca (hero/carrusel). Se cae a `type` legacy.
+  const primary: 'movie' | 'tv' =
+    data?.primary === 'tv' || (data?.primary == null && data?.type === 'tv') ? 'tv' : 'movie'
 
-  // Todos los items de un catálogo de estudio son del mismo tipo (el discover
-  // pide movie o tv, no mixto) — los etiquetamos para que las tarjetas naveguen
-  // al detalle correcto.
-  const tag = (items: MediaItem[]): MediaItem[] =>
-    (items ?? []).map((i) => ({ ...i, media_type: kind }))
-  const popular = tag(data?.popular ?? [])
-  const topRated = tag(data?.topRated ?? [])
-  const recent = tag(data?.recent ?? [])
+  // Catálogo DUAL: cada array se etiqueta con su media_type correcto para que la
+  // tarjeta navegue al detalle bien (movie vs tv). Fallback a la forma legacy
+  // (popular/topRated) por si la API es vieja: ahí todo es del tipo primario.
+  const tagAs = (items: MediaItem[] | undefined, k: 'movie' | 'tv'): MediaItem[] =>
+    (items ?? []).map((i) => ({ ...i, media_type: k }))
+  const movies = tagAs(data?.movies ?? (primary === 'movie' ? data?.popular : []), 'movie')
+  const moviesTop = tagAs(data?.moviesTop ?? (primary === 'movie' ? data?.topRated : []), 'movie')
+  const series = tagAs(data?.series ?? (primary === 'tv' ? data?.popular : []), 'tv')
+  const seriesTop = tagAs(data?.seriesTop ?? (primary === 'tv' ? data?.topRated : []), 'tv')
+  const recent = tagAs(data?.recent, primary)
 
-  const heroItem = popular[0]
-  const heroUrl = backdropUrl(heroItem?.backdrop_path ?? data?.hero ?? null, 'w1280')
   const brandName = data?.name ?? brand?.name ?? key
 
-  const carouselItems = popular
+  // Hero + carrusel salen del tipo primario; el top también.
+  const primaryPop = primary === 'movie' ? movies : series
+  const primaryTop = primary === 'movie' ? moviesTop : seriesTop
+  const heroItem = primaryPop[0]
+  const heroUrl = backdropUrl(heroItem?.backdrop_path ?? data?.hero ?? null, 'w1280')
+
+  const carouselItems = primaryPop
     .slice(1)
     .filter((i) => i.backdrop_path && i.overview)
     .slice(0, 6)
-  const carouselIds = new Set(carouselItems.map((i) => i.id))
-  const popularRest = popular.filter((i) => i.id !== heroItem?.id && !carouselIds.has(i.id))
+  const usedIds = new Set<number>([heroItem?.id, ...carouselItems.map((i) => i.id)].filter(Boolean) as number[])
+  // El tipo primario ya gastó hero+carrusel; quítalos de su fila. El secundario
+  // se muestra completo.
+  const moviesRow = primary === 'movie' ? movies.filter((i) => !usedIds.has(i.id)) : movies
+  const seriesRow = primary === 'tv' ? series.filter((i) => !usedIds.has(i.id)) : series
 
   return (
     <View style={styles.container}>
@@ -108,17 +119,23 @@ export default function StudioScreen() {
                 <FeaturedCarousel items={carouselItems} />
               </View>
             )}
-            {popularRest.length > 0 && (
-              <PosterRow title="Populares" items={popularRest} />
+            {/* Filas de pelis y series — la del tipo primario va primero. */}
+            {primary === 'tv' ? (
+              <>
+                {seriesRow.length > 0 && <PosterRow title="Series" items={seriesRow} />}
+                {moviesRow.length > 0 && <PosterRow title="Películas" items={moviesRow} />}
+              </>
+            ) : (
+              <>
+                {moviesRow.length > 0 && <PosterRow title="Películas" items={moviesRow} />}
+                {seriesRow.length > 0 && <PosterRow title="Series" items={seriesRow} />}
+              </>
             )}
-            {topRated.length > 0 && (
-              <RankedRow title="Top 10" items={topRated} />
+            {primaryTop.length > 0 && (
+              <RankedRow title="Top 10" items={primaryTop.slice(0, 10)} />
             )}
             {recent.length > 0 && (
               <BackdropRow title="Recién llegados" items={recent} />
-            )}
-            {topRated.length > 10 && (
-              <PosterRow title="Más valorados" items={topRated.slice(10)} />
             )}
           </View>
         )}

@@ -5,28 +5,41 @@ import { TTLCache } from '../resolver/cache'
 const CATALOG_TTL = 30 * 60_000   // 30 min
 const cache = new TTLCache<unknown>(CATALOG_TTL)
 
-// Marcas/estudios reconocidos en el buscador. `providerId` = plataforma de
-// streaming (watch provider); `companyId` = productora. `type` marca si la
-// marca se luce más con pelis o series. Las claves deben coincidir con
-// STUDIO_BRANDS del cliente (lib/studios.ts).
+// Marcas/estudios reconocidos en el buscador. Cada marca puede traer catálogo
+// DUAL (pelis + series):
+//   · `providerId`  = plataforma de streaming (watch provider) → aporta pelis Y
+//                     series de lo disponible en la plataforma (mezcla MX + US).
+//   · `movieCompanies` / `tvCompanies` = productora(s) para franquicias; varias
+//                     con OR para no dejar títulos fuera.
+//   · `primary`     = tipo que mejor representa la marca (hero/carrusel).
+// IDs verificados contra la API de TMDB (conteos reales de discover). Las claves
+// deben coincidir con STUDIO_BRANDS del cliente (lib/studios.ts).
 const STUDIOS: Record<
   string,
-  { name: string; type: 'movie' | 'tv'; providerId?: number; companyId?: number }
+  {
+    name: string
+    primary: 'movie' | 'tv'
+    providerId?: number
+    movieCompanies?: number[]
+    tvCompanies?: number[]
+  }
 > = {
-  disney: { name: 'Disney+', type: 'movie', providerId: 337 },
-  hbo: { name: 'HBO Max', type: 'tv', providerId: 1899 },
-  netflix: { name: 'Netflix', type: 'tv', providerId: 8 },
-  prime: { name: 'Prime Video', type: 'movie', providerId: 9 },
-  appletv: { name: 'Apple TV+', type: 'tv', providerId: 350 },
-  marvel: { name: 'Marvel', type: 'movie', companyId: 420 },
-  dc: { name: 'DC', type: 'movie', companyId: 429 },
-  pixar: { name: 'Pixar', type: 'movie', companyId: 3 },
-  starwars: { name: 'Star Wars', type: 'movie', companyId: 1 },
-  // Paramount+ como watch-provider viene vacío en TMDB → usamos la productora.
-  paramount: { name: 'Paramount', type: 'movie', companyId: 4 },
-  warner: { name: 'Warner Bros.', type: 'movie', companyId: 174 },
-  universal: { name: 'Universal', type: 'movie', companyId: 33 },
-  dreamworks: { name: 'DreamWorks', type: 'movie', companyId: 521 },
+  // Plataformas: pelis + series por watch provider (MX + US).
+  netflix: { name: 'Netflix', primary: 'tv', providerId: 8 },
+  disney: { name: 'Disney+', primary: 'movie', providerId: 337 },
+  hbo: { name: 'HBO Max', primary: 'tv', providerId: 1899 },
+  prime: { name: 'Prime Video', primary: 'movie', providerId: 9 },
+  appletv: { name: 'Apple TV+', primary: 'tv', providerId: 350 },
+  // Franquicias con pelis Y series (Marvel Studios / DC / Lucasfilm).
+  marvel: { name: 'Marvel', primary: 'movie', movieCompanies: [420], tvCompanies: [420] },
+  dc: { name: 'DC', primary: 'movie', movieCompanies: [429], tvCompanies: [429] },
+  starwars: { name: 'Star Wars', primary: 'movie', movieCompanies: [1], tvCompanies: [1] },
+  // Estudios sobre todo de cine (su catálogo de TV en TMDB es marginal).
+  pixar: { name: 'Pixar', primary: 'movie', movieCompanies: [3] },
+  paramount: { name: 'Paramount', primary: 'movie', movieCompanies: [4] },
+  warner: { name: 'Warner Bros.', primary: 'movie', movieCompanies: [174] },
+  universal: { name: 'Universal', primary: 'movie', movieCompanies: [33] },
+  dreamworks: { name: 'DreamWorks', primary: 'movie', movieCompanies: [521] },
 }
 
 async function safeGenres(
@@ -191,23 +204,54 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
     ({ params }) =>
       cache.resolve(`studio:${params.key.toLowerCase()}`, async () => {
         const s = STUDIOS[params.key.toLowerCase()]
-        if (!s) return { name: params.key, type: 'movie', hero: null, popular: [], topRated: [], recent: [] }
-        const recentSort = s.type === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc'
-        const base = { companyId: s.companyId, providerId: s.providerId, type: s.type }
-        const [popular, topRated, recent] = await Promise.all([
-          tmdbService.discoverStudio({ ...base, sortBy: 'popularity.desc' }),
-          tmdbService.discoverStudio({ ...base, sortBy: 'vote_average.desc' }),
-          tmdbService.discoverStudio({ ...base, sortBy: recentSort }),
+        if (!s) {
+          return {
+            name: params.key, type: 'movie', primary: 'movie', hero: null,
+            popular: [], topRated: [], recent: [],
+            movies: [], moviesTop: [], series: [], seriesTop: [],
+          }
+        }
+        const wantMovies = !!(s.providerId || s.movieCompanies?.length)
+        const wantSeries = !!(s.providerId || s.tvCompanies?.length)
+        const recentSort = s.primary === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc'
+        const empty = Promise.resolve<any[]>([])
+        const brand = (type: 'movie' | 'tv', sortBy: string) =>
+          tmdbService.discoverBrand({
+            type,
+            sortBy,
+            providerId: s.providerId,
+            companies: type === 'movie' ? s.movieCompanies : s.tvCompanies,
+          })
+
+        // Catálogo dual: pelis (populares + top) y series (populares + top), más
+        // "recientes" del tipo primario. allSettled para que una fila que falle
+        // (o una marca sin series) no tire todo el catálogo.
+        const settled = await Promise.allSettled([
+          wantMovies ? brand('movie', 'popularity.desc') : empty,
+          wantMovies ? brand('movie', 'vote_average.desc') : empty,
+          wantSeries ? brand('tv', 'popularity.desc') : empty,
+          wantSeries ? brand('tv', 'vote_average.desc') : empty,
+          brand(s.primary, recentSort),
         ])
-        const pop = (popular as any).results as any[]
-        const hero = pop.find((x: any) => x.backdrop_path)?.backdrop_path ?? null
+        const val = (i: number): any[] =>
+          settled[i].status === 'fulfilled' ? (settled[i] as PromiseFulfilledResult<any[]>).value : []
+        const movies = val(0), moviesTop = val(1), series = val(2), seriesTop = val(3), recent = val(4)
+
+        const primaryPop = s.primary === 'movie' ? movies : series
+        const primaryTop = s.primary === 'movie' ? moviesTop : seriesTop
+        const hero = primaryPop.find((x: any) => x.backdrop_path)?.backdrop_path ?? null
+
         return {
           name: s.name,
-          type: s.type,
+          primary: s.primary,
           hero,
-          popular: pop,
-          topRated: (topRated as any).results,
-          recent: (recent as any).results,
+          // Nuevo catálogo dual (cliente móvil).
+          movies, moviesTop, series, seriesTop,
+          // Legacy (apps/tv y clientes viejos leen esta forma tipo-género).
+          type: s.primary,
+          popular: primaryPop,
+          topRated: primaryTop,
+          recent,
         }
       }),
     { params: t.Object({ key: t.String() }) }

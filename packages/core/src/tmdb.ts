@@ -155,11 +155,19 @@ export type GenreDetail = {
   recent: MediaItem[]
 }
 
-// Catálogo de estudio/marca (Disney, HBO...). Misma forma que GenreDetail más
-// el nombre y el tipo predominante de la marca.
+// Catálogo de estudio/marca (Disney, HBO, Marvel...). Conserva la forma legacy
+// tipo-género (hero/popular/topRated/recent + type) para clientes viejos —
+// apps/tv sigue leyendo esos campos — y añade el catálogo DUAL (pelis + series)
+// que usa el cliente móvil. `primary` es el tipo que luce la marca (hero/carrusel);
+// cualquiera de movies/series puede venir vacío (p. ej. una franquicia sin series).
 export type StudioDetail = GenreDetail & {
   name: string
   type: 'movie' | 'tv'
+  primary?: 'movie' | 'tv'
+  movies?: MediaItem[]
+  moviesTop?: MediaItem[]
+  series?: MediaItem[]
+  seriesTop?: MediaItem[]
 }
 
 export type GenreRow = { name: string; results: MediaItem[] }
