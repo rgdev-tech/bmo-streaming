@@ -30,6 +30,7 @@ import { useProgressSaver, describeSource, fmt } from '@bmo/player'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
 import { Touchable } from '@/components/Touchable'
+import { AirPlayButton, isAirPlayConnected } from '@/modules/airplay'
 import VideoVLC from '@/vendor/react-native-video-vlc/src/VideoVLC'
 import type {
   VideoVLCRef,
@@ -127,6 +128,13 @@ export default function PlayerScreen() {
   const [hasLatinoAlternative, setHasLatinoAlternative] = useState(false)
   const [showNext, setShowNext] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+
+  // Casting: al conectar una TV por AirPlay forzamos la vía HLS. AVPlayer
+  // (expo-video) castea solo a AirPlay; las fuentes VLC/mkv de Real-Debrid no
+  // pueden ir por AirPlay, así que re-resolvemos a un master HLS equivalente
+  // (proxeado, ya inyecta el Referer). Sticky: una vez casteando seguimos en
+  // HLS aunque cambie de episodio, para no parpadear montando VLC de nuevo.
+  const [castForceHls, setCastForceHls] = useState(false)
 
   // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
   // Default 'latino' — coincide con el default de getAudioLang() en lib/stream.ts,
@@ -253,6 +261,9 @@ export default function PlayerScreen() {
   // subtítulos y pistas de audio sin re-resolver. Cubre tanto el streaming
   // directo de Real-Debrid como un archivo ya descargado.
   const isVlcSource = localIsFile || (streamType === 'file' && !localUri && !!streamUrl)
+  // Al castear forzamos HLS (ver castForceHls): aunque la fuente sea VLC/mkv,
+  // pasamos a NativePlayer con el master HLS para que AVPlayer lo mande a la TV.
+  const useVlc = isVlcSource && !castForceHls
   // Para VLCKit: el archivo local manda sobre la URL remota.
   const vlcUri = localIsFile ? localUri! : streamUrl
 
@@ -307,6 +318,14 @@ export default function PlayerScreen() {
 
   // Última posición conocida, para conservarla al cambiar de fuente.
   const lastPositionRef = useRef(0)
+
+  // Fuente VLC/mkv + TV conectada por AirPlay → saltar a la vía HLS retomando
+  // la posición actual (el master HLS lo castea AVPlayer). Ver castForceHls.
+  function forceCastHls() {
+    if (castForceHls) return
+    setStartAt(lastPositionRef.current)
+    setCastForceHls(true)
+  }
 
   // Cambiar de fuente re-resuelve y remonta el player desde la posición actual.
   async function pickSource(i: number) {
@@ -437,7 +456,7 @@ export default function PlayerScreen() {
             </Touchable>
           </View>
         </View>
-      ) : ready && isVlcSource && vlcUri ? (
+      ) : ready && useVlc && vlcUri ? (
         <VlcPlayer
           // La fuente entra en la key: al cambiar de calidad hay que remontar
           // el player, no solo cambiarle la uri.
@@ -459,6 +478,8 @@ export default function PlayerScreen() {
           activeSourceIndex={pickedSource}
           // Sin fuentes alternativas no se ofrece la pestaña (descarga local).
           onPickSource={localIsFile ? undefined : pickSource}
+          // Sin fuente remota (descarga local) no hay HLS al que castear.
+          onCast={localIsFile ? undefined : forceCastHls}
           onPosition={(t) => { lastPositionRef.current = t }}
           offsetKey={`${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
           onClose={handleClose}
@@ -466,7 +487,7 @@ export default function PlayerScreen() {
           onPlayNext={playNextEpisode}
           onError={(msg) => setError(msg || 'Player error')}
         />
-      ) : ready && !isVlcSource && masterUrl ? (
+      ) : ready && (!isVlcSource || castForceHls) && masterUrl ? (
         <NativePlayer
           key={`${seasonN ?? 0}-${episodeN ?? 0}-hls`}
           uri={masterUrl}
@@ -634,6 +655,7 @@ function VlcPlayer({
   uri, referer, srtCues, startAt, meta, hasNext, title, episodeLabel,
   audioLang, hasLatinoAlternative, onChangeAudioLang,
   sources, sourcesLoading, activeSourceIndex, onPickSource, onPosition,
+  onCast,
   offsetKey,
   onClose, onEnded, onPlayNext, onError,
 }: {
@@ -653,6 +675,9 @@ function VlcPlayer({
   activeSourceIndex: number | null
   onPickSource?: (i: number) => void
   onPosition?: (t: number) => void
+  // Presente = se puede castear esta fuente (hay HLS remoto al que saltar).
+  // Ausente (descarga local) = no se muestra el botón de AirPlay.
+  onCast?: () => void
   // Clave de persistencia del desfase de subtítulos (por título/episodio).
   offsetKey: string
   onClose: (watchedFraction: number) => void
@@ -809,6 +834,14 @@ function VlcPlayer({
   useEffect(() => {
     const t = setTimeout(() => setBuffering(false), 6000)
     return () => clearTimeout(t)
+  }, [])
+
+  // Si ya hay una TV conectada por AirPlay (p. ej. desde el Centro de Control)
+  // al montar esta fuente VLC, saltamos a HLS de una — sin esperar a que el
+  // usuario toque el botón.
+  useEffect(() => {
+    if (onCast && isAirPlayConnected()) onCast()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function toggleControls() {
@@ -1131,14 +1164,28 @@ function VlcPlayer({
             <Touchable scaleTo={0.9} haptic="light" style={styles.vlcIconBtn} onPress={() => onClose(duration > 0 ? position / duration : 0)}>
               <SymbolView name="xmark" tintColor="#fff" style={styles.vlcIcon} />
             </Touchable>
-            {!buffering && (
-              <Touchable
-                scaleTo={0.9} haptic="light" style={styles.vlcIconBtn}
-                onPress={() => setTrackPicker((p) => (p ? null : 'audio'))}
-              >
-                <SymbolView name="ellipsis" tintColor="#fff" style={styles.vlcIcon} />
-              </Touchable>
-            )}
+            <View style={styles.vlcTopRight}>
+              {/* AirPlay: la fuente VLC/mkv no castea; al conectar la TV
+                  saltamos a la vía HLS (onCast → forceCastHls en PlayerScreen). */}
+              {onCast && (
+                <View style={styles.vlcIconBtn}>
+                  <AirPlayButton
+                    style={styles.airplayBtn}
+                    tint="#FFFFFF"
+                    activeTint="#0A84FF"
+                    onConnectionChange={(e) => { if (e.nativeEvent.connected) onCast() }}
+                  />
+                </View>
+              )}
+              {!buffering && (
+                <Touchable
+                  scaleTo={0.9} haptic="light" style={styles.vlcIconBtn}
+                  onPress={() => setTrackPicker((p) => (p ? null : 'audio'))}
+                >
+                  <SymbolView name="ellipsis" tintColor="#fff" style={styles.vlcIcon} />
+                </Touchable>
+              )}
+            </View>
           </View>
 
           {/* Play/pause + retroceder/adelantar 10s — ocultos mientras buffering,
@@ -1714,11 +1761,17 @@ const styles = StyleSheet.create({
     position: 'absolute', left: 16, right: 16,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
+  vlcTopRight: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+  },
   vlcIconBtn: {
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center', justifyContent: 'center',
   },
+  // AVRoutePickerView dibuja su propio glifo de AirPlay; lo centramos dentro
+  // del botón circular para que combine con los demás íconos.
+  airplayBtn: { width: 24, height: 24 },
   vlcIcon: { width: 18, height: 18 },
   vlcCenterControls: {
     ...StyleSheet.absoluteFillObject,
