@@ -13,7 +13,7 @@
 import { tmdbService } from '../tmdb/tmdb.service'
 import { TTLCache } from './cache'
 import {
-  rankCandidates, selectRunnable,
+  rankCandidates, selectRunnable, parseCacheState,
   type AudioTag, type HwTier, type MediaRef, type ScoredCandidate, type TorrentioStream,
 } from './torrentio.parse'
 
@@ -30,8 +30,57 @@ function debridLanguageLabel(langs: Set<AudioTag>): string {
 const PROXY_URL = process.env.STREAM_PROXY_URL
 const DEBRID_KEY = process.env.DEBRID_KEY
 
+// MediaFusion: segundo indexador (opcional). Es un addon Stremio como Torrentio,
+// pero su config va en un string CIFRADO que se genera en la página /configure
+// de la instancia (ahí se pone la key de RD y, sobre todo, la PREFERENCIA DE
+// IDIOMA — priorizar audio latino/español). El env es la base COMPLETA con ese
+// config incluido, sin la parte /stream/... — p. ej.:
+//   MEDIAFUSION_URL=https://mediafusion.elfhosted.com/<CONFIG_CIFRADO>
+// Sin la variable, MediaFusion queda deshabilitado y todo funciona igual que
+// antes (solo Torrentio). Riesgo cero para el comportamiento actual.
+const MEDIAFUSION_URL = process.env.MEDIAFUSION_URL
+
 const TORRENTIO_BASE = 'https://torrentio.strem.fun'
 const FETCH_TIMEOUT = 12_000
+
+// Un indexador estilo Stremio: dado el id IMDb, arma el endpoint de streams.
+// Ambos (Torrentio y MediaFusion) devuelven el mismo formato { streams: [...] },
+// así que se fusionan y pasan por el MISMO parser/ranking.
+type StremioSource = {
+  name: string
+  enabled: boolean
+  streamUrl: (imdbId: string, type: 'movie' | 'tv', season?: number, episode?: number) => string
+}
+
+// El id de episodio de series en el protocolo Stremio: imdb:temporada:episodio.
+function stremioId(imdbId: string, type: 'movie' | 'tv', season?: number, episode?: number): string {
+  return type === 'tv' ? `${imdbId}:${season ?? 1}:${episode ?? 1}` : imdbId
+}
+
+const SOURCES: StremioSource[] = [
+  {
+    name: 'torrentio',
+    enabled: !!DEBRID_KEY,
+    streamUrl: (imdbId, type, season, episode) => {
+      // El key de debrid va embebido en el path (config estándar de addons
+      // Stremio) — así Torrentio devuelve streams con `url` ya resuelto por RD.
+      const config = DEBRID_KEY ? `realdebrid=${DEBRID_KEY}/` : ''
+      const kind = type === 'tv' ? 'series' : 'movie'
+      return `${TORRENTIO_BASE}/${config}stream/${kind}/${stremioId(imdbId, type, season, episode)}.json`
+    },
+  },
+  {
+    name: 'mediafusion',
+    enabled: !!MEDIAFUSION_URL,
+    streamUrl: (imdbId, type, season, episode) => {
+      const base = MEDIAFUSION_URL!.replace(/\/$/, '')
+      const kind = type === 'tv' ? 'series' : 'movie'
+      return `${base}/stream/${kind}/${stremioId(imdbId, type, season, episode)}.json`
+    },
+  },
+]
+
+const activeSources = (): StremioSource[] => SOURCES.filter((s) => s.enabled)
 
 export type { TorrentioStream, MediaRef } from './torrentio.parse'
 
@@ -69,15 +118,6 @@ export async function imdbIdOf(type: 'movie' | 'tv', tmdbId: number): Promise<st
   })
 }
 
-function buildStreamUrl(imdbId: string, type: 'movie' | 'tv', season?: number, episode?: number): string {
-  // El key de debrid va embebido en el path (config estándar de addons Stremio) —
-  // así Torrentio devuelve streams con `url` ya resuelto vía Real-Debrid.
-  const config = DEBRID_KEY ? `realdebrid=${DEBRID_KEY}/` : ''
-  const kind = type === 'tv' ? 'series' : 'movie'
-  const id = type === 'tv' ? `${imdbId}:${season ?? 1}:${episode ?? 1}` : imdbId
-  return `${TORRENTIO_BASE}/${config}stream/${kind}/${id}.json`
-}
-
 // Cachea la respuesta cruda de Torrentio. Dos motivos:
 //  - El selector de calidad hace dos llamadas (listar y luego elegir) y sin
 //    esto Torrentio se consultaría dos veces.
@@ -96,21 +136,61 @@ function fetchStreamsCached(
   return streamsCache.resolve(key, () => fetchStreams(imdbId, type, season, episode))
 }
 
+// Pide los streams a UN indexador y los etiqueta con su origen.
+async function fetchFromSource(
+  src: StremioSource,
+  imdbId: string,
+  type: 'movie' | 'tv',
+  season?: number,
+  episode?: number
+): Promise<TorrentioStream[]> {
+  const r = await safeFetch(src.streamUrl(imdbId, type, season, episode))
+  if (!r) return []
+  try {
+    const data = (await r.json()) as { streams?: TorrentioStream[] }
+    return (data.streams ?? []).map((s) => ({ ...s, _source: src.name }))
+  } catch {
+    return []
+  }
+}
+
+// El MISMO torrent puede aparecer en varios indexadores (mismo infoHash+fileIdx).
+// Se deja uno solo — preferimos el que ya trae `url` de resolución (ejecutable).
+// Sin dedupe, la carrera gastaría intentos resolviendo el mismo release dos veces.
+function dedupeStreams(streams: TorrentioStream[]): TorrentioStream[] {
+  const seen = new Map<string, TorrentioStream>()
+  const out: TorrentioStream[] = []
+  for (const s of streams) {
+    const key = s.infoHash ? `${s.infoHash}:${s.fileIdx ?? 0}` : s.url ?? ''
+    if (!key) { out.push(s); continue }
+    const prev = seen.get(key)
+    if (!prev) { seen.set(key, s); out.push(s); continue }
+    // Ya visto: si el previo no tenía url y este sí, quédate con este.
+    if (!prev.url && s.url) {
+      const idx = out.indexOf(prev)
+      if (idx >= 0) out[idx] = s
+      seen.set(key, s)
+    }
+  }
+  return out
+}
+
+// Consulta TODOS los indexadores activos en paralelo y fusiona los resultados.
+// allSettled: que un indexador falle (timeout, caído) no debe tumbar al otro —
+// el catálogo se arma con lo que sí respondió.
 async function fetchStreams(
   imdbId: string,
   type: 'movie' | 'tv',
   season?: number,
   episode?: number
 ): Promise<TorrentioStream[]> {
-  const url = buildStreamUrl(imdbId, type, season, episode)
-  const r = await safeFetch(url)
-  if (!r) return []
-  try {
-    const data = (await r.json()) as { streams?: TorrentioStream[] }
-    return data.streams ?? []
-  } catch {
-    return []
-  }
+  const sources = activeSources()
+  if (!sources.length) return []
+  const settled = await Promise.allSettled(
+    sources.map((src) => fetchFromSource(src, imdbId, type, season, episode))
+  )
+  const all = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+  return dedupeStreams(all)
 }
 
 // El `url` que trae cada stream es el endpoint de RESOLUCIÓN de Torrentio (no
@@ -163,7 +243,7 @@ async function followResolveUrl(startUrl: string): Promise<string | null> {
   }
 }
 
-export const debridEnabled = !!DEBRID_KEY
+export const debridEnabled = activeSources().length > 0
 
 export type DebridResult = { url: string; label: string; language: string; hasLatinoAlternative: boolean }
 
@@ -271,7 +351,7 @@ export async function listDebridSources(req: DebridRequest): Promise<SourceOptio
 
 // Paso común de listar y resolver: pedir a Torrentio, rankear y filtrar.
 async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
-  if (!DEBRID_KEY) return []
+  if (!activeSources().length) return []
   const imdbId = await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return []
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
@@ -284,7 +364,7 @@ export async function resolveDebridStream(
   // en vez de correr la carrera — es el selector de calidad del reproductor.
   pick?: number
 ): Promise<DebridResult | null> {
-  if (!DEBRID_KEY) return null
+  if (!activeSources().length) return null
 
   const t0 = Date.now()
   const imdbId = await imdbIdOf(req.type, req.tmdbId)
@@ -342,7 +422,7 @@ export async function resolveDebridStream(
 
   const p = winner.c.parsed
   console.error(
-    `[debrid] torrentio ${tFetch}ms + carrera ${Date.now() - tRace}ms ` +
+    `[debrid] ${p.raw._source ?? 'torrentio'} ${tFetch}ms + carrera ${Date.now() - tRace}ms ` +
     `(${runnable.length} ejecutables de ${streams.length}) → ${p.filename} ` +
     `[score ${Math.round(winner.c.score)} · ${p.resolution ?? '?'}p ${p.codec ?? '?'} · cached=${p.cached}]`
   )
@@ -371,6 +451,26 @@ export async function debugTorrentio(
   const imdbId = await imdbIdOf(type, tmdbId)
   if (!imdbId) return { error: 'no se pudo obtener imdb_id', debridEnabled }
 
+  // Desglose POR INDEXADOR: además del catálogo fusionado, se consulta cada
+  // fuente por separado para ver su formato crudo. Es el canal para verificar
+  // el marcador de cacheado / idioma de MediaFusion (solo responde a IPs de
+  // Vercel) y afinar parseCacheState/parseLangs sin adivinar.
+  const perSource = await Promise.all(
+    activeSources().map(async (src) => {
+      const s = await fetchFromSource(src, imdbId, type, season, episode)
+      return {
+        source: src.name,
+        count: s.length,
+        samples: s.slice(0, 5).map((x) => ({
+          name: x.name,
+          title: x.title?.slice(0, 160),
+          filename: x.behaviorHints?.filename,
+          parsedCached: parseCacheState(x.name),
+        })),
+      }
+    })
+  )
+
   const streams = await fetchStreams(imdbId, type, season, episode)
   const r = rankCandidates(streams, media, 'original')
   const runnable = selectRunnable(r)
@@ -379,6 +479,7 @@ export async function debugTorrentio(
     imdbId,
     debridEnabled,
     media,
+    sources: perSource,
     totalStreams: streams.length,
     // Cuenta los que realmente pueden competir (con `url` y sin rechazo), no
     // una aproximación distinta a la del ranking real.
@@ -389,11 +490,13 @@ export async function debugTorrentio(
     hasLatinoAlternative: r.hasLatinoAlternative,
     // Crudos: para verificar/ajustar parseCacheState y la detección de idioma.
     rawSamples: streams.slice(0, 5).map((s) => ({
+      source: s._source,
       name: s.name,
       title: s.title?.slice(0, 160),
       filename: s.behaviorHints?.filename,
     })),
     top: r.ranked.slice(0, 8).map((c) => ({
+      source: c.parsed.raw._source,
       label: c.parsed.filename.slice(0, 90),
       score: Math.round(c.score),
       cached: c.parsed.cached,

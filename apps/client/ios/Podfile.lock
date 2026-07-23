@@ -39,6 +39,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
+  - ExpoAirPlay (1.0.0):
+    - ExpoModulesCore
   - ExpoAppleAuthentication (8.0.8):
     - ExpoModulesCore
   - ExpoAsset (12.0.13):
@@ -2892,6 +2894,7 @@ DEPENDENCIES:
   - "EXJSONUtils (from `../../../node_modules/.bun/expo-json-utils@0.15.0/node_modules/expo-json-utils/ios`)"
   - "EXManifests (from `../../../node_modules/.bun/expo-manifests@1.0.11+63653052d6a48e02/node_modules/expo-manifests/ios`)"
   - "Expo (from `../../../node_modules/.bun/expo@54.0.36+63653052d6a48e02/node_modules/expo`)"
+  - ExpoAirPlay (from `../modules/airplay/ios`)
   - "ExpoAppleAuthentication (from `../../../node_modules/.bun/expo-apple-authentication@8.0.8+63653052d6a48e02/node_modules/expo-apple-authentication/ios`)"
   - "ExpoAsset (from `../../../node_modules/.bun/expo-asset@12.0.13+9d691202961202af/node_modules/expo-asset/ios`)"
   - "ExpoBlur (from `../../../node_modules/.bun/expo-blur@15.0.8+63653052d6a48e02/node_modules/expo-blur/ios`)"
@@ -3019,6 +3022,8 @@ EXTERNAL SOURCES:
     :path: "../../../node_modules/.bun/expo-manifests@1.0.11+63653052d6a48e02/node_modules/expo-manifests/ios"
   Expo:
     :path: "../../../node_modules/.bun/expo@54.0.36+63653052d6a48e02/node_modules/expo"
+  ExpoAirPlay:
+    :path: "../modules/airplay/ios"
   ExpoAppleAuthentication:
     :path: "../../../node_modules/.bun/expo-apple-authentication@8.0.8+63653052d6a48e02/node_modules/expo-apple-authentication/ios"
   ExpoAsset:
@@ -3221,6 +3226,7 @@ SPEC CHECKSUMS:
   EXJSONUtils: 1d3e4590438c3ee593684186007028a14b3686cd
   EXManifests: 378c7742de02a8605093b1c82b5774d8f9875cec
   Expo: b3a0ce325c850dc7e67244640862616daeee6551
+  ExpoAirPlay: 578ba07b3455ff7a616a5d716f2ee5ece0592afb
   ExpoAppleAuthentication: 9413ae9a5e631a424cc04c1b13b0694dbab7d594
   ExpoAsset: 9e5a7c9c0a9fb83ad5b2bb365141f2bd7f289b66
   ExpoBlur: b90747a3f22a8b6ceffd9cb0dc41a4184efdc656

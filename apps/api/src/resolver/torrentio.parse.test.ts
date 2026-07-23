@@ -124,6 +124,9 @@ describe('parseCacheState — tolerante a deriva de formato', () => {
     ['[RD download] Torrentio\n1080p', false],
     ['[AD+] Torrentio', true],
     ['[RD⚡] Torrentio', true],
+    // MediaFusion / Comet: rayo suelto sin corchetes = cacheado.
+    ['MediaFusion ⚡️\n1080p', true],
+    ['⚡ MediaFusion | RD', true],
   ])('%s → %p', (name, expected) => {
     expect(parseCacheState(name)).toBe(expected as any)
   })

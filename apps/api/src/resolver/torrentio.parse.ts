@@ -16,6 +16,9 @@ export type TorrentioStream = {
   fileIdx?: number
   url?: string
   behaviorHints?: { filename?: string; bingeGroup?: string }
+  // Indexador de origen (torrentio | mediafusion). Metadato nuestro para
+  // deduplicar y diagnosticar; no viene del addon.
+  _source?: string
 }
 
 // Tres estados, NO un boolean. `null` = "no pudimos leer el marcador", que es
@@ -101,12 +104,21 @@ export type ScoredCandidate = {
 const CACHE_RE = /\[\s*(?:RD|AD|PM|DL|OC|TB)(\+|⚡|\s*download|\s*dl)?\s*\]/i
 
 export function parseCacheState(name?: string): CacheState {
-  const m = CACHE_RE.exec(name ?? '')
-  if (!m) return null
-  const marker = (m[1] ?? '').trim().toLowerCase()
-  if (marker === '+' || marker === '⚡') return true
-  if (marker === 'download' || marker === 'dl') return false
-  return null // "[RD]" pelado: ambiguo, no inventamos
+  const text = name ?? ''
+  const m = CACHE_RE.exec(text)
+  if (m) {
+    const marker = (m[1] ?? '').trim().toLowerCase()
+    if (marker === '+' || marker === '⚡') return true
+    if (marker === 'download' || marker === 'dl') return false
+    // "[RD]" pelado: ambiguo — sigue evaluando otros marcadores abajo.
+  }
+  // MediaFusion / Comet marcan la disponibilidad instantánea (cacheada) con un
+  // rayo ⚡ SUELTO, sin corchetes de debrid. Un ⚡ no aparece en un nombre de
+  // release por ninguna otra razón, así que es señal fiable de cacheado. Los no
+  // cacheados de esos addons no lo llevan → quedan en null (y el filtro los
+  // descarta, que es justo lo que queremos). Formato a verificar vía debug.
+  if (text.includes('⚡')) return true
+  return null // sin marcador legible: ambiguo, no inventamos
 }
 
 // ¿Podemos confiar en la señal de cacheado del lote?
