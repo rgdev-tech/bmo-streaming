@@ -1,6 +1,8 @@
+import { useRef } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Image } from 'expo-image'
 import { posterUrl, titleOf, type MediaItem } from '@bmo/core/tmdb'
+import { prewarmTitle } from '@bmo/core/stream'
 import { useFocusScale } from './useFocusScale'
 import { colors, layout } from './theme'
 
@@ -33,6 +35,20 @@ export function PosterCard({
   size?: 'normal' | 'large'
 }) {
   const { scale, onFocus: onScaleFocus, onBlur } = useFocusScale()
+
+  // Pre-resolver al ENFOCAR (el truco de Netflix): al pararse sobre un póster,
+  // arrancamos el resolve en segundo plano para que, al dar OK, la URL ya esté
+  // en el caché del API y el video arranque casi al instante. Debounce de 400ms
+  // para no calentar las tarjetas que solo se pasan de largo al recorrer la fila;
+  // el resolve del API deduplica y cachea, así que no hay trabajo doble.
+  const prewarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const schedulePrewarm = () => {
+    clearTimeout(prewarmTimer.current)
+    prewarmTimer.current = setTimeout(() => {
+      prewarmTitle(item.id, item.media_type === 'tv')
+    }, 400)
+  }
+
   const lg = size === 'large'
   const dims = lg
     ? { width: layout.posterWidthLg, height: layout.posterHeightLg }
@@ -43,8 +59,8 @@ export function PosterCard({
 
   return (
     <Pressable
-      onFocus={() => { onScaleFocus(); onFocus?.() }}
-      onBlur={onBlur}
+      onFocus={() => { onScaleFocus(); onFocus?.(); schedulePrewarm() }}
+      onBlur={() => { onBlur(); clearTimeout(prewarmTimer.current) }}
       onPress={() => onPress?.(item)}
       style={inGrid ? undefined : styles.pressable}
     >

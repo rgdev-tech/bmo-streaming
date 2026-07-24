@@ -379,7 +379,12 @@ export function decodePenalty(
   return -35
 }
 
-export function scoreStream(p: ParsedStream, m: MediaRef, lang: 'original' | 'latino'): ScoredCandidate {
+export function scoreStream(
+  p: ParsedStream,
+  m: MediaRef,
+  lang: 'original' | 'latino',
+  hwTier: HwTier = 'high',
+): ScoredCandidate {
   const parts: Record<string, number> = {}
 
   // Ya cacheado en Real-Debrid = arranca al instante. Peso alto pero no
@@ -456,6 +461,19 @@ export function scoreStream(p: ParsedStream, m: MediaRef, lang: 'original' | 'la
 
   parts.seeders = p.seeders ? Math.min(10, Math.log2(p.seeders + 1)) : 0
 
+  // Arranque rápido en dispositivos flojos (Fire TV): un remux/archivo enorme
+  // tarda MUCHO más en empezar a bufferear que un WEB-DL 1080p liviano — y sobre
+  // datos/CPU limitados eso es la diferencia entre arrancar al toque o esperar.
+  // Solo se añade el término en 'low' (en 'high' ni existe la clave → el scoring
+  // y sus tests quedan idénticos). Es preferencia, nunca rechazo: si lo único
+  // cacheado es un remux, igual se sirve.
+  if (hwTier === 'low') {
+    parts.fastStart =
+      (p.releaseKind === 'web' ? 8 : 0) +
+      (p.isRemux ? -20 : 0) +
+      (p.sizeGB != null && p.sizeGB > 8 ? -15 : 0)
+  }
+
   const score = Object.values(parts).reduce((a, b) => a + b, 0)
   return { parsed: p, score, parts }
 }
@@ -505,7 +523,7 @@ export function rankCandidates(
   }
 
   const ranked = kept
-    .map((p) => scoreStream(p, m, lang))
+    .map((p) => scoreStream(p, m, lang, hwTier))
     .sort((a, b) => b.score - a.score)
 
   return { ranked, rejected, hasLatinoAlternative, cacheSignal, cacheCounts }

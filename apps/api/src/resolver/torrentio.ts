@@ -49,7 +49,11 @@ const MEDIAFUSION_URL = process.env.MEDIAFUSION_URL
 const MEDIAFUSION_CACHED_ONLY = process.env.MEDIAFUSION_CACHED_ONLY !== 'false'
 
 const TORRENTIO_BASE = 'https://torrentio.strem.fun'
-const FETCH_TIMEOUT = 12_000
+// 8s (antes 12s): los indexadores cacheados responden en 1–4s. `fetchStreams`
+// espera a TODAS las fuentes (allSettled), así que un indexador lento (Torrentio
+// suele flaquear) retrasaba el arranque hasta 12s aunque MediaFusion ya hubiera
+// respondido. Un tope más bajo acota ese peor caso sin perder respuestas válidas.
+const FETCH_TIMEOUT = 8_000
 
 // Un indexador estilo Stremio: dado el id IMDb, arma el endpoint de streams.
 // Ambos (Torrentio y MediaFusion) devuelven el mismo formato { streams: [...] },
@@ -219,7 +223,10 @@ async function fetchStreams(
 // link en RD → RD redirige a su CDN) — seguir solo el primer Location dejaba
 // una URL intermedia (no reproducible → CoreMediaErrorDomain -12646). Seguimos
 // la cadena completa nosotros mismos, sin descargar el archivo.
-const RESOLVE_TIMEOUT_MS = 10_000
+// 6s por salto (antes 10s): un link cacheado de RD arma su redirect en 1–2s. Un
+// salto que tarda más está trabado — cortarlo antes deja que la carrera pase al
+// siguiente candidato en vez de quedarse esperando, clave para el arranque rápido.
+const RESOLVE_TIMEOUT_MS = 6_000
 const MAX_REDIRECTS = 6
 
 // Cuando el archivo resuelto no es reproducible (p.ej. el torrent resultó ser

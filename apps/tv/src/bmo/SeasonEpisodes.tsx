@@ -14,6 +14,7 @@ import { Image } from 'expo-image'
 import { Ionicons } from '@expo/vector-icons'
 import { useFocusEffect } from 'expo-router'
 import { stillUrl, tmdb, type Episode, type Season } from '@bmo/core/tmdb'
+import { prewarmTitle } from '@bmo/core/stream'
 import { useAsync } from '@bmo/core/useAsync'
 import { getEpisodeProgress, getWatchedEpisodes } from '@bmo/core/library'
 import { colors, layout, rowHeading, safe } from './theme'
@@ -160,12 +161,15 @@ function EpisodeRow({
   watched,
   progress,
   onPress,
+  onFocus,
 }: {
   ep: Episode
   watched: boolean
   /** 0–1, o undefined si nunca se empezó. */
   progress?: number
   onPress?: (ep: Episode) => void
+  /** Aviso de foco (para pre-resolver ese episodio en segundo plano). */
+  onFocus?: (ep: Episode) => void
 }) {
   // El still se muestra a 200×113 dp (un thumbnail): w300 lo cubre nítido. Pedir
   // 'original' (a menudo 1920×1080 ≈ 8MB por bitmap, y una temporada tiene decenas)
@@ -178,7 +182,7 @@ function EpisodeRow({
   const meta = [ep.runtime ? `${ep.runtime} min` : null, year].filter(Boolean).join('  ·  ')
 
   return (
-    <Pressable onPress={() => onPress?.(ep)}>
+    <Pressable onPress={() => onPress?.(ep)} onFocus={() => onFocus?.(ep)}>
       {({ focused }) => (
         <View style={[styles.epRow, focused && styles.epRowFocused]}>
           <View style={[styles.stillWrap, focused && styles.stillWrapFocused]}>
@@ -246,6 +250,17 @@ export function SeasonEpisodes({
     `season:${tvId}:${selected}`
   )
 
+  // Pre-resolver el episodio EXACTO al enfocarlo (paso final antes del play):
+  // para cuando el usuario dé OK, el resolve ya está en el caché del API.
+  // Debounce de 400ms para no calentar los que solo se recorren de largo.
+  const epPrewarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const prewarmEpisode = (ep: Episode) => {
+    clearTimeout(epPrewarmTimer.current)
+    epPrewarmTimer.current = setTimeout(() => {
+      prewarmTitle(Number(tvId), true, selected, ep.episode_number)
+    }, 400)
+  }
+
   // Vistos y progreso se releen al volver a la pantalla, no solo al montar.
   const [watched, setWatched] = useState<Set<string>>(new Set())
   const [progress, setProgress] = useState<Map<string, number>>(new Map())
@@ -290,6 +305,7 @@ export function SeasonEpisodes({
                 watched={watched.has(key)}
                 progress={progress.get(key)}
                 onPress={(ep) => onPlayEpisode?.(selected, ep)}
+                onFocus={prewarmEpisode}
               />
             )
           })}
