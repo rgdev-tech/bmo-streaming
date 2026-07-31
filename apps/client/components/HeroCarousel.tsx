@@ -118,8 +118,11 @@ export function HeroCarousel({
 
   return (
     <View style={styles.wrap}>
+      {/* w1280 y no 'original': cubre de sobra el ancho de un iPhone 3x
+          (~1206 px) por una sexta parte de los bytes. Ver el comentario largo
+          en Hero.tsx. */}
       <PullStretchBackdrop
-        uri={backdropUrl(data[activeIdx]?.backdrop_path ?? null, 'original')}
+        uri={backdropUrl(data[activeIdx]?.backdrop_path ?? null, 'w1280')}
         scrollY={scrollY}
       />
 

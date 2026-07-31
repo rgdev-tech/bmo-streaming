@@ -63,6 +63,11 @@ export type HomeData = {
   popularMovies: Paged<MediaItem>
   popularSeries: Paged<MediaItem>
   topMovies: Paged<MediaItem>
+  // Opcional a propósito: el cliente puede estar desplegado antes que la API
+  // (Vercel va por su lado) y una API vieja no devuelve este campo. Marcarlo
+  // opcional obliga a manejar ese hueco en vez de crashear — mismo criterio
+  // que los campos nuevos de CatalogData.
+  topSeries?: Paged<MediaItem>
 }
 
 export type Genre = { id: number; name: string }

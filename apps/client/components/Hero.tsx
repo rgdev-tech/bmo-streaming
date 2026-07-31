@@ -26,10 +26,16 @@ const KEN_BURNS_SCALE = 1.09
 export function Hero({ item, active, scrollY }: { item: MediaItem; active: boolean; scrollY?: Animated.Value }) {
   const router = useRouter()
   const isTv = item.media_type === 'tv' || (!!item.name && !item.title)
-  // 'original' — mismo tamaño que sirve TMDB, sin el recorte de calidad de w1280.
-  // Solo el slide activo (y el que ya se visitó) carga esta calidad — el resto
-  // del carrusel no gasta ancho de banda en imágenes que quizás nunca se vean.
-  const bg = backdropUrl(item.backdrop_path, active ? 'original' : 'w780')
+  // w1280 y NO 'original': el hero ocupa el ancho de la pantalla, que en un
+  // iPhone 3x son ~1206 px — w1280 los cubre justo, sin recorte visible. Medido
+  // contra TMDB, el mismo backdrop pesa 175 KB en w1280 y 1.1 MB en 'original':
+  // seis veces más bytes (y un bitmap enorme al decodificar) por píxeles que la
+  // pantalla no puede mostrar. El carrusel rota seis títulos, así que se pagaba
+  // en la pantalla más vista de la app.
+  //
+  // Sólo el slide activo carga esta calidad; el resto se queda en w780 para no
+  // gastar en imágenes que quizás nunca se vean.
+  const bg = backdropUrl(item.backdrop_path, active ? 'w1280' : 'w780')
   const upcoming = isUpcoming(item)
 
   const [logo, setLogo] = useState<string | null>(null)

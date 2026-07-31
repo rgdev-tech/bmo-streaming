@@ -24,6 +24,11 @@ import { screenTitle, rowHeading } from '@/lib/typography'
 import { getContinueWatching, type Progress } from '@/lib/library'
 import { useAuth } from '@/lib/auth'
 import { ProfileAvatar } from '@/components/ProfileAvatar'
+import { dedupeRows, heroIds } from '@/lib/dedupeRows'
+
+// Cuántos títulos rota el hero. Tiene que coincidir con MAX_ITEMS de
+// HeroCarousel: es la lista que se excluye del resto del Home.
+const HERO_ITEMS = 6
 
 export default function HomeScreen() {
   const router = useRouter()
@@ -64,9 +69,41 @@ export default function HomeScreen() {
 
   // Item destacado: primer trending con backdrop + overview
   const spotlight = data.trending.results.find((i) => i.backdrop_path && i.overview)
-  const trendingRest = spotlight
-    ? data.trending.results.filter((i) => i.id !== spotlight.id)
-    : data.trending.results
+
+  // El Home mezcla fuentes que se solapan mucho (lo que es tendencia también es
+  // popular, y lo popular suele estar en Netflix): medido contra la API real,
+  // el 26% de las tarjetas eran un título ya visto más arriba. Se reparte una
+  // sola vez cada título, respetando el orden de las filas como prioridad.
+  const rows = dedupeRows(
+    [
+      { key: 'trending', items: data.trending.results },
+      { key: 'topMovies', items: data.topMovies.results },
+      ...(collections
+        ? [
+            { key: 'netflix', items: collections.netflix.results },
+            { key: 'hbo', items: collections.hbo.results },
+            { key: 'appletv', items: collections.appletv.results },
+            { key: 'disney', items: collections.disney.results },
+            { key: 'prime', items: collections.prime.results },
+          ]
+        : []),
+      { key: 'popularMovies', items: data.popularMovies.results },
+      { key: 'popularSeries', items: data.popularSeries.results },
+      // Series mejor valoradas: fuente propia. Antes esta fila reusaba
+      // data.topMovies —el mismo array que 'Top 10 películas'— así que las
+      // dos mostraban lo mismo con distinto título.
+      { key: 'topSeries', items: data.topSeries?.results ?? [] },
+    ],
+    {
+      // El hero y el destacado ya ocupan la parte alta de la pantalla: volver a
+      // verlos en una fila unos centímetros más abajo es la repetición más
+      // evidente de todas.
+      exclude: [
+        ...heroIds(data.trending.results, HERO_ITEMS),
+        ...(spotlight ? [spotlight.id] : []),
+      ],
+    }
+  )
 
   return (
     <View style={styles.container}>
@@ -90,7 +127,7 @@ export default function HomeScreen() {
           />
 
           {/* Tendencias: fila de posters */}
-          <PosterRow title="Tendencias" items={trendingRest} />
+          <PosterRow title="Tendencias" items={rows.trending} />
 
           {/* Spotlight: tarjeta grande con descripción */}
           {spotlight && (
@@ -101,35 +138,38 @@ export default function HomeScreen() {
           )}
 
           {/* Top 10: fila rankeada */}
-          <RankedRow title="Top 10 películas" items={data.topMovies.results} />
+          <RankedRow title="Top 10 películas" items={rows.topMovies} />
 
           {collections && (
             <>
               {/* Netflix: posters */}
-              <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} />
+              <PosterRow title="Lo mejor de Netflix" items={rows.netflix} />
 
               {/* HBO: landscape backdrops */}
-              <BackdropRow title="Lo mejor de HBO Max" items={collections.hbo.results} />
+              <BackdropRow title="Lo mejor de HBO Max" items={rows.hbo} />
 
               {/* Apple TV+: posters */}
-              <PosterRow title="Lo mejor de Apple TV+" items={collections.appletv.results} />
+              <PosterRow title="Lo mejor de Apple TV+" items={rows.appletv} />
 
               {/* Disney+: landscape backdrops */}
-              <BackdropRow title="Lo mejor de Disney+" items={collections.disney.results} />
+              <BackdropRow title="Lo mejor de Disney+" items={rows.disney} />
 
               {/* Prime: posters */}
-              <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} />
+              <PosterRow title="Lo mejor de Prime Video" items={rows.prime} />
             </>
           )}
 
           {/* Películas populares: posters */}
-          <PosterRow title="Películas populares" items={data.popularMovies.results} />
+          <PosterRow title="Películas populares" items={rows.popularMovies} />
 
           {/* Series del momento: rankeadas */}
-          <RankedRow title="Series del momento" items={data.popularSeries.results} />
+          <RankedRow title="Series del momento" items={rows.popularSeries} />
 
-          {/* Mejor valoradas: landscape backdrops */}
-          <BackdropRow title="Mejor valoradas" items={data.topMovies.results} />
+          {/* Series mejor valoradas. Si la API todavía no manda topSeries
+              (deploy desfasado), la fila no se dibuja en vez de repetir. */}
+          {rows.topSeries.length > 0 && (
+            <BackdropRow title="Series mejor valoradas" items={rows.topSeries} />
+          )}
         </View>
       </Animated.ScrollView>
 

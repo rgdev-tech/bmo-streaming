@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "expo start --clear",
     "ios": "expo run:ios",
-    "android": "expo run:android"
+    "android": "expo run:android",
+    "test": "bun test lib",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@bmo/core": "workspace:*",
@@ -45,6 +47,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/bun": "^1.3.14",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.0",
     "typescript": "~5.9.2"

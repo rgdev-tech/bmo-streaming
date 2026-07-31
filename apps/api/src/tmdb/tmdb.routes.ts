@@ -85,14 +85,19 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
   // Inicio: varias filas en una sola llamada
   .get('/home', () =>
     cache.resolve('home', async () => {
-      const [trending, popularMovies, popularSeries, topMovies] =
+      // topSeries es una quinta fuente REAL. El Home dibuja unas diez filas y
+      // sólo había cuatro listas para alimentarlas: "Top 10 películas" y
+      // "Mejor valoradas" terminaban mostrando exactamente el mismo array, que
+      // es información repetida por diseño y no por un descuido del cliente.
+      const [trending, popularMovies, popularSeries, topMovies, topSeries] =
         await Promise.all([
           tmdbService.trending(),
           tmdbService.popularMovies(),
           tmdbService.popularSeries(),
           tmdbService.topRatedMovies(),
+          tmdbService.topRatedSeries(),
         ])
-      return { trending, popularMovies, popularSeries, topMovies }
+      return { trending, popularMovies, popularSeries, topMovies, topSeries }
     })
   )
 

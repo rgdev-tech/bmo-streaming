@@ -147,6 +147,12 @@ function EpisodeRow({
   onToggleWatched: () => void
 }) {
   const router = useRouter()
+  // Se queda en w300 (el default) a propósito. La miniatura mide 130x74 pt, o
+  // sea 390 px en 3x, así que w300 queda algo corto — pero TMDB no tiene nada
+  // entre w300 y 'original', y ese salto son 284 KB por imagen contra 10 KB.
+  // En una temporada de veinte episodios serían ~5.7 MB y bitmaps enormes al
+  // decodificar, para ganar nitidez en un recuadro del tamaño de una estampilla:
+  // el "mejor tamaño" acá empeora la app.
   const still = stillUrl(ep.still_path)
   const released = isReleased(ep.air_date)
 

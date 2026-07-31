@@ -21,7 +21,12 @@ export function CastRow({ cast }: { cast: CastMember[] }) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
-          const img = profileUrl(item.profile_path)
+          // h632 y no el w185 por defecto: el círculo mide 80 pt, que en un
+          // iPhone 3x son 240 px reales — w185 se quedaba corto y en una cara
+          // la falta de nitidez se nota más que en cualquier otra imagen. TMDB
+          // no ofrece nada entre medio (w45 / w185 / h632), y el salto son 49 KB
+          // por foto contra 6 KB: por una fila de ~15 caras es asumible.
+          const img = profileUrl(item.profile_path, 'h632')
           return (
             <Touchable
               style={styles.person}
