@@ -83,15 +83,16 @@ const BASE_ORDER: string[] = providers
   .sort((a, b) => b.rank - a.rank)
   .map((s) => s.id)
 
-// Orden de fuentes según el idioma de audio preferido.
+// Orden de fuentes: SIEMPRE por rank (fiabilidad y velocidad), nunca por idioma.
+// Antes, pidiendo latino, se adelantaban las fuentes latinas — que suelen ser
+// scrapers más lentos y con más señuelos — por delante de otras mejor rankeadas.
+// Eso costaba segundos de arranque a cambio de un doblaje que casi siempre está
+// igual disponible en la pista de audio del archivo elegido.
+//
 // exclude: fuentes que el cliente ya intentó y fallaron al reproducir → se saltan.
-function buildSourceOrder(lang: AudioLang, exclude: string[] = []): string[] {
+function buildSourceOrder(exclude: string[] = []): string[] {
   const ex = new Set(exclude)
-  const base = BASE_ORDER.filter((id) => !ex.has(id))
-  if (lang !== 'latino') return base
-  const latino = LATINO_SOURCES.filter((id) => base.includes(id))
-  const rest = base.filter((id) => !latino.includes(id))
-  return [...latino, ...rest]
+  return BASE_ORDER.filter((id) => !ex.has(id))
 }
 
 // Etiqueta de idioma de audio inferida a partir de la fuente ganadora.
@@ -374,8 +375,20 @@ async function scrape(
   console.error(`[resolve] scraping "${media.title}" (${media.releaseYear}) lang=${lang}${exclude.length ? ` excl=${exclude.join(',')}` : ''}`)
   const t0 = Date.now()
   try {
-    // Subtítulos en paralelo (no dependen del scrape de video)
-    const subsP = fetchSubtitles(type, tmdbId, season, episode)
+    // Subtítulos en paralelo (no dependen del scrape de video).
+    //
+    // Van con TOPE PROPIO: la respuesta no puede esperarlos. El reproductor sólo
+    // necesita la URL del video para empezar, pero la respuesta incluye las
+    // pistas, así que un Wyzie lento retrasaba el arranque hasta 6 s por algo
+    // que no hace falta para el primer frame. Con el tope, si no llegaron a
+    // tiempo se devuelve sin ellos: es preferible que arranque y quede sin
+    // subtítulos externos (el archivo suele traer los suyos) a que el usuario
+    // mire una pantalla negra esperando.
+    const SUBS_BUDGET_MS = 1_500
+    const subsP = Promise.race([
+      fetchSubtitles(type, tmdbId, season, episode),
+      new Promise<Caption[]>((r) => setTimeout(() => r([]), SUBS_BUDGET_MS)),
+    ])
 
     // Real-Debrid primero: sirve la MEJOR fuente cacheada, que RD entrega con un
     // link instantáneo → reproducción inmediata. No nos desviamos a los scrapers
@@ -384,7 +397,7 @@ async function scrape(
     // velocidad. 'realdebrid' se trata como una fuente más para el exclude.
     if (debridEnabled && !exclude.includes('realdebrid')) {
       try {
-        const debrid = await resolveDebridStream({ type, tmdbId, lang, media: ref, season, episode, hwTier })
+        const debrid = await resolveDebridStream({ type, tmdbId, media: ref, season, episode, hwTier })
         if (debrid) {
           const result: StreamResult = {
             url: debrid.url,
@@ -415,7 +428,7 @@ async function scrape(
     let result: StreamResult | null = null
     let winner = ''
     while (Date.now() < deadline) {
-      const order = buildSourceOrder(lang).filter((id) => !blocked.has(id))
+      const order = buildSourceOrder().filter((id) => !blocked.has(id))
       if (!order.length) break
 
       const output = await providers.runAll({ media, sourceOrder: order })
@@ -465,7 +478,12 @@ export function resolveStream(
   // El hwTier entra en la clave: un Fire TV ('low') y un iPhone ('high') pueden
   // resolver el mismo título a fuentes distintas, no deben compartir caché.
   const hw = hwTier === 'low' ? ':hw=low' : ''
-  const key = (ex ? `${base}:${lang}:x=${ex}` : `${base}:${lang}`) + hw
+  // El idioma NO entra en la clave. Ya no influye en qué fuente se elige, así
+  // que separar por idioma sólo servía para partir la caché en dos: el mismo
+  // título se resolvía una vez para 'original' y otra para 'latino', con la
+  // mitad de aciertos y el doble de scrapes. Con una sola entrada, el segundo
+  // que le da play a un título arranca del caché.
+  const key = (ex ? `${base}:x=${ex}` : base) + hw
   return cache.resolve(key, () => scrape(type, tmdbId, lang, season, episode, exclude, hwTier))
 }
 
@@ -518,11 +536,11 @@ export async function listSources(
 ) {
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return []
-  return listDebridSources({ type, tmdbId, lang, media: built.ref, season, episode, hwTier })
+  return listDebridSources({ type, tmdbId, media: built.ref, season, episode, hwTier })
 }
 
 // Resuelve UNA fuente concreta elegida por el usuario. No pasa por el caché de
-// resolveStream: ese guarda el ganador automático por (título, idioma), y
+// resolveStream: ese guarda el ganador automático del título, y
 // pisarlo con una elección manual haría que la siguiente reproducción normal
 // arrancara con esa fuente sin que nadie la haya pedido.
 export async function resolvePickedSource(
@@ -535,7 +553,7 @@ export async function resolvePickedSource(
 
   const subsP = fetchSubtitles(type, tmdbId, season, episode)
   const debrid = await resolveDebridStream(
-    { type, tmdbId, lang, media: built.ref, season, episode, hwTier },
+    { type, tmdbId, media: built.ref, season, episode, hwTier },
     pick
   )
   if (!debrid) return null

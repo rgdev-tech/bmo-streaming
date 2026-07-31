@@ -256,7 +256,7 @@ describe('rejectionOf — hardware flojo (hwTier low: Fire TV Stick)', () => {
       stream('Movie.2020.2160p.x265.10bit.mkv'),
       stream('Movie.2020.1080p.x265.10bit.mkv'),
       stream('Movie.2020.1080p.x264.mkv'),
-    ], movieRef({ year: 2020 }), 'original', 'low')
+    ], movieRef({ year: 2020 }), 'low')
     expect(r.ranked).toHaveLength(1)
     expect(r.ranked[0].parsed.resolution).toBe(1080)
     expect(r.ranked[0].parsed.codec).toBe('h264')
@@ -272,8 +272,8 @@ describe('procedencia del release', () => {
     const preHd = parse('www.1TamilMV.onl - Superman (2025) HQ PRE-HD - 1080p - x264 - [Tam].mkv')
     const bluray = parse('Superman.2025.1080p.BluRay.x264-GROUP.mkv')
     expect(preHd.releaseKind).toBe('cam')
-    expect(scoreStream(bluray, ref, 'original').score)
-      .toBeGreaterThan(scoreStream(preHd, ref, 'original').score)
+    expect(scoreStream(bluray, ref).score)
+      .toBeGreaterThan(scoreStream(preHd, ref).score)
   })
 
   test.each(['M.2020.HDCAM.1080p.mkv', 'M.2020.TELESYNC.720p.mkv', 'M.2020.PRE-HD.1080p.mkv'])(
@@ -288,8 +288,8 @@ describe('procedencia del release', () => {
 
   test('BluRay y WEB-DL no se penalizan', () => {
     const ref = movieRef({ year: 2020 })
-    expect(scoreStream(parse('M.2020.1080p.BluRay.x264.mkv'), ref, 'original').parts.release).toBe(0)
-    expect(scoreStream(parse('M.2020.1080p.WEB-DL.x264.mkv'), ref, 'original').parts.release).toBe(0)
+    expect(scoreStream(parse('M.2020.1080p.BluRay.x264.mkv'), ref).parts.release).toBe(0)
+    expect(scoreStream(parse('M.2020.1080p.WEB-DL.x264.mkv'), ref).parts.release).toBe(0)
   })
 })
 
@@ -347,21 +347,21 @@ describe('bitrateMbps', () => {
 describe('scoreStream — desglose por término', () => {
   test('el bitrate castiga más 20GB/90min que 20GB/180min', () => {
     const p = parse('Movie.2020.1080p.x264.mkv 💾 20 GB')
-    const a = scoreStream(p, movieRef({ year: 2020, runtimeMin: 90 }), 'original')
-    const b = scoreStream(p, movieRef({ year: 2020, runtimeMin: 180 }), 'original')
+    const a = scoreStream(p, movieRef({ year: 2020, runtimeMin: 90 }))
+    const b = scoreStream(p, movieRef({ year: 2020, runtimeMin: 180 }))
     expect(a.parts.bitrate).toBeLessThanOrEqual(b.parts.bitrate)
   })
 
   test('DV penaliza más que HDR10, y ambos penalizan', () => {
-    const dv = scoreStream(parse('M.2020.1080p.DV.x264.mkv'), movieRef({ year: 2020 }), 'original')
-    const hdr = scoreStream(parse('M.2020.1080p.HDR10.x264.mkv'), movieRef({ year: 2020 }), 'original')
+    const dv = scoreStream(parse('M.2020.1080p.DV.x264.mkv'), movieRef({ year: 2020 }))
+    const hdr = scoreStream(parse('M.2020.1080p.HDR10.x264.mkv'), movieRef({ year: 2020 }))
     expect(dv.parts.hdr).toBeLessThan(hdr.parts.hdr)
     expect(hdr.parts.hdr).toBeLessThan(0)
   })
 
   test('pidiendo audio original, un release SIN el idioma original se penaliza', () => {
     const soloIta = scoreStream(parse('M.2020.1080p.ITA.x264.mkv'),
-      movieRef({ year: 2020, originalLanguage: 'en' }), 'original')
+      movieRef({ year: 2020, originalLanguage: 'en' }))
     expect(soloIta.parts.lang).toBeLessThan(0)
   })
 
@@ -370,7 +370,7 @@ describe('scoreStream — desglose por término', () => {
     // castigarlo por idioma sería incorrecto. Lo que lo hunde es 4K+DV+HEVC.
     const s = scoreStream(parse(FILE.supermanIta), movieRef({
       title: 'Superman', originalTitle: 'Superman', year: 2025, originalLanguage: 'en',
-    }), 'original')
+    }))
     expect(s.parts.lang).toBe(0)
     expect(s.parts.hdr).toBeLessThan(0)
     expect(s.parts.decode).toBeLessThan(0)
@@ -378,30 +378,46 @@ describe('scoreStream — desglose por término', () => {
 
   test('el ganador real de Superman pierde contra un 1080p x264 sobrio', () => {
     const ref = movieRef({ title: 'Superman', originalTitle: 'Superman', year: 2025, runtimeMin: 130 })
-    const actual = scoreStream(parse(FILE.supermanIta), ref, 'original')
-    const sane = scoreStream(parse('Superman.2025.1080p.BluRay.x264.mkv'), ref, 'original')
+    const actual = scoreStream(parse(FILE.supermanIta), ref)
+    const sane = scoreStream(parse('Superman.2025.1080p.BluRay.x264.mkv'), ref)
     expect(sane.score).toBeGreaterThan(actual.score)
   })
 
-  test('pidiendo latino, un dual-audio puntúa a la par de un latino-solo', () => {
-    const dual = scoreStream(parse('M.2020.1080p.Dual.Lat.Eng.x264.mkv'), movieRef({ year: 2020 }), 'latino')
-    const only = scoreStream(parse('M.2020.1080p.Latino.x264.mkv'), movieRef({ year: 2020 }), 'latino')
-    expect(dual.parts.lang).toBeGreaterThan(0)
-    expect(Math.abs(dual.parts.lang - only.parts.lang)).toBeLessThanOrEqual(20)
+  // El ranking NO premia el español. Se busca la fuente que arranque más rápido
+  // con la mejor calidad; el idioma se resuelve después, con la pista de audio
+  // embebida y los subtítulos. Estos tests fijan esa decisión para que no se
+  // reintroduzca un sesgo por doblaje sin querer.
+  test('un release latino NO recibe bonus por serlo', () => {
+    const lat = scoreStream(parse('M.2020.1080p.Dual.Lat.Eng.x264.mkv'), movieRef({ year: 2020 }))
+    const eng = scoreStream(parse('M.2020.1080p.English.x264.mkv'), movieRef({ year: 2020 }))
+    expect(lat.parts.lang).toBe(0)
+    expect(eng.parts.lang).toBe(0)
   })
 
-  test('pidiendo latino, "Español" ambiguo puntúa alto (probable latino) y por encima de castellano y original', () => {
-    const amb = scoreStream(parse('M.2020.1080p.Español.x264.mkv'), movieRef({ year: 2020 }), 'latino')
-    const cast = scoreStream(parse('M.2020.1080p.Castellano.x264.mkv'), movieRef({ year: 2020 }), 'latino')
-    const eng = scoreStream(parse('M.2020.1080p.English.x264.mkv'), movieRef({ year: 2020 }), 'latino')
-    expect(amb.parts.lang).toBeGreaterThan(0)
-    expect(amb.parts.lang).toBeGreaterThan(cast.parts.lang)
-    expect(amb.parts.lang).toBeGreaterThan(eng.parts.lang)
+  test('entre dos cacheados, gana la calidad y no el idioma', () => {
+    const latino480 = scoreStream(parse('M.2020.480p.Latino.x264.mkv'), movieRef({ year: 2020 }))
+    const orig1080 = scoreStream(parse('M.2020.1080p.English.x264.mkv'), movieRef({ year: 2020 }))
+    expect(orig1080.score).toBeGreaterThan(latino480.score)
+  })
+
+  test('un dual-audio conserva el original y no se castiga', () => {
+    const dual = scoreStream(parse('M.2020.1080p.Dual.Lat.Eng.x264.mkv'), movieRef({ year: 2020 }))
+    expect(dual.parts.lang).toBe(0)
+  })
+
+  // El castigo que SÍ queda: un doblaje que reemplaza al idioma original es peor
+  // material de partida, sea al italiano o al español. No es preferencia de
+  // idioma, es calidad de la fuente.
+  test('un doblaje que pisa el idioma original se castiga, sea cual sea', () => {
+    const soloEs = scoreStream(parse('M.2020.1080p.Español.x264.mkv'), movieRef({ year: 2020 }))
+    const soloIta = scoreStream(parse('M.2020.1080p.ITA.x264.mkv'), movieRef({ year: 2020 }))
+    expect(soloEs.parts.lang).toBeLessThan(0)
+    expect(soloIta.parts.lang).toBe(soloEs.parts.lang)
   })
 
   test('cacheado suma; no cacheado no', () => {
-    const cached = scoreStream(parse(FILE.inception1080, { name: '[RD+] Torrentio' }), movieRef({ year: 2010 }), 'original')
-    const not = scoreStream(parse(FILE.inception1080, { name: '[RD download] Torrentio' }), movieRef({ year: 2010 }), 'original')
+    const cached = scoreStream(parse(FILE.inception1080, { name: '[RD+] Torrentio' }), movieRef({ year: 2010 }))
+    const not = scoreStream(parse(FILE.inception1080, { name: '[RD download] Torrentio' }), movieRef({ year: 2010 }))
     expect(cached.parts.cached).toBeGreaterThan(not.parts.cached)
   })
 })
@@ -410,9 +426,7 @@ describe('rankCandidates — integración', () => {
   test('con un 1080p disponible, el AV1 4K ya no gana', () => {
     const r = rankCandidates(
       [stream(FILE.inceptionAv1), stream(FILE.inception1080)],
-      movieRef({ title: 'Inception', originalTitle: 'Inception', year: 2010, runtimeMin: 148 }),
-      'original'
-    )
+      movieRef({ title: 'Inception', originalTitle: 'Inception', year: 2010, runtimeMin: 148 }))
     expect(r.ranked[0].parsed.filename).toBe(FILE.inception1080)
     expect(r.rejected.map((x) => x.reason)).toContain('av1')
   })
@@ -420,8 +434,7 @@ describe('rankCandidates — integración', () => {
   test('el upscale falso pierde contra un 1080p real, y la peli ajena se rechaza', () => {
     const r = rankCandidates(
       [stream(FILE.fightClubUpscale), stream(FILE.nirvanna), stream('Fight.Club.1999.1080p.BluRay.x264.mkv')],
-      movieRef(), 'original'
-    )
+      movieRef())
     expect(r.ranked[0].parsed.isUpscale).toBe(false)
     expect(r.rejected.some((x) => x.reason === 'wrong-year')).toBe(true)
   })
@@ -429,7 +442,7 @@ describe('rankCandidates — integración', () => {
   test('si TODO es AV1, ranked queda vacío (callejón deliberado)', () => {
     // Devolver null hace que scrape() caiga a los scrapers, que es mejor que
     // entregar un archivo que no va a reproducir.
-    const r = rankCandidates([stream(FILE.inceptionAv1)], movieRef({ year: 2010 }), 'original')
+    const r = rankCandidates([stream(FILE.inceptionAv1)], movieRef({ year: 2010 }))
     expect(r.ranked).toHaveLength(0)
   })
 
@@ -438,13 +451,12 @@ describe('rankCandidates — integración', () => {
     // al usuario un cambio de audio que no va a reproducir.
     const r = rankCandidates(
       [stream('M.2020.2160p.AV1.Latino.mkv'), stream('M.2020.1080p.x264.mkv')],
-      movieRef({ year: 2020 }), 'original'
-    )
+      movieRef({ year: 2020 }))
     expect(r.hasLatinoAlternative).toBe(false)
   })
 
   test('hasLatinoAlternative cuenta el "Español" ambiguo, no solo el latino explícito', () => {
-    const r = rankCandidates([stream('M.2020.1080p.Español.x264.mkv')], movieRef({ year: 2020 }), 'original')
+    const r = rankCandidates([stream('M.2020.1080p.Español.x264.mkv')], movieRef({ year: 2020 }))
     expect(r.hasLatinoAlternative).toBe(true)
   })
 })
@@ -456,7 +468,7 @@ describe('selectRunnable — filtro de cacheados con degradación', () => {
     const r = rankCandidates([
       mk('[RD+] Torrentio', 'A.2020.1080p.x264.mkv'),
       mk('[RD download] Torrentio', 'B.2020.1080p.x264.mkv'),
-    ], movieRef({ year: 2020 }), 'original')
+    ], movieRef({ year: 2020 }))
     expect(r.cacheSignal).toBe('ok')
     const runnable = selectRunnable(r)
     expect(runnable).toHaveLength(1)
@@ -469,7 +481,7 @@ describe('selectRunnable — filtro de cacheados con degradación', () => {
     const r = rankCandidates([
       mk(undefined, 'A.2020.1080p.x264.mkv'),
       mk(undefined, 'B.2020.1080p.x264.mkv'),
-    ], movieRef({ year: 2020 }), 'original')
+    ], movieRef({ year: 2020 }))
     expect(r.cacheSignal).toBe('absent')
     expect(selectRunnable(r)).toHaveLength(r.ranked.length)
   })
@@ -478,7 +490,7 @@ describe('selectRunnable — filtro de cacheados con degradación', () => {
     const r = rankCandidates([
       mk('[RD download] Torrentio', 'A.2020.1080p.x264.mkv'),
       mk('[RD+] Torrentio', 'B.2020.2160p.AV1.mkv'), // el único cacheado es AV1 → rechazado antes
-    ], movieRef({ year: 2020 }), 'original')
+    ], movieRef({ year: 2020 }))
     expect(selectRunnable(r)).toHaveLength(0)
   })
 })

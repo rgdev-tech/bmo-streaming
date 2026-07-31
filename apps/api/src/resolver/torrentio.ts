@@ -277,7 +277,6 @@ export type DebridResult = { url: string; label: string; language: string; hasLa
 export type DebridRequest = {
   type: 'movie' | 'tv'
   tmdbId: number
-  lang: 'original' | 'latino'
   media: MediaRef
   season?: number
   episode?: number
@@ -382,7 +381,7 @@ async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
   const imdbId = await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return []
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
-  return selectRunnable(rankCandidates(streams, req.media, req.lang, req.hwTier))
+  return selectRunnable(rankCandidates(streams, req.media, req.hwTier))
 }
 
 export async function resolveDebridStream(
@@ -399,7 +398,7 @@ export async function resolveDebridStream(
 
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
   const tFetch = Date.now() - t0
-  const r = rankCandidates(streams, req.media, req.lang, req.hwTier)
+  const r = rankCandidates(streams, req.media, req.hwTier)
 
   if (r.cacheSignal === 'absent' && streams.length > 0) {
     // Torrentio cambió el formato del marcador de cacheado: seguimos andando
@@ -502,7 +501,7 @@ export async function debugTorrentio(
   )
 
   const streams = await fetchStreams(imdbId, type, season, episode)
-  const r = rankCandidates(streams, media, lang)
+  const r = rankCandidates(streams, media)
   const runnable = selectRunnable(r)
 
   return {

@@ -379,10 +379,12 @@ export function decodePenalty(
   return -35
 }
 
+// Sin parámetro de idioma a propósito: el ranking optimiza arranque instantáneo
+// (cacheado) y calidad, nada más. Si vuelve a aparecer un `lang` acá, es que se
+// está pagando velocidad por una preferencia de doblaje.
 export function scoreStream(
   p: ParsedStream,
   m: MediaRef,
-  lang: 'original' | 'latino',
   hwTier: HwTier = 'high',
 ): ScoredCandidate {
   const parts: Record<string, number> = {}
@@ -391,29 +393,24 @@ export function scoreStream(
   // infinito: el filtro duro de cacheados vive aparte (ver rankCandidates).
   parts.cached = p.cached === true ? 120 : 0
 
-  if (lang === 'latino') {
-    // Un dual/multi-audio con español suele ser un release de mejor calidad que
-    // un re-encode solo-latino, y el cliente ya sabe auto-seleccionar la pista
-    // en español de las pistas embebidas. Por eso puntúa casi igual.
-    // El idioma es un DESEMPATE SUAVE, no un factor dominante. La prioridad es la
-    // reproducción INSTANTÁNEA: entre fuentes cacheadas (todas arrancan al toque)
-    // preferimos español/latino cuando la calidad es comparable, pero JAMÁS por
-    // encima de resolución/bitrate. Los pesos van por debajo del salto de
-    // resolución (1080↔480 = 35) para no elegir un latino 480p sobre un original
-    // 1080p. "Español" ambiguo (sin decir latino ni castellano) suele ser latino,
-    // así que va por encima del castellano (doblaje de España).
-    parts.lang = p.langs.has('latino') ? 25
-      : p.langs.has('spanish') && !p.langs.has('castellano') ? 15
-      : p.langs.has('castellano') ? 8
-      : 0
-  } else {
-    // Pedimos audio original: penalizamos releases que claramente NO lo traen
-    // (el caso "Superman 2160p iTA EnG": ganaba un release italiano).
-    const orig = m.originalLanguage
-    const tagFor: Record<string, AudioTag> = { en: 'english', it: 'italian', fr: 'french', pt: 'portuguese', es: 'spanish' }
-    const wanted = orig ? tagFor[orig] : undefined
-    parts.lang = wanted && p.langs.size > 0 && !p.langs.has(wanted) ? -60 : 0
-  }
+  // NO hay bonus por español. Antes se sumaban puntos a los releases latinos y
+  // eso desviaba la elección: el objetivo es la fuente que arranque más rápido
+  // con la mejor calidad, y el idioma se resuelve DESPUÉS — el reproductor ya
+  // auto-selecciona la pista de audio en español cuando el archivo la trae, y
+  // los subtítulos van aparte. Elegir un archivo peor "porque dice Latino" era
+  // pagar velocidad y calidad por algo que casi siempre se consigue igual.
+  //
+  // Lo que SÍ se conserva es el castigo a un doblaje ajeno al idioma original
+  // (el caso "Superman 2160p iTA EnG", donde ganaba un release italiano). Eso
+  // no es preferencia de idioma: un doblaje al italiano de una película inglesa
+  // es peor material de partida, sin importar qué idioma quiera el usuario.
+  const orig = m.originalLanguage
+  const tagFor: Record<string, AudioTag> = { en: 'english', it: 'italian', fr: 'french', pt: 'portuguese', es: 'spanish' }
+  const wanted = orig ? tagFor[orig] : undefined
+  // Un release que además trae español (dual/multi) NO se castiga: sigue
+  // teniendo el audio original adentro.
+  const keepsOriginal = !wanted || p.langs.size === 0 || p.langs.has(wanted)
+  parts.lang = keepsOriginal ? 0 : -60
 
   // Título: penalización, NUNCA rechazo. Los releases usan abreviaturas y
   // títulos traducidos, así que un solapamiento bajo es sospecha, no certeza.
@@ -491,7 +488,6 @@ export type RankResult = {
 export function rankCandidates(
   streams: TorrentioStream[],
   m: MediaRef,
-  lang: 'original' | 'latino',
   hwTier: HwTier = 'high'
 ): RankResult {
   const parsed = streams.map(parseStream)
@@ -523,7 +519,7 @@ export function rankCandidates(
   }
 
   const ranked = kept
-    .map((p) => scoreStream(p, m, lang, hwTier))
+    .map((p) => scoreStream(p, m, hwTier))
     .sort((a, b) => b.score - a.score)
 
   return { ranked, rejected, hasLatinoAlternative, cacheSignal, cacheCounts }
