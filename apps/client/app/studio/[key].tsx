@@ -22,6 +22,7 @@ import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonRow } from '@/components/Skeleton'
 import { rowHeading } from '@/lib/typography'
+import { colors } from '@/lib/theme'
 
 const { width } = Dimensions.get('window')
 const HERO_H = width * 0.62
@@ -159,7 +160,7 @@ export default function StudioScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  heroPlaceholder: { backgroundColor: '#1C1C1E' },
+  heroPlaceholder: { backgroundColor: colors.surface },
   heroContent: { position: 'absolute', left: 18, right: 18 },
   heroKicker: {
     color: 'rgba(255,255,255,0.75)',
@@ -196,7 +197,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderColor: colors.textFaint,
   },
   blurWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   backIcon: { width: 15, height: 15 },

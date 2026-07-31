@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   FlatList,
   View,
@@ -11,6 +11,7 @@ import {
 import { tmdb, type MediaItem } from '@/lib/tmdb'
 import { matchStudio, type StudioBrand } from '@/lib/studios'
 import { useAsync } from '@/lib/useAsync'
+import { useDebouncedValue } from '@/lib/useDebouncedValue'
 import { PosterCard } from '@/components/PosterCard'
 import { CategoryCard } from '@/components/CategoryCard'
 import { PersonResultCard } from '@/components/PersonResultCard'
@@ -31,27 +32,45 @@ export default function SearchScreen() {
 
   const searching = query.trim().length >= 2
 
-  async function runSearch(q: string) {
-    setQuery(q)
-    if (q.trim().length < 2) { setResults([]); setPeople([]); setBrand(null); return }
-    // Marca reconocida (Disney, HBO...) → banner de catálogo especial. Es local
-    // e instantáneo, no espera a la red.
-    setBrand(matchStudio(q))
+  // El texto se refleja al instante (lo local no espera a nadie) pero la
+  // consulta a la red va sobre el valor demorado: antes salía un request por
+  // cada tecla — escribir "breaking bad" eran doce.
+  const debouncedQuery = useDebouncedValue(query, 300)
+
+  // Marca reconocida (Disney, HBO...) → banner de catálogo especial. Se calcula
+  // sobre el texto en vivo porque es local e instantáneo: no tiene por qué
+  // esperar al debounce.
+  useEffect(() => {
+    setBrand(searching ? matchStudio(query) : null)
+  }, [query, searching])
+
+  useEffect(() => {
+    const q = debouncedQuery.trim()
+    if (q.length < 2) { setResults([]); setPeople([]); setLoading(false); return }
+
+    // Sin esto, una respuesta lenta de una consulta vieja puede llegar DESPUÉS
+    // de la nueva y pisar los resultados correctos con los de un texto que el
+    // usuario ya terminó de escribir.
+    let cancelled = false
     setLoading(true)
-    try {
-      const data = await tmdb.search(q)
-      // Títulos (con póster) por un lado; personas (actores, con foto y
-      // filmografía conocida) por otro — cada uno se muestra distinto.
-      setResults(data.results.filter((r) => r.media_type !== 'person' && r.poster_path))
-      setPeople(
-        data.results
-          .filter((r) => r.media_type === 'person' && r.profile_path)
-          .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
-          .slice(0, 3)
-      )
-    } catch { setResults([]); setPeople([]) }
-    finally { setLoading(false) }
-  }
+    tmdb.search(q)
+      .then((data) => {
+        if (cancelled) return
+        // Títulos (con póster) por un lado; personas (actores, con foto y
+        // filmografía conocida) por otro — cada uno se muestra distinto.
+        setResults(data.results.filter((r) => r.media_type !== 'person' && r.poster_path))
+        setPeople(
+          data.results
+            .filter((r) => r.media_type === 'person' && r.profile_path)
+            .sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0))
+            .slice(0, 3)
+        )
+      })
+      .catch(() => { if (!cancelled) { setResults([]); setPeople([]) } })
+      .finally(() => { if (!cancelled) setLoading(false) })
+
+    return () => { cancelled = true }
+  }, [debouncedQuery])
 
   // Cabecera de resultados: banner de marca + personas encontradas, encima de
   // la cuadrícula de títulos.
@@ -80,7 +99,7 @@ export default function SearchScreen() {
           headerStyle: { backgroundColor: 'transparent' },
           headerSearchBarOptions: {
             placeholder: 'Películas, series, actores...',
-            onChangeText: (e: any) => runSearch(e.nativeEvent.text),
+            onChangeText: (e: any) => setQuery(e.nativeEvent.text),
             hideWhenScrolling: false,
             autoCapitalize: 'none',
             textColor: '#fff',

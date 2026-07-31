@@ -8,6 +8,7 @@ import { AVATARS } from '@/lib/avatars'
 import { ProfileAvatar } from './ProfileAvatar'
 import { Touchable } from './Touchable'
 import type { Profile } from '@/lib/supabase'
+import { colors } from '@/lib/theme'
 
 // Detalle de perfil, con el patrón de las pantallas de Ajustes de iOS: cabecera
 // con el elemento en grande, listas agrupadas en tarjetas con separadores
@@ -127,7 +128,7 @@ export function ProfileEditor({
 
         {!!error && (
           <View style={styles.banner}>
-            <SymbolView name="exclamationmark.circle.fill" tintColor="#ff6b6b" style={styles.bannerIcon} />
+            <SymbolView name="exclamationmark.circle.fill" tintColor={colors.danger} style={styles.bannerIcon} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
@@ -137,7 +138,7 @@ export function ProfileEditor({
         {canDelete && (
           <View style={[styles.group, styles.groupDanger]}>
             <Touchable style={styles.row} scaleTo={0.99} haptic="medium" onPress={onDelete}>
-              <SymbolView name="trash.fill" tintColor="#ff6b6b" style={styles.rowIcon} />
+              <SymbolView name="trash.fill" tintColor={colors.danger} style={styles.rowIcon} />
               <Text style={[styles.rowLabel, styles.dangerLabel]}>Eliminar perfil</Text>
             </Touchable>
           </View>
@@ -160,15 +161,15 @@ const styles = StyleSheet.create({
   },
   barBtn: { minWidth: 74, paddingVertical: 6 },
   barTitle: { color: '#fff', fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
-  barCancel: { color: 'rgba(255,255,255,0.6)', fontSize: 16 },
+  barCancel: { color: colors.textDim, fontSize: 16 },
   barSave: { color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'right' },
-  barSaveOff: { color: 'rgba(255,255,255,0.25)', fontWeight: '600' },
+  barSaveOff: { color: colors.textFaint, fontWeight: '600' },
 
   content: { paddingHorizontal: 20 },
   hero: { alignItems: 'center', paddingVertical: 26 },
 
   sectionLabel: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 12.5, fontWeight: '700',
+    color: colors.textMuted, fontSize: 12.5, fontWeight: '700',
     letterSpacing: 0.7, textTransform: 'uppercase',
     marginBottom: 11, marginLeft: 4, marginTop: 8,
   },
@@ -178,7 +179,7 @@ const styles = StyleSheet.create({
     position: 'absolute', right: -2, bottom: -2,
     width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#08080F',
+    borderWidth: 2, borderColor: colors.bg,
   },
   checkIcon: { width: 9, height: 9 },
 
@@ -198,10 +199,10 @@ const styles = StyleSheet.create({
   },
   rowIcon: { width: 17, height: 17 },
   rowLabel: { color: '#fff', fontSize: 16, flex: 1 },
-  rowValue: { color: 'rgba(255,255,255,0.4)', fontSize: 15.5 },
+  rowValue: { color: colors.textMuted, fontSize: 15.5 },
   rowInput: { flex: 1, color: '#fff', fontSize: 16, paddingVertical: 16 },
   chevron: { width: 12, height: 12 },
-  dangerLabel: { color: '#ff6b6b', fontWeight: '600' },
+  dangerLabel: { color: colors.danger, fontWeight: '600' },
 
   hint: {
     color: 'rgba(255,255,255,0.35)', fontSize: 13.5,
@@ -209,5 +210,5 @@ const styles = StyleSheet.create({
   },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16, paddingHorizontal: 2 },
   bannerIcon: { width: 15, height: 15 },
-  errorText: { color: '#ff6b6b', fontSize: 14, flex: 1, lineHeight: 19 },
+  errorText: { color: colors.danger, fontSize: 14, flex: 1, lineHeight: 19 },
 })

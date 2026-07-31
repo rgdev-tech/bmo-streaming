@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Animated, View, StyleSheet, Dimensions, type ViewStyle } from 'react-native'
+import { colors } from '@/lib/theme'
 
 const { width } = Dimensions.get('window')
 
@@ -115,7 +116,7 @@ const POSTER_W = 124
 const { height } = Dimensions.get('window')
 
 const styles = StyleSheet.create({
-  block: { backgroundColor: '#1C1C1E', borderRadius: 8 },
+  block: { backgroundColor: colors.surface, borderRadius: 8 },
   container: { flex: 1, backgroundColor: '#000' },
   hero: { width, height: height * 0.55, borderRadius: 0 },
   rows: { paddingTop: 20, gap: 28 },

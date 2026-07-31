@@ -21,6 +21,7 @@ import { EmptyState } from './EmptyState'
 import { CatalogSkeleton } from './Skeleton'
 import { screenTitle, rowHeading } from '@/lib/typography'
 import type { CatalogData, MediaItem } from '@/lib/tmdb'
+import { colors } from '@/lib/theme'
 
 const GRID_GAP = 12
 const GRID_PAD = 20
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.hairline,
   },
   chipsRow: { paddingHorizontal: 6, paddingVertical: 6, gap: 4 },
   chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },

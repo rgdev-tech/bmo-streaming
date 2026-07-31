@@ -22,6 +22,7 @@ import { DownloadButton } from '@/components/DownloadButton'
 import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { TitleSkeleton } from '@/components/Skeleton'
+import { colors } from '@/lib/theme'
 
 export default function TitleScreen() {
   const router = useRouter()
@@ -300,7 +301,7 @@ const HERO_H = width * 0.95
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  hero: { width, height: HERO_H, backgroundColor: '#1C1C1E' },
+  hero: { width, height: HERO_H, backgroundColor: colors.surface },
   heroBg: { ...StyleSheet.absoluteFillObject },
   heroGradient: { ...StyleSheet.absoluteFillObject },
   heroContent: {
@@ -321,7 +322,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   metaRow: { flexDirection: 'row', gap: 14, marginTop: 10, justifyContent: 'center' },
-  meta: { color: 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: '500' },
+  meta: { color: colors.textDim, fontSize: 14, fontWeight: '500' },
   certBadge: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.5)',
@@ -344,7 +345,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.hairline,
     borderRadius: 12,
     paddingVertical: 14,
     marginTop: 20,
@@ -370,7 +371,7 @@ const styles = StyleSheet.create({
   // 14 y no 15: con tres botones e icono, "Descargar" quedaba al filo en
   // pantallas de 390pt.
   listText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  genres: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 20 },
+  genres: { color: colors.textMuted, fontSize: 13, marginTop: 20 },
   overview: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 15,

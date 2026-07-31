@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { useRouter } from 'expo-router'
 import { backdropUrl, type Category } from '@/lib/tmdb'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
   const router = useRouter()
@@ -37,9 +38,9 @@ export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#1C1C1E' },
+  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: colors.surface },
   img: { ...StyleSheet.absoluteFillObject },
-  empty: { backgroundColor: '#1C1C1E' },
+  empty: { backgroundColor: colors.surface },
   grad: { ...StyleSheet.absoluteFillObject },
   name: {
     position: 'absolute',

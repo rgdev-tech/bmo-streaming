@@ -183,6 +183,7 @@ export default function TitleScreen() {
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               transition={300}
+              cachePolicy="disk"
             />
           )}
           <LinearGradient

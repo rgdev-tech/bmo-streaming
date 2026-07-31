@@ -51,8 +51,11 @@ export function Hero({ item }: { item: MediaItem }) {
 
   return (
     <View style={[styles.hero, { height: heroHeight }]}>
+      {/* cachePolicy 'disk' (no 'memory-disk'): es un bitmap a pantalla completa
+          — retenerlo decodificado en RAM pesa demasiado en TVs de 1-2GB. Del
+          disco carga igual de rápido y no compite con el resto de la app. */}
       {uri && (
-        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} cachePolicy="memory-disk" recyclingKey={String(item.id)} />
+        <Image source={uri} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} cachePolicy="disk" recyclingKey={String(item.id)} />
       )}
 
       {/* Dos degradados en cruz: el vertical funde el borde inferior con las

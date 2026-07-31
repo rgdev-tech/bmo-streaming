@@ -11,6 +11,7 @@ import {
   type DownloadItem,
 } from '@/lib/download'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 type Props = {
   id: number
@@ -57,7 +58,7 @@ export function DownloadButton({
   return (
     <Touchable scaleTo={0.85} haptic="medium" onPress={handlePress} hitSlop={10} style={styles.btn}>
       {status === 'done' ? (
-        <SymbolView name="arrow.down.circle.fill" tintColor="#34C759" style={{ width: size, height: size }} />
+        <SymbolView name="arrow.down.circle.fill" tintColor={colors.success} style={{ width: size, height: size }} />
 
       ) : status === 'downloading' || status === 'pending' ? (
         <CircularProgress size={size} progress={progress} tintColor={tintColor}>

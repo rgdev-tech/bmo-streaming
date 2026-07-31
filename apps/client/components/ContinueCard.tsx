@@ -7,6 +7,7 @@ import { backdropUrl, posterUrl } from '@/lib/tmdb'
 import { removeProgress, type Progress } from '@/lib/library'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 const CARD_WIDTH = 300
 
@@ -109,10 +110,10 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: 'hidden',
     marginRight: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
   thumb: { ...StyleSheet.absoluteFillObject },
-  empty: { backgroundColor: '#1C1C1E' },
+  empty: { backgroundColor: colors.surface },
   overlay: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '55%' },
   bottom: {
     position: 'absolute',

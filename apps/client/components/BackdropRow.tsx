@@ -6,6 +6,7 @@ import { type MediaItem, backdropUrl, titleOf } from '@/lib/tmdb'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
+import { colors } from '@/lib/theme'
 
 const { width } = Dimensions.get('window')
 const CARD_W = Math.round(width * 0.62)
@@ -70,9 +71,9 @@ const styles = StyleSheet.create({
     height: CARD_H,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
-  placeholder: { backgroundColor: '#2C2C2E' },
+  placeholder: { backgroundColor: colors.surfaceHigh },
   title: {
     position: 'absolute',
     bottom: 10,

@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router'
 import { type MediaItem, posterUrl, titleOf, isUpcoming } from '@/lib/tmdb'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 const CARD_WIDTH = 124
 
@@ -86,7 +87,7 @@ const styles = StyleSheet.create({
     width: CARD_WIDTH,
     height: CARD_WIDTH * 1.5,
     borderRadius: 12,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
   placeholder: {
     alignItems: 'center',
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   placeholderText: {
-    color: 'rgba(255,255,255,0.4)',
+    color: colors.textMuted,
     fontSize: 12,
     textAlign: 'center',
   },

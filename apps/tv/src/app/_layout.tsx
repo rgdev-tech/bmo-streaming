@@ -1,12 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Animated, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Animated, DeviceEventEmitter, StyleSheet, View } from 'react-native'
 import { Stack, useRouter, useSegments } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
+import { Image as ExpoImage } from 'expo-image'
 import { AuthProvider, useAuth } from '@bmo/core/auth'
 import { supabaseConfigured } from '@bmo/core/supabase'
 import { setHwTier } from '@bmo/core/stream'
 import { colors } from '@/bmo/theme'
+
+// Nivel de onTrimMemory de Android (ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+// a partir del cual el sistema ya está apretando en foreground — la señal más
+// temprana que tenemos antes de que el OOM killer se lleve el proceso. Lo
+// reenvía MainApplication.kt vía withLowMemory (apps/tv/plugins).
+const TRIM_MEMORY_RUNNING_LOW = 10
+
+/**
+ * En Fire TV / Mi Box de 1-2GB, sin esto la app se queda en pantalla negra sin
+ * avisar cuando el sistema mata el proceso por falta de memoria. Al primer
+ * aviso de presión soltamos el caché EN MEMORIA de expo-image (no el de
+ * disco, que no es el recurso apretado) para intentar seguir vivos.
+ */
+function useLowMemoryGuard() {
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('lowMemory', (level: number) => {
+      if (level >= TRIM_MEMORY_RUNNING_LOW) ExpoImage.clearMemoryCache()
+    })
+    return () => sub.remove()
+  }, [])
+}
 
 // Esta app corre en Fire TV / Android TV (Stick de poca RAM, sin decoder 4K/
 // HEVC-10bit por hardware). Le avisamos al resolver que somos hardware flojo:
@@ -131,6 +153,7 @@ function AnimatedSplash({ onDone }: { onDone: () => void }) {
 
 export default function RootLayout() {
   const [splashDone, setSplashDone] = useState(false)
+  useLowMemoryGuard()
 
   return (
     <AuthProvider>

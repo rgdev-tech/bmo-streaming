@@ -36,6 +36,7 @@ import type {
   VideoVLCRef,
   OnLoadData, OnProgressData, OnVideoErrorData, OnBufferData,
 } from '@/vendor/react-native-video-vlc/src'
+import { colors } from '@/lib/theme'
 
 const COUNTDOWN_S = 8
 const FINISHED_RATIO = 0.9 // visto "completo" → ofrecer siguiente episodio
@@ -443,7 +444,7 @@ export default function PlayerScreen() {
     <GestureHandlerRootView style={styles.container}>
       {error ? (
         <View style={styles.center}>
-          <SymbolView name="film.stack" tintColor="rgba(255,255,255,0.4)" style={styles.errIcon} />
+          <SymbolView name="film.stack" tintColor={colors.textMuted} style={styles.errIcon} />
           <Text style={styles.errText}>No se pudo cargar</Text>
           <Text style={styles.errSub}>{error}</Text>
           <View style={styles.errButtons}>
@@ -1172,7 +1173,7 @@ function VlcPlayer({
                   <AirPlayButton
                     style={styles.airplayBtn}
                     tint="#FFFFFF"
-                    activeTint="#0A84FF"
+                    activeTint={colors.accent}
                     onConnectionChange={(e) => { if (e.nativeEvent.connected) onCast() }}
                   />
                 </View>
@@ -1858,7 +1859,7 @@ const styles = StyleSheet.create({
   vlcQualitySub: { color: 'rgba(255,255,255,0.38)', fontSize: 11.5 },
   // Badge de idioma de la fuente (mismos colores que la TV).
   vlcLangBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  vlcLangBadgeEs: { backgroundColor: '#34C759' },              // verde = latino / español (probable latino)
+  vlcLangBadgeEs: { backgroundColor: colors.success },              // verde = latino / español (probable latino)
   vlcLangBadgeCast: { backgroundColor: '#FF9F0A' },            // ámbar = castellano (España)
   vlcLangBadgeOther: { backgroundColor: 'rgba(120,120,128,0.7)' }, // gris = otros idiomas
   vlcLangBadgeText: { fontSize: 12, fontWeight: '800' },
@@ -1873,7 +1874,7 @@ const styles = StyleSheet.create({
   vlcPickerSwitchRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 12, marginBottom: 6,
-    backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 14,
+    backgroundColor: colors.hairline, borderRadius: 14,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
   vlcPickerSwitchText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
@@ -1890,11 +1891,11 @@ const styles = StyleSheet.create({
   vlcPickerRowText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, flexShrink: 1 },
   vlcPickerRowTextActive: { color: '#fff', fontWeight: '700' },
   vlcPickerNotice: {
-    color: '#FFD60A', fontSize: 12.5, lineHeight: 17,
+    color: colors.warning, fontSize: 12.5, lineHeight: 17,
     paddingHorizontal: 14, paddingBottom: 10, paddingTop: 2,
   },
   vlcPickerEmpty: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 13, textAlign: 'center',
+    color: colors.textMuted, fontSize: 13, textAlign: 'center',
     paddingVertical: 20, paddingHorizontal: 12,
   },
 
@@ -1912,13 +1913,13 @@ const styles = StyleSheet.create({
   vlcSyncControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   vlcSyncBtn: {
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.hairline,
   },
   vlcSyncBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   vlcSyncValue: { minWidth: 58, alignItems: 'center', paddingVertical: 7 },
   vlcSyncValueText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   vlcSyncHint: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 11.5, marginTop: 8, lineHeight: 16,
+    color: colors.textMuted, fontSize: 11.5, marginTop: 8, lineHeight: 16,
   },
   vlcStyleLabel: {
     color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '600',
@@ -1964,7 +1965,7 @@ const styles = StyleSheet.create({
     paddingBottom: 60,
   },
   nextLabel: {
-    color: 'rgba(255,255,255,0.6)',
+    color: colors.textDim,
     fontSize: 13,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -2012,7 +2013,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.4)',
+    borderColor: colors.textMuted,
   },
   backText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 })

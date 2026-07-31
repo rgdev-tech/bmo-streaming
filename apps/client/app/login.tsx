@@ -10,6 +10,7 @@ import { SymbolView } from 'expo-symbols'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '@/lib/supabase'
 import { Touchable } from '@/components/Touchable'
+import { colors, gradients } from '@/lib/theme'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD = 6
@@ -156,9 +157,9 @@ export default function LoginScreen() {
     <View style={styles.root}>
       {/* Dos capas: degradado base + halo superior. El halo evita que el fondo
           se vea plano detrás del logo. */}
-      <LinearGradient colors={['#171733', '#0B0B18', '#000']} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={gradients.ambient} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFill} />
       <LinearGradient
-        colors={['rgba(90,90,190,0.30)', 'transparent']}
+        colors={['rgba(92,202,181,0.22)', 'transparent']}
         style={styles.halo}
         pointerEvents="none"
       />
@@ -239,7 +240,7 @@ export default function LoginScreen() {
                   >
                     <SymbolView
                       name={showPassword ? 'eye.slash.fill' : 'eye.fill'}
-                      tintColor="rgba(255,255,255,0.4)"
+                      tintColor={colors.textMuted}
                       style={styles.eye}
                     />
                   </Touchable>
@@ -254,13 +255,13 @@ export default function LoginScreen() {
 
             {!!error && (
               <View style={styles.banner}>
-                <SymbolView name="exclamationmark.circle.fill" tintColor="#ff6b6b" style={styles.bannerIcon} />
+                <SymbolView name="exclamationmark.circle.fill" tintColor={colors.danger} style={styles.bannerIcon} />
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
             {!!notice && (
               <View style={styles.banner}>
-                <SymbolView name="checkmark.circle.fill" tintColor="#6bd39a" style={styles.bannerIcon} />
+                <SymbolView name="checkmark.circle.fill" tintColor={colors.success} style={styles.bannerIcon} />
                 <Text style={styles.noticeText}>{notice}</Text>
               </View>
             )}
@@ -361,7 +362,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.hairline,
     overflow: 'hidden',
   },
   field: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 11, height: 56 },
@@ -375,11 +376,11 @@ const styles = StyleSheet.create({
     marginLeft: 43, // arranca después del icono, como las listas de iOS
   },
 
-  hint: { color: 'rgba(255,255,255,0.4)', fontSize: 13, marginTop: 10, marginLeft: 4 },
+  hint: { color: colors.textMuted, fontSize: 13, marginTop: 10, marginLeft: 4 },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14, paddingHorizontal: 2 },
   bannerIcon: { width: 15, height: 15 },
-  errorText: { color: '#ff6b6b', fontSize: 14, flex: 1, lineHeight: 19 },
-  noticeText: { color: '#6bd39a', fontSize: 14, flex: 1, lineHeight: 19 },
+  errorText: { color: colors.danger, fontSize: 14, flex: 1, lineHeight: 19 },
+  noticeText: { color: colors.success, fontSize: 14, flex: 1, lineHeight: 19 },
 
   primaryBtn: {
     backgroundColor: '#fff', borderRadius: 28,

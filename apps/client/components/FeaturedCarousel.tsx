@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router'
 import { type MediaItem, backdropUrl, titleOf, genreNames } from '@/lib/tmdb'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 const { width } = Dimensions.get('window')
 const CARD_W = width - 32
@@ -127,13 +128,13 @@ const styles = StyleSheet.create({
     width: CARD_W,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
   imgWrap: {
     width: CARD_W,
     height: IMG_H,
   },
-  placeholder: { backgroundColor: '#2C2C2E' },
+  placeholder: { backgroundColor: colors.surfaceHigh },
   imgTitle: {
     position: 'absolute',
     bottom: 12,

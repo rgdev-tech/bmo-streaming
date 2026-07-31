@@ -15,6 +15,7 @@ import { ProfileEditor } from '@/components/ProfileEditor'
 import { Touchable } from '@/components/Touchable'
 import { PinPad, PIN_LENGTH } from '@/components/PinPad'
 import type { Profile } from '@/lib/supabase'
+import { colors, gradients } from '@/lib/theme'
 
 const MAX_PROFILES = 5 // igual que el tope del trigger en el esquema
 const { width } = Dimensions.get('window')
@@ -69,7 +70,7 @@ export default function ProfilesScreen() {
 
   return (
     <View style={styles.root}>
-      <LinearGradient colors={['#141428', '#08080F', '#000']} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={gradients.ambient} locations={[0, 0.5, 1]} style={StyleSheet.absoluteFill} />
 
       {pinTarget ? (
         // Con PIN ya puesto se quita directo; si no, se define uno nuevo.
@@ -288,7 +289,7 @@ function DeleteProfile({
 
         {!!error && (
           <View style={styles.banner}>
-            <SymbolView name="exclamationmark.circle.fill" tintColor="#ff6b6b" style={styles.bannerIcon} />
+            <SymbolView name="exclamationmark.circle.fill" tintColor={colors.danger} style={styles.bannerIcon} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
@@ -527,7 +528,7 @@ function NewProfileForm({
         <Touchable style={styles.toggleRow} scaleTo={0.99} haptic="selection" onPress={() => setWantsPin((v) => !v)}>
           <SymbolView
             name={wantsPin ? 'lock.fill' : 'lock.open.fill'}
-            tintColor={wantsPin ? '#fff' : 'rgba(255,255,255,0.4)'}
+            tintColor={wantsPin ? '#fff' : colors.textMuted}
             style={styles.toggleIcon}
           />
           <View style={styles.toggleText}>
@@ -541,7 +542,7 @@ function NewProfileForm({
 
         {!!error && (
           <View style={styles.banner}>
-            <SymbolView name="exclamationmark.circle.fill" tintColor="#ff6b6b" style={styles.bannerIcon} />
+            <SymbolView name="exclamationmark.circle.fill" tintColor={colors.danger} style={styles.bannerIcon} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
@@ -643,14 +644,14 @@ const styles = StyleSheet.create({
     position: 'absolute', right: 2, bottom: 2,
     width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2.5, borderColor: '#08080F',
+    borderWidth: 2.5, borderColor: colors.bg,
   },
   lockIcon: { width: 11, height: 11 },
   deleteBadge: {
     position: 'absolute', right: 2, bottom: 2,
-    width: 26, height: 26, borderRadius: 13, backgroundColor: '#E03131',
+    width: 26, height: 26, borderRadius: 13, backgroundColor: colors.danger,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2.5, borderColor: '#08080F',
+    borderWidth: 2.5, borderColor: colors.bg,
   },
 
   editBtn: { alignItems: 'center', marginTop: 34, paddingVertical: 10 },
@@ -667,12 +668,12 @@ const styles = StyleSheet.create({
   },
   deleteHero: { alignItems: 'center' },
   deleteLabel: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 12.5, fontWeight: '700',
+    color: colors.textMuted, fontSize: 12.5, fontWeight: '700',
     letterSpacing: 0.7, textTransform: 'uppercase',
     marginBottom: 12, marginLeft: 4,
   },
   dangerBtn: {
-    backgroundColor: '#E03131', borderRadius: 28, alignSelf: 'stretch',
+    backgroundColor: colors.danger, borderRadius: 28, alignSelf: 'stretch',
     paddingVertical: 17, alignItems: 'center', justifyContent: 'center',
     marginTop: 26, minHeight: 56,
   },
@@ -712,7 +713,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16 },
   cell: { alignItems: 'center', width: CELL + 8 },
   name: {
-    color: 'rgba(255,255,255,0.6)', fontSize: 14,
+    color: colors.textDim, fontSize: 14,
     fontWeight: '600', marginTop: 11, textAlign: 'center',
   },
   nameActive: { color: '#fff' },
@@ -739,7 +740,7 @@ const styles = StyleSheet.create({
     marginTop: 13, letterSpacing: -0.2,
   },
   label: {
-    color: 'rgba(255,255,255,0.4)', fontSize: 12.5, fontWeight: '700',
+    color: colors.textMuted, fontSize: 12.5, fontWeight: '700',
     letterSpacing: 0.7, textTransform: 'uppercase', marginBottom: 12, marginLeft: 4,
   },
   // -24 cancela el padding del ScrollView padre para que la fila llegue a los
@@ -752,7 +753,7 @@ const styles = StyleSheet.create({
     position: 'absolute', right: -3, bottom: -3,
     width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff',
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#08080F',
+    borderWidth: 2, borderColor: colors.bg,
   },
   checkIcon: { width: 9, height: 9 },
 
@@ -760,7 +761,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: colors.hairline,
     paddingHorizontal: 16,
     height: 56, justifyContent: 'center',
   },
@@ -768,7 +769,7 @@ const styles = StyleSheet.create({
 
   banner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14, paddingHorizontal: 2 },
   bannerIcon: { width: 15, height: 15 },
-  errorText: { color: '#ff6b6b', fontSize: 14, flex: 1, lineHeight: 19 },
+  errorText: { color: colors.danger, fontSize: 14, flex: 1, lineHeight: 19 },
 
   primaryBtn: {
     backgroundColor: '#fff', borderRadius: 28,

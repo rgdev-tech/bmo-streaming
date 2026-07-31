@@ -12,6 +12,7 @@ import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Hero } from './Hero'
 import { type MediaItem, backdropUrl } from '@/lib/tmdb'
+import { colors } from '@/lib/theme'
 
 const { width, height } = Dimensions.get('window')
 const HERO_H = height * 0.74
@@ -203,7 +204,7 @@ export function HeroCarousel({
 
 const styles = StyleSheet.create({
   wrap: { width, height: HERO_H },
-  pullBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1C1C1E' },
+  pullBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.surface },
   // Sin overflow:hidden a propósito: los slides van contra-trasladados para
   // apilarse (ver renderItem) y este recorte los cortaría a la mitad. El Hero
   // ya se recorta a sí mismo (styles.hero), así que el zoom del Ken Burns

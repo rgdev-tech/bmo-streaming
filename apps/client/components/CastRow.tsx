@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router'
 import { type CastMember, profileUrl } from '@/lib/tmdb'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
+import { colors } from '@/lib/theme'
 
 export function CastRow({ cast }: { cast: CastMember[] }) {
   const router = useRouter()
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
   },
   list: { gap: 14 },
   person: { width: 80 },
-  photo: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#1C1C1E' },
+  photo: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.surface },
   empty: { alignItems: 'center', justifyContent: 'center' },
   initials: { color: 'rgba(255,255,255,0.5)', fontSize: 24, fontWeight: '700' },
   name: { color: '#fff', fontSize: 12, fontWeight: '600', marginTop: 8, textAlign: 'center' },

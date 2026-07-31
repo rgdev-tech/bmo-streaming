@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Animated } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { SymbolView } from 'expo-symbols'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 export const PIN_LENGTH = 4
 
@@ -104,9 +105,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.32)',
   },
   dotOn: { backgroundColor: '#fff', borderColor: '#fff' },
-  dotError: { borderColor: '#ff6b6b' },
+  dotError: { borderColor: colors.danger },
   // Altura reservada siempre: sin esto el teclado salta al aparecer el error.
-  error: { color: '#ff6b6b', fontSize: 13.5, marginTop: 14, height: 18, textAlign: 'center' },
+  error: { color: colors.danger, fontSize: 13.5, marginTop: 14, height: 18, textAlign: 'center' },
 
   pad: {
     flexDirection: 'row', flexWrap: 'wrap',

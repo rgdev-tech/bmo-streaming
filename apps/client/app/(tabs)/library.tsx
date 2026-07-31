@@ -28,6 +28,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { screenTitle, rowHeading } from '@/lib/typography'
 import { backdropUrl } from '@/lib/tmdb'
 import type { MediaItem } from '@/lib/tmdb'
+import { colors } from '@/lib/theme'
 
 const PAD = 20
 const GRID_GAP = 12
@@ -169,7 +170,7 @@ export default function LibraryScreen() {
                   <Touchable scaleTo={0.95} haptic="light" style={styles.smartPill} onPress={toggleSmart}>
                     <SymbolView
                       name={smartEnabled ? 'bolt.fill' : 'bolt.slash'}
-                      tintColor={smartEnabled ? '#FFD60A' : 'rgba(255,255,255,0.4)'}
+                      tintColor={smartEnabled ? colors.warning : colors.textMuted}
                       style={styles.smartIcon}
                     />
                     <Text style={[styles.smartText, !smartEnabled && styles.smartTextOff]}>
@@ -322,7 +323,7 @@ const styles = StyleSheet.create({
   heading: rowHeading,
   count: { color: 'rgba(255,255,255,0.35)', fontSize: 16, fontWeight: '600' },
 
-  editText: { color: 'rgba(255,255,255,0.6)', fontSize: 15, fontWeight: '600' },
+  editText: { color: colors.textDim, fontSize: 15, fontWeight: '600' },
   editTextOn: { color: '#fff' },
 
   smartPill: {
@@ -331,8 +332,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20,
   },
   smartIcon: { width: 12, height: 12 },
-  smartText: { color: '#FFD60A', fontSize: 12.5, fontWeight: '600' },
-  smartTextOff: { color: 'rgba(255,255,255,0.4)' },
+  smartText: { color: colors.warning, fontSize: 12.5, fontWeight: '600' },
+  smartTextOff: { color: colors.textMuted },
 
   grid: {
     flexDirection: 'row', flexWrap: 'wrap',
@@ -357,8 +358,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 11, gap: 12,
   },
   dlThumbWrap: { position: 'relative' },
-  dlThumb: { width: 106, height: 60, borderRadius: 9, backgroundColor: '#1C1C1E' },
-  dlThumbEmpty: { backgroundColor: '#1C1C1E' },
+  dlThumb: { width: 106, height: 60, borderRadius: 9, backgroundColor: colors.surface },
+  dlThumbEmpty: { backgroundColor: colors.surface },
   dlProgressOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     height: 3, backgroundColor: 'rgba(255,255,255,0.15)',
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
   dlTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   dlSub: { color: 'rgba(255,255,255,0.55)', fontSize: 13 },
   dlStatus: { color: 'rgba(255,255,255,0.38)', fontSize: 12 },
-  dlError: { color: '#ff6b6b' },
+  dlError: { color: colors.danger },
   dlDelete: { padding: 6 },
   dlDeleteIcon: { width: 17, height: 17 },
 })

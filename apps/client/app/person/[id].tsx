@@ -18,6 +18,7 @@ import { PosterRow } from '@/components/PosterRow'
 import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { PersonSkeleton } from '@/components/Skeleton'
+import { colors } from '@/lib/theme'
 
 function dedupeSorted(credits: PersonCredit[], type: 'movie' | 'tv') {
   const seen = new Set<number>()
@@ -131,7 +132,7 @@ export default function PersonScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   header: { flexDirection: 'row', gap: 16, padding: 20, paddingTop: 12 },
-  photo: { width: 110, height: 165, borderRadius: 12, backgroundColor: '#1C1C1E' },
+  photo: { width: 110, height: 165, borderRadius: 12, backgroundColor: colors.surface },
   empty: { alignItems: 'center', justifyContent: 'center' },
   initials: { color: 'rgba(255,255,255,0.5)', fontSize: 40, fontWeight: '700' },
   headerInfo: { flex: 1, justifyContent: 'center' },

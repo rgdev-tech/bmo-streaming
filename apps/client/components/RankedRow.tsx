@@ -5,6 +5,7 @@ import { type MediaItem, posterUrl, titleOf } from '@/lib/tmdb'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
+import { colors } from '@/lib/theme'
 
 const CARD_W = 110
 const CARD_H = CARD_W * 1.5
@@ -82,7 +83,7 @@ const styles = StyleSheet.create({
     width: CARD_W,
     height: CARD_H,
     borderRadius: 10,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
   placeholder: {
     alignItems: 'center',
@@ -90,7 +91,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   placeholderText: {
-    color: 'rgba(255,255,255,0.4)',
+    color: colors.textMuted,
     fontSize: 11,
     textAlign: 'center',
   },

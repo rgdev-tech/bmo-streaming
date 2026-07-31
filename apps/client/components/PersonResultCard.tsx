@@ -4,6 +4,7 @@ import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { profileUrl, type MediaItem } from '@/lib/tmdb'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 // Traduce el departamento de TMDB (viene en inglés) a una etiqueta corta.
 const DEPT_ES: Record<string, string> = {
@@ -60,12 +61,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  photo: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1C1C1E' },
+  photo: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.surface },
   empty: { alignItems: 'center', justifyContent: 'center' },
   initials: { color: 'rgba(255,255,255,0.5)', fontSize: 22, fontWeight: '700' },
   info: { flex: 1 },
   name: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
   role: { color: 'rgba(255,255,255,0.55)', fontSize: 13, marginTop: 2 },
-  knownFor: { color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 2 },
+  knownFor: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   chevron: { width: 13, height: 13 },
 })

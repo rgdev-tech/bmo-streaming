@@ -16,6 +16,7 @@ import {
 import { isInMyList, toggleMyList, toLibraryItem } from '@/lib/library'
 import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 const { width, height } = Dimensions.get('window')
 const HERO_H = height * 0.74
@@ -188,7 +189,7 @@ const styles = StyleSheet.create({
   // límites; sin recorte se asoma al slide vecino del carrusel (están uno al
   // lado del otro dentro del FlatList horizontal).
   hero: { width, height: HERO_H, overflow: 'hidden' },
-  bg: { ...StyleSheet.absoluteFillObject, backgroundColor: '#1C1C1E' },
+  bg: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.surface },
   gradient: { ...StyleSheet.absoluteFillObject },
   tapArea: { position: 'absolute', top: 0, left: 0, right: 0, height: '60%' },
   content: { position: 'absolute', bottom: 28, left: 0, right: 0, alignItems: 'center', paddingHorizontal: 20 },

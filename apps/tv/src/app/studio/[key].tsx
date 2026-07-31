@@ -39,14 +39,17 @@ export default function StudioScreen() {
     )
   }
 
-  const hero = backdropUrl(data.hero, 'original')
+  // w1280 alcanza de sobra para un fondo en TVs de hasta 1080p ('original'
+  // puede venir en 4K+ de TMDB — decodificarlo entero es memoria tirada en
+  // Fire TV / Mi Box de 1-2GB).
+  const hero = backdropUrl(data.hero, 'w1280')
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           {hero && (
-            <Image source={hero} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} />
+            <Image source={hero} style={StyleSheet.absoluteFill} contentFit="cover" transition={300} cachePolicy="disk" />
           )}
           {/* Degradado con el color de la marca sobre la imagen: la tiñe lo
               suficiente para que se lea como "sección de Disney" y no como una

@@ -15,6 +15,7 @@ import { getWatchedEpisodes, getEpisodeProgress, toggleEpisodeWatched, setSeason
 import { prewarmTitle } from '@/lib/stream'
 import { DownloadButton } from './DownloadButton'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 export function SeasonEpisodes({
   tvId,
@@ -95,7 +96,7 @@ export function SeasonEpisodes({
         <Touchable scaleTo={0.97} haptic="medium" style={styles.markSeasonBtn} onPress={toggleSeason}>
           <SymbolView
             name={allWatched ? 'checkmark.circle.fill' : 'circle'}
-            tintColor={allWatched ? '#34C759' : 'rgba(255,255,255,0.6)'}
+            tintColor={allWatched ? colors.success : colors.textDim}
             style={styles.markSeasonIcon}
           />
           <Text style={styles.markSeasonText}>
@@ -230,7 +231,7 @@ function EpisodeRow({
             episode={ep.episode_number}
             episodeTitle={ep.name}
             size={22}
-            tintColor="rgba(255,255,255,0.6)"
+            tintColor={colors.textDim}
           />
           <Touchable
             scaleTo={0.85}
@@ -241,7 +242,7 @@ function EpisodeRow({
           >
             <SymbolView
               name={watched ? 'checkmark.circle.fill' : 'circle'}
-              tintColor={watched ? '#34C759' : 'rgba(255,255,255,0.5)'}
+              tintColor={watched ? colors.success : 'rgba(255,255,255,0.5)'}
               style={styles.markIcon}
             />
           </Touchable>
@@ -258,7 +259,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: colors.surface,
   },
   seasonChipActive: { backgroundColor: '#fff' },
   seasonText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
@@ -276,11 +277,11 @@ const styles = StyleSheet.create({
   epRow: { flexDirection: 'row', marginBottom: 18, gap: 12, alignItems: 'center' },
   epRowSoon: { opacity: 0.5 },
   thumbWrap: { position: 'relative' },
-  thumb: { width: 130, height: 74, borderRadius: 8, backgroundColor: '#1C1C1E' },
-  thumbEmpty: { backgroundColor: '#1C1C1E' },
+  thumb: { width: 130, height: 74, borderRadius: 8, backgroundColor: colors.surface },
+  thumbEmpty: { backgroundColor: colors.surface },
   progressTrack: {
     position: 'absolute', left: 0, right: 0, bottom: 0, height: 3,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: colors.textFaint,
     borderBottomLeftRadius: 8, borderBottomRightRadius: 8, overflow: 'hidden',
   },
   progressFill: { height: '100%', backgroundColor: '#fff' },
