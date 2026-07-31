@@ -155,9 +155,18 @@ export default function PlayerScreen() {
 
   async function exitToBack() {
     setOriented(false)
-    // Un respiro para que el negro pinte antes de disparar la rotación.
-    await new Promise((r) => setTimeout(r, 50))
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+    // Dos frames para que el negro llegue a pintarse antes de girar (uno solo
+    // no alcanza: el primero programa el render, el segundo lo ve en pantalla).
+    // Antes eran 50 ms fijos, que en un panel de 120 Hz son seis frames de
+    // espera pura.
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    // SIN await: la rotación a vertical y la navegación de vuelta corren a la
+    // vez. Esperar a que el giro terminara para recién ahí llamar a router.back()
+    // encadenaba dos animaciones de ~300 ms una detrás de la otra, y esa suma
+    // es lo que hacía que salir del reproductor se sintiera pesado. Las dos
+    // pasan detrás del overlay negro, así que solaparlas no descubre el reflow.
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
     router.back()
   }
 
@@ -282,11 +291,16 @@ export default function PlayerScreen() {
     const isLandscape = (o: ScreenOrientation.Orientation) =>
       o === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
       o === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
-    ;(async () => {
-      const cur = await ScreenOrientation.getOrientationAsync()
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+    // La rotación se dispara en el PRIMER frame. Antes se esperaba a que
+    // resolviera getOrientationAsync() para recién ahí llamar a lockAsync: dos
+    // viajes al lado nativo en serie, y el giro no empezaba hasta el segundo.
+    // Ese retraso se pagaba entero detrás del overlay negro, en cada entrada al
+    // reproductor. La consulta del estado actual sólo sirve para el caso "ya
+    // estábamos en landscape", así que va en paralelo y no bloquea nada.
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE)
+    ScreenOrientation.getOrientationAsync().then((cur) => {
       if (isLandscape(cur)) finish()
-    })()
+    })
     const sub = ScreenOrientation.addOrientationChangeListener((e) => {
       if (isLandscape(e.orientationInfo.orientation)) finish()
     })
