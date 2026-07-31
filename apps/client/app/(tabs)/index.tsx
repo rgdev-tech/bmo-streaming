@@ -25,6 +25,8 @@ import { getContinueWatching, type Progress } from '@/lib/library'
 import { useAuth } from '@/lib/auth'
 import { ProfileAvatar } from '@/components/ProfileAvatar'
 import { dedupeRows, heroIds } from '@/lib/dedupeRows'
+import { Reveal } from '@/components/Reveal'
+import { colors } from '@/lib/theme'
 
 // Cuántos títulos rota el hero. Tiene que coincidir con MAX_ITEMS de
 // HeroCarousel: es la lista que se excluye del resto del Home.
@@ -120,55 +122,59 @@ export default function HomeScreen() {
 
         <View style={styles.rows}>
           {/* Continuar viendo */}
-          <ContinueRow
-            items={watching}
-            onChange={loadWatching}
-            onSeeAll={() => router.navigate('/library')}
-          />
+          <Reveal index={0}>
+            <ContinueRow
+              items={watching}
+              onChange={loadWatching}
+              onSeeAll={() => router.navigate('/library')}
+            />
+          </Reveal>
 
           {/* Tendencias: fila de posters */}
-          <PosterRow title="Tendencias" items={rows.trending} />
+          <Reveal index={1}><PosterRow title="Tendencias" items={rows.trending} /></Reveal>
 
           {/* Spotlight: tarjeta grande con descripción */}
           {spotlight && (
-            <View style={styles.featuredWrap}>
-              <Text style={styles.rowTitle}>Destacado hoy</Text>
-              <FeaturedCard item={spotlight} />
-            </View>
+            <Reveal index={2}>
+              <View style={styles.featuredWrap}>
+                <Text style={styles.rowTitle}>Destacado hoy</Text>
+                <FeaturedCard item={spotlight} />
+              </View>
+            </Reveal>
           )}
 
           {/* Top 10: fila rankeada */}
-          <RankedRow title="Top 10 películas" items={rows.topMovies} />
+          <Reveal index={2}><RankedRow title="Top 10 películas" items={rows.topMovies} /></Reveal>
 
           {collections && (
             <>
               {/* Netflix: posters */}
-              <PosterRow title="Lo mejor de Netflix" items={rows.netflix} />
+              <Reveal index={3}><PosterRow title="Lo mejor de Netflix" items={rows.netflix} /></Reveal>
 
               {/* HBO: landscape backdrops */}
-              <BackdropRow title="Lo mejor de HBO Max" items={rows.hbo} />
+              <Reveal index={4}><BackdropRow title="Lo mejor de HBO Max" items={rows.hbo} /></Reveal>
 
               {/* Apple TV+: posters */}
-              <PosterRow title="Lo mejor de Apple TV+" items={rows.appletv} />
+              <Reveal index={5}><PosterRow title="Lo mejor de Apple TV+" items={rows.appletv} /></Reveal>
 
               {/* Disney+: landscape backdrops */}
-              <BackdropRow title="Lo mejor de Disney+" items={rows.disney} />
+              <Reveal index={6}><BackdropRow title="Lo mejor de Disney+" items={rows.disney} /></Reveal>
 
               {/* Prime: posters */}
-              <PosterRow title="Lo mejor de Prime Video" items={rows.prime} />
+              <Reveal index={7}><PosterRow title="Lo mejor de Prime Video" items={rows.prime} /></Reveal>
             </>
           )}
 
           {/* Películas populares: posters */}
-          <PosterRow title="Películas populares" items={rows.popularMovies} />
+          <Reveal index={8}><PosterRow title="Películas populares" items={rows.popularMovies} /></Reveal>
 
           {/* Series del momento: rankeadas */}
-          <RankedRow title="Series del momento" items={rows.popularSeries} />
+          <Reveal index={9}><RankedRow title="Series del momento" items={rows.popularSeries} /></Reveal>
 
           {/* Series mejor valoradas. Si la API todavía no manda topSeries
               (deploy desfasado), la fila no se dibuja en vez de repetir. */}
           {rows.topSeries.length > 0 && (
-            <BackdropRow title="Series mejor valoradas" items={rows.topSeries} />
+            <Reveal index={10}><BackdropRow title="Series mejor valoradas" items={rows.topSeries} /></Reveal>
           )}
         </View>
       </Animated.ScrollView>
@@ -190,7 +196,7 @@ export default function HomeScreen() {
           {profile ? (
             <ProfileAvatar avatar={profile.avatar} size={36} />
           ) : (
-            <SymbolView name="person.fill" tintColor="rgba(255,255,255,0.9)" style={styles.avatarIcon} />
+            <SymbolView name="person.fill" tintColor={colors.text} style={styles.avatarIcon} />
           )}
         </Touchable>
       </Animated.View>

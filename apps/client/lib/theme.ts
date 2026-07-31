@@ -42,6 +42,16 @@ export const colors = {
   // "gris": es blanco a baja opacidad, así funciona sobre cualquier fondo.
   hairline: 'rgba(255,255,255,0.12)',
 
+  // Blancos translúcidos que NO son texto: rellenos y bordes. Antes convivían
+  // catorce valores distintos en este rango (0.04 a 0.22) sin criterio; son
+  // estos tres.
+  //  · fill        — botón secundario, chip, control sobre una imagen
+  //  · fillSubtle  — relleno apenas insinuado (pista de una barra, zebra)
+  //  · border      — borde visible, no un pelo
+  fill: 'rgba(255,255,255,0.10)',
+  fillSubtle: 'rgba(255,255,255,0.05)',
+  border: 'rgba(255,255,255,0.18)',
+
   // Texto en cuatro niveles y no en nueve. La regla: primary para lo que se
   // lee, dim para lo que acompaña, muted para metadatos, faint para lo apenas
   // presente (placeholders, separadores tipográficos). Si algo no entra en

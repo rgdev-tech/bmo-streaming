@@ -38,5 +38,5 @@ export function ProfileAvatar({
 
 const styles = StyleSheet.create({
   box: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  legacy: { backgroundColor: 'rgba(255,255,255,0.09)' },
+  legacy: { backgroundColor: colors.fill },
 })

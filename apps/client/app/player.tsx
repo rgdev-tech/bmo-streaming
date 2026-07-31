@@ -511,7 +511,7 @@ export default function PlayerScreen() {
         <View style={styles.loadingSpinnerWrap}>
           <ActivityIndicator color="#fff" size="large" />
           <Pressable style={styles.loadingBack} onPress={exitToBack} hitSlop={12}>
-            <SymbolView name="chevron.left" tintColor="rgba(255,255,255,0.9)" style={styles.loadingBackIcon} />
+            <SymbolView name="chevron.left" tintColor={colors.text} style={styles.loadingBackIcon} />
           </Pressable>
         </View>
       )}
@@ -1224,7 +1224,7 @@ function VlcPlayer({
               minimumValue={0}
               maximumValue={duration > 0 ? duration : 1}
               minimumTrackTintColor="#fff"
-              maximumTrackTintColor="rgba(255,255,255,0.3)"
+              maximumTrackTintColor={colors.textFaint}
               thumbTintColor="#fff"
               onSlidingStart={() => { seeking.current = true }}
               onSlidingComplete={(v) => { seekTo(v) }}
@@ -1252,7 +1252,7 @@ function VlcPlayer({
           <View style={[styles.vlcDropdownWrap, { top: dropdownTop, height: dropdownHeight }]}>
             <BlurView intensity={78} tint="systemChromeMaterialDark" style={styles.vlcPickerCard}>
               <LinearGradient
-                colors={['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']}
+                colors={[colors.border, 'rgba(255,255,255,0)']}
                 locations={[0, 0.6]}
                 style={styles.vlcPickerSheen}
                 pointerEvents="none"
@@ -1690,14 +1690,14 @@ const styles = StyleSheet.create({
   loadingCenter: {
     flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 40,
   },
-  loadingTitle: { color: 'rgba(255,255,255,0.9)', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  loadingTitle: { color: colors.text, fontSize: 15, fontWeight: '600', textAlign: 'center' },
   // top/right fijos y no insets: en el landscape forzado por lockAsync el
   // safe-area-context a veces arrastra los insets de portrait (mismo problema
   // ya documentado para la barra superior del VlcPlayer).
   loadingClose: {
     position: 'absolute', top: 16, right: 20,
     width: 34, height: 34, borderRadius: 17, overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.22)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
   },
   loadingCloseBlur: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingCloseIcon: { width: 13, height: 13 },
@@ -1708,11 +1708,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderRadius: 16, padding: 4, gap: 4,
     overflow: 'hidden',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1, borderColor: colors.border,
   },
   langOption: { paddingVertical: 9, paddingHorizontal: 16, borderRadius: 9 },
   langOptionActive: { backgroundColor: '#fff' },
-  langOptionText: { color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: '600' },
+  langOptionText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   langOptionTextActive: { color: '#000', fontWeight: '700' },
 
   // Pill siguiente episodio
@@ -1823,7 +1823,7 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.65)', textShadowRadius: 6,
   },
   vlcEpisodeText: {
-    color: 'rgba(255,255,255,0.7)', fontSize: 13.5, fontWeight: '500', marginTop: 2,
+    color: colors.textDim, fontSize: 13.5, fontWeight: '500', marginTop: 2,
     textShadowColor: 'rgba(0,0,0,0.65)', textShadowRadius: 6,
   },
   vlcSlider: { flex: 1, height: 32 },
@@ -1839,7 +1839,7 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: colors.border,
     overflow: 'hidden',
     paddingTop: 12, paddingHorizontal: 10, paddingBottom: 10,
   },
@@ -1856,7 +1856,7 @@ const styles = StyleSheet.create({
   // La fila de calidad lleva dos líneas, así que el texto necesita su propia
   // columna para no empujar al checkmark fuera de la tarjeta.
   vlcQualityInfo: { flex: 1, gap: 2 },
-  vlcQualitySub: { color: 'rgba(255,255,255,0.38)', fontSize: 11.5 },
+  vlcQualitySub: { color: colors.textMuted, fontSize: 11.5 },
   // Badge de idioma de la fuente (mismos colores que la TV).
   vlcLangBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   vlcLangBadgeEs: { backgroundColor: colors.success },              // verde = latino / español (probable latino)
@@ -1875,7 +1875,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 12, paddingHorizontal: 12, marginBottom: 6,
     backgroundColor: colors.hairline, borderRadius: 14,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1, borderColor: colors.fill,
   },
   vlcPickerSwitchText: { color: '#fff', fontSize: 14, fontWeight: '700', flexShrink: 1 },
   // flex:1 en vez de maxHeight — llena siempre el alto fijo del dropdown
@@ -1888,7 +1888,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 12, gap: 10,
     borderRadius: 14,
   },
-  vlcPickerRowText: { color: 'rgba(255,255,255,0.8)', fontSize: 15, flexShrink: 1 },
+  vlcPickerRowText: { color: colors.text, fontSize: 15, flexShrink: 1 },
   vlcPickerRowTextActive: { color: '#fff', fontWeight: '700' },
   vlcPickerNotice: {
     color: colors.warning, fontSize: 12.5, lineHeight: 17,
@@ -1922,23 +1922,23 @@ const styles = StyleSheet.create({
     color: colors.textMuted, fontSize: 11.5, marginTop: 8, lineHeight: 16,
   },
   vlcStyleLabel: {
-    color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: '600',
+    color: colors.textDim, fontSize: 12, fontWeight: '600',
     textTransform: 'uppercase', letterSpacing: 1.1, paddingHorizontal: 4,
     textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 3,
   },
   vlcStyleChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 4 },
   vlcStyleChip: {
     paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: colors.fill,
+    borderWidth: 1, borderColor: colors.fill,
   },
   vlcStyleChipActive: { backgroundColor: '#fff', borderColor: '#fff' },
-  vlcStyleChipText: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '600' },
+  vlcStyleChipText: { color: colors.textDim, fontSize: 13, fontWeight: '600' },
   vlcStyleChipTextActive: { color: '#000', fontWeight: '700' },
 
   errIcon: { width: 48, height: 48 },
   errText: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 16 },
-  errSub: { color: 'rgba(255,255,255,0.5)', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 28, lineHeight: 20 },
+  errSub: { color: colors.textMuted, fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 28, lineHeight: 20 },
   errButtons: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 28 },
   retry: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -1948,7 +1948,7 @@ const styles = StyleSheet.create({
   retryText: { color: '#000', fontWeight: '700', fontSize: 15 },
   errBackBtn: {
     paddingHorizontal: 22, paddingVertical: 13, borderRadius: 12,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)',
+    borderWidth: 1.5, borderColor: colors.textFaint,
   },
   errBackText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 
@@ -1980,13 +1980,13 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   nextEp: {
-    color: 'rgba(255,255,255,0.7)',
+    color: colors.textDim,
     fontSize: 16,
     marginBottom: 24,
   },
   progressTrack: {
     height: 3,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: colors.border,
     borderRadius: 2,
     marginBottom: 28,
     overflow: 'hidden',

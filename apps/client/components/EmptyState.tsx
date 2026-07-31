@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { SymbolView, type SymbolViewProps } from 'expo-symbols'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 // Estado vacío / error consistente: ícono + título + subtítulo + acción opcional.
 // El contenedor no fija su propio layout (flex/centrado vertical) — lo decide
@@ -19,7 +20,7 @@ export function EmptyState({
   return (
     <View style={styles.wrap}>
       <View style={styles.iconCircle}>
-        <SymbolView name={icon} tintColor="rgba(255,255,255,0.5)" style={styles.icon} />
+        <SymbolView name={icon} tintColor={colors.textMuted} style={styles.icon} />
       </View>
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -38,7 +39,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.fill,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -46,7 +47,7 @@ const styles = StyleSheet.create({
   icon: { width: 30, height: 30 },
   title: { color: '#fff', fontSize: 17, fontWeight: '700', textAlign: 'center', marginBottom: 6 },
   subtitle: {
-    color: 'rgba(255,255,255,0.45)',
+    color: colors.textMuted,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,

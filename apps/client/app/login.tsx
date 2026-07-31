@@ -309,13 +309,13 @@ const Field = ({ ref, icon, focused, accessory, ...rest }: FieldProps & { ref?: 
   <View style={[styles.field, focused && styles.fieldFocused]}>
     <SymbolView
       name={icon as any}
-      tintColor={focused ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.32)'}
+      tintColor={focused ? colors.textDim : colors.textFaint}
       style={styles.fieldIcon}
     />
     <TextInput
       ref={ref}
       style={styles.input}
-      placeholderTextColor="rgba(255,255,255,0.3)"
+      placeholderTextColor={colors.textFaint}
       autoCapitalize="none"
       autoCorrect={false}
       selectionColor="#fff"
@@ -348,31 +348,31 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6, marginTop: 22, textAlign: 'center',
   },
   subtitle: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 15,
+    color: colors.textMuted, fontSize: 15,
     marginTop: 7, textAlign: 'center', lineHeight: 21,
   },
 
   appleBtn: { height: 52, width: '100%' },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 22 },
-  line: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.16)' },
-  dividerText: { color: 'rgba(255,255,255,0.38)', fontSize: 13 },
+  line: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  dividerText: { color: colors.textMuted, fontSize: 13 },
 
   // Tarjeta única con separador: menos ruido visual que dos campos flotando.
   group: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.fillSubtle,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.hairline,
     overflow: 'hidden',
   },
   field: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 11, height: 56 },
-  fieldFocused: { backgroundColor: 'rgba(255,255,255,0.05)' },
+  fieldFocused: { backgroundColor: colors.fillSubtle },
   fieldIcon: { width: 17, height: 17 },
   input: { flex: 1, color: '#fff', fontSize: 16.5, height: '100%' },
   eye: { width: 18, height: 18 },
   separator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: colors.fill,
     marginLeft: 43, // arranca después del icono, como las listas de iOS
   },
 
@@ -388,11 +388,11 @@ const styles = StyleSheet.create({
     marginTop: 26, minHeight: 56,
   },
   // Deshabilitado en vez de oculto: el usuario ve el objetivo y qué le falta.
-  primaryBtnOff: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  primaryBtnOff: { backgroundColor: colors.border },
   primaryText: { color: '#000', fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
-  primaryTextOff: { color: 'rgba(255,255,255,0.45)' },
+  primaryTextOff: { color: colors.textMuted },
 
   switchBtn: { marginTop: 22, alignItems: 'center', paddingVertical: 6 },
-  switchText: { color: 'rgba(255,255,255,0.5)', fontSize: 14.5 },
+  switchText: { color: colors.textMuted, fontSize: 14.5 },
   switchLink: { color: '#fff', fontWeight: '600' },
 })

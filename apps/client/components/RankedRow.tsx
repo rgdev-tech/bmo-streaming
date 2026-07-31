@@ -6,6 +6,7 @@ import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
 import { colors } from '@/lib/theme'
+import { rowVirtualization, fixedItemLayout } from './rowVirtualization'
 
 const CARD_W = 110
 const CARD_H = CARD_W * 1.5
@@ -48,6 +49,8 @@ export function RankedRow({ title, items }: { title: string; items: MediaItem[] 
         renderItem={({ item, index }) => <RankedCard item={item} rank={index + 1} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        getItemLayout={fixedItemLayout(NUM_W - 6 + CARD_W + 8)}
+        {...rowVirtualization}
       />
     </View>
   )
@@ -68,7 +71,7 @@ const styles = StyleSheet.create({
   },
   num: {
     width: NUM_W,
-    color: 'rgba(255,255,255,0.85)',
+    color: colors.text,
     fontSize: 48,
     fontWeight: '900',
     lineHeight: 52,

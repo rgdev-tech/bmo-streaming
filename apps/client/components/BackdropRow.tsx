@@ -7,6 +7,7 @@ import { prewarmTitle } from '@/lib/stream'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
 import { colors } from '@/lib/theme'
+import { rowVirtualization, fixedItemLayout } from './rowVirtualization'
 
 const { width } = Dimensions.get('window')
 const CARD_W = Math.round(width * 0.62)
@@ -53,6 +54,8 @@ export function BackdropRow({ title, items }: { title: string; items: MediaItem[
         renderItem={({ item }) => <BackdropCard item={item} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        getItemLayout={fixedItemLayout(CARD_W + 10)}
+        {...rowVirtualization}
       />
     </View>
   )

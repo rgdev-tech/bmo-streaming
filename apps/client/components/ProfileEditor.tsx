@@ -104,7 +104,7 @@ export function ProfileEditor({
               value={name}
               onChangeText={(v) => { setName(v); if (error) setError(null) }}
               placeholder="Nombre"
-              placeholderTextColor="rgba(255,255,255,0.3)"
+              placeholderTextColor={colors.textFaint}
               maxLength={30}
               selectionColor="#fff"
               returnKeyType="done"
@@ -117,12 +117,12 @@ export function ProfileEditor({
           <Touchable style={styles.row} scaleTo={0.99} haptic="light" onPress={onManagePin}>
             <SymbolView
               name={profile.has_pin ? 'lock.fill' : 'lock.open.fill'}
-              tintColor={profile.has_pin ? '#fff' : 'rgba(255,255,255,0.45)'}
+              tintColor={profile.has_pin ? '#fff' : colors.textMuted}
               style={styles.rowIcon}
             />
             <Text style={styles.rowLabel}>Bloqueo con PIN</Text>
             <Text style={styles.rowValue}>{profile.has_pin ? 'Activado' : 'Desactivado'}</Text>
-            <SymbolView name="chevron.right" tintColor="rgba(255,255,255,0.28)" style={styles.chevron} />
+            <SymbolView name="chevron.right" tintColor={colors.textFaint} style={styles.chevron} />
           </Touchable>
         </View>
 
@@ -185,10 +185,10 @@ const styles = StyleSheet.create({
 
   // Tarjeta agrupada: el patrón de Ajustes.
   group: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.fillSubtle,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.11)',
+    borderColor: colors.fill,
     overflow: 'hidden',
     marginBottom: 26,
   },
@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
   dangerLabel: { color: colors.danger, fontWeight: '600' },
 
   hint: {
-    color: 'rgba(255,255,255,0.35)', fontSize: 13.5,
+    color: colors.textMuted, fontSize: 13.5,
     textAlign: 'center', marginTop: 6, lineHeight: 19, paddingHorizontal: 20,
   },
   banner: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16, paddingHorizontal: 2 },

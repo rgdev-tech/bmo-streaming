@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
   chipsRow: { paddingHorizontal: 6, paddingVertical: 6, gap: 4 },
   chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   chipActive: { backgroundColor: '#fff' },
-  chipText: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
+  chipText: { color: colors.text, fontSize: 14, fontWeight: '600' },
   chipTextActive: { color: '#000' },
 
   rows: { paddingTop: 12, paddingBottom: 120 },

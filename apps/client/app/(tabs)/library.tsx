@@ -321,14 +321,14 @@ const styles = StyleSheet.create({
   },
   headingLeft: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   heading: rowHeading,
-  count: { color: 'rgba(255,255,255,0.35)', fontSize: 16, fontWeight: '600' },
+  count: { color: colors.textMuted, fontSize: 16, fontWeight: '600' },
 
   editText: { color: colors.textDim, fontSize: 15, fontWeight: '600' },
   editTextOn: { color: '#fff' },
 
   smartPill: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.fill,
     paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20,
   },
   smartIcon: { width: 12, height: 12 },
@@ -342,15 +342,15 @@ const styles = StyleSheet.create({
 
   dlGroup: {
     marginHorizontal: PAD,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.fillSubtle,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.fill,
     overflow: 'hidden',
   },
   dlSeparator: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    backgroundColor: colors.fill,
     marginLeft: 130, // arranca después de la miniatura, como las listas de iOS
   },
   dlRow: {
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
   dlThumbEmpty: { backgroundColor: colors.surface },
   dlProgressOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    height: 3, backgroundColor: 'rgba(255,255,255,0.15)',
+    height: 3, backgroundColor: colors.border,
     borderBottomLeftRadius: 9, borderBottomRightRadius: 9, overflow: 'hidden',
   },
   dlProgressBar: { height: '100%', backgroundColor: '#fff' },
@@ -374,8 +374,8 @@ const styles = StyleSheet.create({
   dlPlayIcon: { width: 18, height: 18 },
   dlInfo: { flex: 1, gap: 2 },
   dlTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  dlSub: { color: 'rgba(255,255,255,0.55)', fontSize: 13 },
-  dlStatus: { color: 'rgba(255,255,255,0.38)', fontSize: 12 },
+  dlSub: { color: colors.textDim, fontSize: 13 },
+  dlStatus: { color: colors.textMuted, fontSize: 12 },
   dlError: { color: colors.danger },
   dlDelete: { padding: 6 },
   dlDeleteIcon: { width: 17, height: 17 },

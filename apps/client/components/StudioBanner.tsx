@@ -4,6 +4,7 @@ import { SymbolView } from 'expo-symbols'
 import { useRouter } from 'expo-router'
 import { type StudioBrand } from '@/lib/studios'
 import { Touchable } from './Touchable'
+import { colors } from '@/lib/theme'
 
 // Banner de marca en el buscador (Disney, HBO...) → abre el catálogo especial.
 export function StudioBanner({ brand }: { brand: StudioBrand }) {
@@ -49,11 +50,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: colors.border,
   },
   textCol: { flex: 1 },
   kicker: {
-    color: 'rgba(255,255,255,0.8)',
+    color: colors.text,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1,
@@ -65,7 +66,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: colors.border,
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,

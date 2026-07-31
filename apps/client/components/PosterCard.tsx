@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: colors.border,
   },
   soonText: {
     color: '#fff',
@@ -126,11 +126,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     // Aro tenue: sobre un póster oscuro el círculo negro se perdía.
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderColor: colors.textFaint,
   },
   removeIcon: { width: 11, height: 11 },
   title: {
-    color: 'rgba(255,255,255,0.85)',
+    color: colors.text,
     fontSize: 13,
     fontWeight: '500',
     marginTop: 6,

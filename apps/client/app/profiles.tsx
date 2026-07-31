@@ -170,7 +170,7 @@ export default function ProfilesScreen() {
             {!editing && profiles.length < MAX_PROFILES && (
               <Touchable scaleTo={0.93} haptic="light" style={styles.cell} onPress={() => setCreating(true)}>
                 <View style={[styles.addBox, { width: CELL, height: CELL, borderRadius: CELL / 2 }]}>
-                  <SymbolView name="plus" tintColor="rgba(255,255,255,0.55)" style={styles.addIcon} />
+                  <SymbolView name="plus" tintColor={colors.textDim} style={styles.addIcon} />
                 </View>
                 <Text style={styles.name}>Añadir</Text>
               </Touchable>
@@ -198,7 +198,7 @@ export default function ProfilesScreen() {
             <Touchable style={styles.signOut} scaleTo={0.97} haptic="light" onPress={signOut}>
               <SymbolView
                 name="rectangle.portrait.and.arrow.right"
-                tintColor="rgba(255,255,255,0.45)"
+                tintColor={colors.textMuted}
                 style={styles.signOutIcon}
               />
               <Text style={styles.signOutText}>Cerrar sesión</Text>
@@ -275,7 +275,7 @@ function DeleteProfile({
           <TextInput
             style={styles.input}
             placeholder="Contraseña"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={colors.textFaint}
             value={password}
             onChangeText={(v) => { setPassword(v); if (error) setError(null) }}
             secureTextEntry
@@ -513,7 +513,7 @@ function NewProfileForm({
           <TextInput
             style={styles.input}
             placeholder="Ej. Diego"
-            placeholderTextColor="rgba(255,255,255,0.3)"
+            placeholderTextColor={colors.textFaint}
             value={name}
             onChangeText={setName}
             maxLength={30}
@@ -655,7 +655,7 @@ const styles = StyleSheet.create({
   },
 
   editBtn: { alignItems: 'center', marginTop: 34, paddingVertical: 10 },
-  editText: { color: 'rgba(255,255,255,0.55)', fontSize: 15, fontWeight: '600' },
+  editText: { color: colors.textDim, fontSize: 15, fontWeight: '600' },
   editTextOn: { color: '#fff' },
 
   deleteTitle: {
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4, marginTop: 20, textAlign: 'center',
   },
   deleteWarn: {
-    color: 'rgba(255,255,255,0.5)', fontSize: 14.5, lineHeight: 21,
+    color: colors.textMuted, fontSize: 14.5, lineHeight: 21,
     textAlign: 'center', marginTop: 12, marginBottom: 32, paddingHorizontal: 8,
   },
   deleteHero: { alignItems: 'center' },
@@ -682,18 +682,18 @@ const styles = StyleSheet.create({
 
   toggleRow: {
     flexDirection: 'row', alignItems: 'center', gap: 13,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.fillSubtle,
     borderRadius: 16, borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.fill,
     paddingHorizontal: 16, paddingVertical: 15, marginTop: 18,
   },
   toggleIcon: { width: 18, height: 18 },
   toggleText: { flex: 1 },
   toggleTitle: { color: '#fff', fontSize: 15.5, fontWeight: '600' },
-  toggleSub: { color: 'rgba(255,255,255,0.42)', fontSize: 13, marginTop: 3, lineHeight: 17 },
+  toggleSub: { color: colors.textMuted, fontSize: 13, marginTop: 3, lineHeight: 17 },
   checkbox: {
     width: 24, height: 24, borderRadius: 12,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)',
+    borderWidth: 1.5, borderColor: colors.textFaint,
     alignItems: 'center', justifyContent: 'center',
   },
   checkboxOn: { backgroundColor: '#fff', borderColor: '#fff' },
@@ -706,7 +706,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.8, textAlign: 'center',
   },
   subtitle: {
-    color: 'rgba(255,255,255,0.45)', fontSize: 14.5,
+    color: colors.textMuted, fontSize: 14.5,
     textAlign: 'center', marginTop: 8, marginBottom: 38, lineHeight: 20,
   },
 
@@ -719,9 +719,9 @@ const styles = StyleSheet.create({
   nameActive: { color: '#fff' },
   addBox: {
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: colors.fillSubtle,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: colors.border,
     borderStyle: 'dashed',
   },
   addIcon: { width: 24, height: 24 },
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
     gap: 7, marginTop: 56, paddingVertical: 10,
   },
   signOutIcon: { width: 15, height: 15 },
-  signOutText: { color: 'rgba(255,255,255,0.45)', fontSize: 15 },
+  signOutText: { color: colors.textMuted, fontSize: 15 },
 
   // Formulario
   preview: { alignItems: 'center', marginBottom: 34 },
@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
   checkIcon: { width: 9, height: 9 },
 
   inputWrap: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.fillSubtle,
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.hairline,
@@ -776,9 +776,9 @@ const styles = StyleSheet.create({
     paddingVertical: 17, alignItems: 'center', justifyContent: 'center',
     marginTop: 26, minHeight: 56,
   },
-  primaryBtnOff: { backgroundColor: 'rgba(255,255,255,0.14)' },
+  primaryBtnOff: { backgroundColor: colors.border },
   primaryText: { color: '#000', fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
-  primaryTextOff: { color: 'rgba(255,255,255,0.45)' },
+  primaryTextOff: { color: colors.textMuted },
   ghostBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 6 },
-  ghostText: { color: 'rgba(255,255,255,0.5)', fontSize: 15 },
+  ghostText: { color: colors.textMuted, fontSize: 15 },
 })

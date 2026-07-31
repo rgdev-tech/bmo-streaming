@@ -4,6 +4,11 @@ import { type MediaItem } from '@/lib/tmdb'
 import { PosterCard } from './PosterCard'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
+import { rowVirtualization, fixedItemLayout } from './rowVirtualization'
+
+// Ancho que ocupa cada tarjeta en la fila: los 124 del póster + su separación.
+// Tiene que seguir a PosterCard; si cambia allá, cambia acá.
+const POSTER_ITEM_W = 124 + 12
 
 export function PosterRow({
   title,
@@ -36,6 +41,8 @@ export function PosterRow({
         renderItem={({ item }) => <PosterCard item={item} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
+        getItemLayout={fixedItemLayout(POSTER_ITEM_W)}
+        {...rowVirtualization}
       />
     </View>
   )

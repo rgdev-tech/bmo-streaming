@@ -4,6 +4,10 @@ import { ContinueCard } from './ContinueCard'
 import { Touchable } from './Touchable'
 import { rowHeading } from '@/lib/typography'
 import type { Progress } from '@/lib/library'
+import { rowVirtualization, fixedItemLayout } from './rowVirtualization'
+
+// 300 de la tarjeta + 12 de separación (ver ContinueCard).
+const CONTINUE_ITEM_W = 300 + 12
 
 export function ContinueRow({
   items,
@@ -37,6 +41,8 @@ export function ContinueRow({
         renderItem={({ item }) => <ContinueCard item={item} onRemove={onChange} />}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
+        getItemLayout={fixedItemLayout(CONTINUE_ITEM_W)}
+        {...rowVirtualization}
       />
     </View>
   )

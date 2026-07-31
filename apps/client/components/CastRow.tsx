@@ -60,10 +60,10 @@ const styles = StyleSheet.create({
   person: { width: 80 },
   photo: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.surface },
   empty: { alignItems: 'center', justifyContent: 'center' },
-  initials: { color: 'rgba(255,255,255,0.5)', fontSize: 24, fontWeight: '700' },
+  initials: { color: colors.textMuted, fontSize: 24, fontWeight: '700' },
   name: { color: '#fff', fontSize: 12, fontWeight: '600', marginTop: 8, textAlign: 'center' },
   character: {
-    color: 'rgba(255,255,255,0.45)',
+    color: colors.textMuted,
     fontSize: 11,
     marginTop: 2,
     textAlign: 'center',

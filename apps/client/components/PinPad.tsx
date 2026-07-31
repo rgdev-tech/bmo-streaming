@@ -77,7 +77,7 @@ export function PinPad({
         >
           <SymbolView
             name="delete.left.fill"
-            tintColor={value.length ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)'}
+            tintColor={value.length ? colors.textDim : colors.border}
             style={styles.backIcon}
           />
         </Touchable>
@@ -96,13 +96,13 @@ const styles = StyleSheet.create({
   root: { alignItems: 'center' },
   title: { color: '#fff', fontSize: 21, fontWeight: '700', letterSpacing: -0.4, textAlign: 'center' },
   subtitle: {
-    color: 'rgba(255,255,255,0.45)', fontSize: 14.5,
+    color: colors.textMuted, fontSize: 14.5,
     marginTop: 7, textAlign: 'center', lineHeight: 20,
   },
   dots: { flexDirection: 'row', gap: 18, marginTop: 26 },
   dot: {
     width: 15, height: 15, borderRadius: 8,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.32)',
+    borderWidth: 1.5, borderColor: colors.textFaint,
   },
   dotOn: { backgroundColor: '#fff', borderColor: '#fff' },
   dotError: { borderColor: colors.danger },
@@ -115,8 +115,8 @@ const styles = StyleSheet.create({
   },
   key: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center' },
   keyFilled: {
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: colors.fill,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: colors.fill,
   },
   keyText: { color: '#fff', fontSize: 27, fontWeight: '500' },
   backIcon: { width: 25, height: 20 },

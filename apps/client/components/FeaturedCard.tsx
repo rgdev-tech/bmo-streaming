@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
   },
   meta: { padding: 14, paddingTop: 10 },
   metaLine: {
-    color: 'rgba(255,255,255,0.45)',
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.2,
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   overview: {
-    color: 'rgba(255,255,255,0.75)',
+    color: colors.textDim,
     fontSize: 13,
     lineHeight: 19,
   },

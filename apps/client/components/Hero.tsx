@@ -154,7 +154,7 @@ export function Hero({ item, active, scrollY }: { item: MediaItem; active: boole
         <View style={styles.buttons}>
           {upcoming ? (
             <View style={styles.soonBtn}>
-              <SymbolView name="clock" tintColor="rgba(255,255,255,0.8)" style={styles.playIcon} />
+              <SymbolView name="clock" tintColor={colors.text} style={styles.playIcon} />
               <Text style={styles.soonText}>Próximamente</Text>
             </View>
           ) : (
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   content: { position: 'absolute', bottom: 28, left: 0, right: 0, alignItems: 'center', paddingHorizontal: 20 },
   trendingBadge: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: colors.textMuted,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
   logoBox: { height: 100, justifyContent: 'flex-end', alignItems: 'center' },
   logo: { width: width * 0.72, height: 100 },
   title: { fontSize: 34, fontWeight: '800', color: '#fff', letterSpacing: -0.5, textAlign: 'center' },
-  meta: { color: 'rgba(255,255,255,0.85)', fontSize: 14, fontWeight: '600', marginTop: 10, textAlign: 'center' },
+  meta: { color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 10, textAlign: 'center' },
   buttons: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18 },
   playBtn: {
     flexDirection: 'row',
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: colors.border,
     borderRadius: 27,
     paddingVertical: 14,
     paddingHorizontal: 32,
@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -355,7 +355,7 @@ export default function TitleScreen() {
           {!isTv &&
             (!isReleased(data.release_date) ? (
               <View style={styles.soonButton}>
-                <SymbolView name="clock" tintColor="rgba(255,255,255,0.7)" style={styles.playIcon} />
+                <SymbolView name="clock" tintColor={colors.textDim} style={styles.playIcon} />
                 <Text style={styles.soonText}>
                   Próximamente{data.release_date ? ` · ${yearOf(data)}` : ''}
                 </Text>
@@ -552,12 +552,12 @@ const styles = StyleSheet.create({
   meta: { color: colors.textDim, fontSize: 14, fontWeight: '500' },
   certBadge: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: colors.textMuted,
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
-  certText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700' },
+  certText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   playButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 8,
   },
-  soonText: { color: 'rgba(255,255,255,0.7)', fontSize: 16, fontWeight: '600' },
+  soonText: { color: colors.textDim, fontSize: 16, fontWeight: '600' },
   playIcon: { width: 16, height: 16 },
   playText: { color: '#000', fontSize: 16, fontWeight: '700' },
   secondaryRow: { flexDirection: 'row', gap: 9, marginTop: 12 },
@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 6,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: colors.fill,
   },
   // Con el tráiler sonando el botón queda encendido: es el mismo control que lo
   // apaga, así que tiene que leerse como "activo" y no como uno más.
@@ -604,7 +604,7 @@ const styles = StyleSheet.create({
   listTextActive: { color: colors.onAccent },
   genres: { color: colors.textMuted, fontSize: 13, marginTop: 20 },
   overview: {
-    color: 'rgba(255,255,255,0.8)',
+    color: colors.text,
     fontSize: 15,
     lineHeight: 22,
     marginTop: 12,

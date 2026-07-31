@@ -99,7 +99,7 @@ function CircularProgress({
         {/* Pista */}
         <Circle
           cx={cx} cy={cx} r={r}
-          stroke="rgba(255,255,255,0.2)"
+          stroke={colors.border}
           strokeWidth={stroke}
           fill="none"
         />

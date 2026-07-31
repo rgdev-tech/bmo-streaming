@@ -44,7 +44,7 @@ export function PersonResultCard({ person }: { person: MediaItem }) {
         <Text style={styles.role} numberOfLines={1}>{role}</Text>
         {!!knownFor && <Text style={styles.knownFor} numberOfLines={1}>{knownFor}</Text>}
       </View>
-      <SymbolView name="chevron.right" tintColor="rgba(255,255,255,0.35)" style={styles.chevron} />
+      <SymbolView name="chevron.right" tintColor={colors.textMuted} style={styles.chevron} />
     </Touchable>
   )
 }
@@ -57,16 +57,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: colors.fillSubtle,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.fill,
   },
   photo: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.surface },
   empty: { alignItems: 'center', justifyContent: 'center' },
-  initials: { color: 'rgba(255,255,255,0.5)', fontSize: 22, fontWeight: '700' },
+  initials: { color: colors.textMuted, fontSize: 22, fontWeight: '700' },
   info: { flex: 1 },
   name: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
-  role: { color: 'rgba(255,255,255,0.55)', fontSize: 13, marginTop: 2 },
+  role: { color: colors.textDim, fontSize: 13, marginTop: 2 },
   knownFor: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   chevron: { width: 13, height: 13 },
 })

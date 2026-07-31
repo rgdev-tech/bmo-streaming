@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   heroPlaceholder: { backgroundColor: colors.surface },
   heroContent: { position: 'absolute', left: 18, right: 18 },
   heroKicker: {
-    color: 'rgba(255,255,255,0.75)',
+    color: colors.textDim,
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 1.5,

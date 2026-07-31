@@ -17,6 +17,7 @@ import { CategoryCard } from '@/components/CategoryCard'
 import { PersonResultCard } from '@/components/PersonResultCard'
 import { StudioBanner } from '@/components/StudioBanner'
 import { EmptyState } from '@/components/EmptyState'
+import { colors } from '@/lib/theme'
 
 const { width } = Dimensions.get('window')
 const CAT_W = Math.floor((width - 32 - 24) / 3)
@@ -104,7 +105,7 @@ export default function SearchScreen() {
             autoCapitalize: 'none',
             textColor: '#fff',
             tintColor: '#fff',
-            hintTextColor: 'rgba(255,255,255,0.45)',
+            hintTextColor: colors.textMuted,
           },
         }}
       />
@@ -162,7 +163,7 @@ const styles = StyleSheet.create({
   peopleSection: { gap: 10 },
   peopleList: { gap: 8 },
   sectionLabel: {
-    color: 'rgba(255,255,255,0.55)',
+    color: colors.textDim,
     fontSize: 13,
     fontWeight: '700',
     textTransform: 'uppercase',

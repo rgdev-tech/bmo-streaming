@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: colors.border,
   },
   progressFill: { height: '100%', backgroundColor: colors.accent },
   fallback: {

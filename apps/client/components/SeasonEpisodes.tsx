@@ -248,7 +248,7 @@ function EpisodeRow({
           >
             <SymbolView
               name={watched ? 'checkmark.circle.fill' : 'circle'}
-              tintColor={watched ? colors.success : 'rgba(255,255,255,0.5)'}
+              tintColor={watched ? colors.success : colors.textMuted}
               style={styles.markIcon}
             />
           </Touchable>
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   seasonChipActive: { backgroundColor: '#fff' },
-  seasonText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+  seasonText: { color: colors.textDim, fontSize: 14, fontWeight: '600' },
   seasonTextActive: { color: '#000' },
   markSeasonBtn: {
     flexDirection: 'row',
@@ -278,7 +278,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   markSeasonIcon: { width: 20, height: 20 },
-  markSeasonText: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '600' },
+  markSeasonText: { color: colors.text, fontSize: 14, fontWeight: '600' },
   spinner: { marginVertical: 30 },
   epRow: { flexDirection: 'row', marginBottom: 18, gap: 12, alignItems: 'center' },
   epRowSoon: { opacity: 0.5 },
@@ -313,15 +313,15 @@ const styles = StyleSheet.create({
   playBadgeIcon: { width: 10, height: 10 },
   epInfo: { flex: 1, justifyContent: 'center' },
   epTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  epTitleWatched: { color: 'rgba(255,255,255,0.5)' },
+  epTitleWatched: { color: colors.textMuted },
   epOverview: {
-    color: 'rgba(255,255,255,0.45)',
+    color: colors.textMuted,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
   },
   epSoon: {
-    color: 'rgba(255,255,255,0.5)',
+    color: colors.textMuted,
     fontSize: 13,
     fontWeight: '600',
     marginTop: 4,
