@@ -8,13 +8,20 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit"
+  },
   "//react-pin": "Mismo criterio que @bmo/core: react va PINNEADO y como peerDependency (no dependency) para no reintroducir el doble React ('Invalid hook call'). @bmo/core también es peer: cada app ya lo provee (client vía workspace:*, tv vía file: con npm/disableHierarchicalLookup). Este paquete es SOLO lógica/hooks headless — no depende de react-native ni expo.",
   "peerDependencies": {
     "react": "19.1.0",
     "@bmo/core": "*"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.14",
     "@types/react": "~19.1.10",
+    "@types/react-test-renderer": "^19.1.0",
+    "react-test-renderer": "19.1.0",
     "typescript": "~5.9.2"
   }
 }
