@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia'
 import {
-  resolveStream, checkProviders, debugScrape, debugSubs, debugDebrid,
+  resolveStream, checkProviders, debugScrape, debugSubs, debugDebrid, debugTiming,
   listSources, resolvePickedSource, type AudioLang,
 } from './resolver.service'
 import { langCode } from './hls'
@@ -104,6 +104,19 @@ export const resolverRoutes = new Elysia({ prefix: '/resolve' })
   .get(
     '/debug/debrid/tv/:id/:season/:episode',
     ({ params, query }) => debugDebrid('tv', Number(params.id), Number(params.season), Number(params.episode), (query as { lang?: string }).lang),
+    { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
+  )
+
+  // Dónde se van los segundos de una resolución en frío. Salta la caché de
+  // streams: mide el peor caso, que es el que paga el primero en reproducir.
+  .get(
+    '/debug/timing/movie/:id',
+    ({ params }) => debugTiming('movie', Number(params.id)),
+    { params: t.Object({ id: t.String() }) }
+  )
+  .get(
+    '/debug/timing/tv/:id/:season/:episode',
+    ({ params }) => debugTiming('tv', Number(params.id), Number(params.season), Number(params.episode)),
     { params: t.Object({ id: t.String(), season: t.String(), episode: t.String() }) }
   )
 

@@ -384,6 +384,54 @@ async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
   return selectRunnable(rankCandidates(streams, req.media, req.hwTier))
 }
 
+/**
+ * Desglose de tiempos del camino frío, tramo por tramo. Existe para poder decir
+ * DÓNDE se van los segundos en vez de estimarlo leyendo el código: los timeouts
+ * de cada etapa son distintos (8 s el indexador, 6 s el unrestrict) y sin medir
+ * es imposible saber cuál domina en la práctica.
+ *
+ * Salta la caché de streams a propósito — mide el peor caso, que es el que
+ * paga el primero que reproduce un título.
+ */
+export async function debridTiming(req: DebridRequest): Promise<Record<string, unknown>> {
+  const marks: Record<string, number> = {}
+  const stage = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+    const t = Date.now()
+    try { return await run() } finally { marks[name] = Date.now() - t }
+  }
+
+  const total = Date.now()
+  const imdbId = await stage('imdbId_tmdb', () => imdbIdOf(req.type, req.tmdbId))
+  if (!imdbId) return { error: 'sin imdbId', marks }
+
+  // fetchStreams (no la variante cacheada): interesa el costo real del indexador.
+  const streams = await stage('indexers', () =>
+    fetchStreams(imdbId, req.type, req.season, req.episode)
+  )
+
+  const tRank = Date.now()
+  const r = rankCandidates(streams, req.media, req.hwTier)
+  const runnable = selectRunnable(r)
+  marks.rank = Date.now() - tRank
+
+  let resolved: string | null = null
+  if (runnable.length) {
+    resolved = await stage('unrestrict', async () => {
+      try { return (await tryCandidate(runnable[0]!)).url } catch { return null }
+    })
+  }
+
+  marks.total = Date.now() - total
+  return {
+    marks,
+    streams: streams.length,
+    runnable: runnable.length,
+    cacheCounts: r.cacheCounts,
+    winner: runnable[0]?.parsed.filename ?? null,
+    resolvedOk: !!resolved,
+  }
+}
+
 export async function resolveDebridStream(
   req: DebridRequest,
   // Índice dentro de listDebridSources(). Cuando viene, se resuelve ESA fuente

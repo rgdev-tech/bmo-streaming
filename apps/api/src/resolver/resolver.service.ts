@@ -9,7 +9,7 @@ import {
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
-import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio } from './torrentio'
+import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio, debridTiming } from './torrentio'
 import type { HwTier, MediaRef } from './torrentio.parse'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
@@ -583,6 +583,39 @@ export async function debugDebrid(
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return { error: 'buildMedia falló (¿TMDB_API_KEY?)' }
   return debugTorrentio(type, tmdbId, built.ref, season, episode, lang === 'latino' ? 'latino' : 'original')
+}
+
+/**
+ * Dónde se van los segundos de una resolución en frío, tramo por tramo.
+ * Mide buildMedia (TMDB) aparte del resto porque hoy corre ANTES y en SERIE con
+ * el resto de la cadena — si pesa, se puede paralelizar.
+ */
+export async function debugTiming(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<Record<string, unknown>> {
+  const t0 = Date.now()
+  const built = await buildMedia(type, tmdbId, season, episode)
+  const buildMediaMs = Date.now() - t0
+  if (!built) return { error: 'buildMedia falló', buildMediaMs }
+
+  const tSubs = Date.now()
+  const subs = await fetchSubtitles(type, tmdbId, season, episode)
+  const subsMs = Date.now() - tSubs
+
+  const debrid = await debridTiming({ type, tmdbId, media: built.ref, season, episode })
+
+  return {
+    title: built.ref.title,
+    buildMediaMs,
+    // Los subtítulos van en paralelo en producción y con tope de 1.5 s; acá se
+    // miden solos para saber cuánto tardarían si nadie los acotara.
+    subsMs,
+    subsCount: subs.length,
+    debrid,
+  }
 }
 
 // Diagnóstico detallado: corre runAll capturando el resultado de CADA source.
