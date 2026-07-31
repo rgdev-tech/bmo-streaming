@@ -9,7 +9,7 @@ import {
 import { TTLCache } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
-import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio, debridTiming } from './torrentio'
+import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio, debridTiming, imdbIdOf } from './torrentio'
 import type { HwTier, MediaRef } from './torrentio.parse'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
@@ -100,11 +100,30 @@ function languageLabel(sourceId: string): string {
   return LATINO_SOURCES.includes(sourceId) ? 'Español Latino' : 'Original'
 }
 
+// Metadatos de título: no cambian entre una reproducción y la siguiente, pero
+// se volvían a pedir a TMDB en CADA resolución en frío. Con caché, la segunda
+// vez que se resuelve el mismo título (otro idioma, otro dispositivo, un
+// reintento tras fallar la reproducción) se ahorra el viaje entero.
+// 2 h: los datos son estables, pero un episodio recién estrenado puede cambiar
+// su runtime/air_date y no queremos arrastrar eso todo el día.
+const MEDIA_TTL = 2 * 60 * 60 * 1000
+const mediaCache = new TTLCache<{ media: ScrapeMedia; ref: MediaRef } | null>(MEDIA_TTL)
+
+function buildMedia(
+  type: 'movie' | 'tv',
+  tmdbId: number,
+  season?: number,
+  episode?: number
+): Promise<{ media: ScrapeMedia; ref: MediaRef } | null> {
+  const key = type === 'tv' ? `tv:${tmdbId}:${season ?? 1}:${episode ?? 1}` : `movie:${tmdbId}`
+  return mediaCache.resolve(key, () => buildMediaUncached(type, tmdbId, season, episode))
+}
+
 // Construye el objeto ScrapeMedia que la librería necesita (título + año + tmdbIds)
 // y, en la misma pasada, el MediaRef que usa el ranking de Real-Debrid para
 // validar que el torrent sea el correcto. Sale todo de las MISMAS respuestas de
 // TMDB, sin llamadas extra.
-async function buildMedia(
+async function buildMediaUncached(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
@@ -133,9 +152,14 @@ async function buildMedia(
       }
     }
 
-    // TV: necesitamos los tmdbId de temporada y episodio
-    const d = await tmdbService.tvDetails(tmdbId) as any
-    const seasonData = await tmdbService.tvSeason(tmdbId, season ?? 1) as any
+    // TV: necesitamos los tmdbId de temporada y episodio. Las dos llamadas van
+    // EN PARALELO: tvSeason sólo depende de (tmdbId, season), no de lo que
+    // devuelva tvDetails. Encadenarlas costaba un round-trip a TMDB de más en
+    // cada resolución de serie, justo antes de poder tocar el indexador.
+    const [d, seasonData] = await Promise.all([
+      tmdbService.tvDetails(tmdbId) as Promise<any>,
+      tmdbService.tvSeason(tmdbId, season ?? 1) as Promise<any>,
+    ])
     const ep = (seasonData.episodes ?? []).find(
       (e: any) => e.episode_number === (episode ?? 1)
     )
@@ -365,7 +389,15 @@ async function scrape(
   exclude: string[] = [],
   hwTier: HwTier = 'high'
 ): Promise<StreamResult | null> {
-  const built = await buildMedia(type, tmdbId, season, episode)
+  // Los detalles del título y el id de IMDb son INDEPENDIENTES entre sí, así que
+  // se piden a la vez. Antes iban encadenados —buildMedia, y recién dentro del
+  // camino de debrid el imdbIdOf—, o sea dos round-trips a TMDB en serie antes
+  // de poder consultar al indexador. Ahora el costo es el del más lento, no la
+  // suma. (En series buildMedia además paraleliza sus propias dos llamadas.)
+  const [built, imdbId] = await Promise.all([
+    buildMedia(type, tmdbId, season, episode),
+    imdbIdOf(type, tmdbId),
+  ])
   if (!built) {
     console.error(`[resolve] no se pudo construir media para ${type}/${tmdbId}`)
     return null
@@ -397,7 +429,7 @@ async function scrape(
     // velocidad. 'realdebrid' se trata como una fuente más para el exclude.
     if (debridEnabled && !exclude.includes('realdebrid')) {
       try {
-        const debrid = await resolveDebridStream({ type, tmdbId, media: ref, season, episode, hwTier })
+        const debrid = await resolveDebridStream({ type, tmdbId, media: ref, imdbId, season, episode, hwTier })
         if (debrid) {
           const result: StreamResult = {
             url: debrid.url,

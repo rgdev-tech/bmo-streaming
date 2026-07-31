@@ -278,6 +278,10 @@ export type DebridRequest = {
   type: 'movie' | 'tv'
   tmdbId: number
   media: MediaRef
+  // imdbId ya resuelto. El caller puede pedirlo EN PARALELO con los detalles de
+  // TMDB (son independientes) en vez de dejar que se resuelva acá, ya empezada
+  // la cadena — así el indexador arranca un round-trip antes.
+  imdbId?: string | null
   season?: number
   episode?: number
   // Capacidad de decode del dispositivo (Fire TV Stick = 'low' → sin 4K/10-bit).
@@ -378,7 +382,7 @@ export async function listDebridSources(req: DebridRequest): Promise<SourceOptio
 // Paso común de listar y resolver: pedir a Torrentio, rankear y filtrar.
 async function rankRunnable(req: DebridRequest): Promise<ScoredCandidate[]> {
   if (!activeSources().length) return []
-  const imdbId = await imdbIdOf(req.type, req.tmdbId)
+  const imdbId = req.imdbId ?? await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return []
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
   return selectRunnable(rankCandidates(streams, req.media, req.hwTier))
@@ -401,7 +405,7 @@ export async function debridTiming(req: DebridRequest): Promise<Record<string, u
   }
 
   const total = Date.now()
-  const imdbId = await stage('imdbId_tmdb', () => imdbIdOf(req.type, req.tmdbId))
+  const imdbId = await stage('imdbId_tmdb', async () => req.imdbId ?? await imdbIdOf(req.type, req.tmdbId))
   if (!imdbId) return { error: 'sin imdbId', marks }
 
   // fetchStreams (no la variante cacheada): interesa el costo real del indexador.
@@ -441,7 +445,7 @@ export async function resolveDebridStream(
   if (!activeSources().length) return null
 
   const t0 = Date.now()
-  const imdbId = await imdbIdOf(req.type, req.tmdbId)
+  const imdbId = req.imdbId ?? await imdbIdOf(req.type, req.tmdbId)
   if (!imdbId) return null
 
   const streams = await fetchStreamsCached(imdbId, req.type, req.season, req.episode)
