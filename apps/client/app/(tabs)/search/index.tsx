@@ -115,7 +115,7 @@ export default function SearchScreen() {
         keyExtractor={(item: any) =>
           searching
             ? `${item.media_type}-${item.id}`
-            : `${item.type}-${item.genreId}`
+            : `${item.type}-${item.studioKey ?? item.genreId}`
         }
         numColumns={3}
         columnWrapperStyle={styles.col}

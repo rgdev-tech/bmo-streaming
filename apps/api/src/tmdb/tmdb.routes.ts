@@ -30,6 +30,9 @@ const STUDIOS: Record<
   hbo: { name: 'HBO Max', primary: 'tv', providerId: 1899 },
   prime: { name: 'Prime Video', primary: 'movie', providerId: 9 },
   appletv: { name: 'Apple TV+', primary: 'tv', providerId: 350 },
+  // Peacock es sobre todo catálogo de EE.UU.: sin la región US queda casi vacío
+  // (en MX su contenido se reparte entre otras plataformas).
+  peacock: { name: 'Peacock', primary: 'tv', providerId: 386 },
   // Franquicias con pelis Y series (Marvel Studios / DC / Lucasfilm).
   marvel: { name: 'Marvel', primary: 'movie', movieCompanies: [420], tvCompanies: [420] },
   dc: { name: 'DC', primary: 'movie', movieCompanies: [429], tvCompanies: [429] },
@@ -307,17 +310,70 @@ export const tmdbRoutes = new Elysia({ prefix: '/tmdb' })
         ['Guerra y política', 'tv', 10768],
         ['Telenovelas', 'tv', 10766],
       ]
-      const results = await Promise.allSettled(
-        CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))
-      )
-      return CATS.map(([name, type, genreId], i) => {
-        const list: any[] =
-          results[i].status === 'fulfilled'
-            ? ((results[i] as PromiseFulfilledResult<any>).value.results ?? [])
-            : []
-        const art = list.find((x: any) => x.backdrop_path) ?? list[0]
-        return { name, type, genreId, backdrop_path: art?.backdrop_path ?? null }
-      }).filter((c) => c.backdrop_path)
+      // Marcas navegables (Marvel, Apple TV+, DC, Peacock...). Antes sólo se
+      // llegaba a ellas ESCRIBIENDO el nombre en el buscador; acá se muestran
+      // como tarjetas junto a los géneros. Llevan `studioKey` en vez de
+      // `genreId`: el cliente las enruta a /studio/:key y no a /browse.
+      const BRANDS: string[] = [
+        'netflix', 'disney', 'hbo', 'prime', 'appletv', 'peacock',
+        'marvel', 'dc', 'starwars', 'pixar',
+        'paramount', 'warner', 'universal', 'dreamworks',
+      ]
+
+      const [genreResults, brandResults] = await Promise.all([
+        Promise.allSettled(CATS.map(([, type, id]) => tmdbService.discoverByGenre(id, type))),
+        Promise.allSettled(
+          BRANDS.map((key) => {
+            const s = STUDIOS[key]
+            return tmdbService.discoverBrand({
+              type: s.primary,
+              sortBy: 'popularity.desc',
+              providerId: s.providerId,
+              companies: s.primary === 'movie' ? s.movieCompanies : s.tvCompanies,
+            })
+          })
+        ),
+      ])
+
+      const settledList = (r: PromiseSettledResult<any>): any[] => {
+        if (r.status !== 'fulfilled') return []
+        // discoverByGenre devuelve {results}; discoverBrand devuelve el array.
+        return Array.isArray(r.value) ? r.value : (r.value?.results ?? [])
+      }
+
+      // Sin esto la misma portada aparecía en tres tarjetas: cada categoría
+      // elegía por su cuenta el primer título con backdrop, y los títulos
+      // populares (Spider-Man, Moana) encabezan varios géneros a la vez. Se
+      // lleva registro de lo ya usado y cada tarjeta toma el primero libre.
+      const usedIds = new Set<number>()
+      const pickArt = (list: any[]) => {
+        const fresh = list.find((x: any) => x.backdrop_path && !usedIds.has(x.id))
+        // Si TODO el listado ya se usó, se repite antes que dejar la tarjeta
+        // vacía — pero recién como último recurso.
+        const art = fresh ?? list.find((x: any) => x.backdrop_path)
+        if (art?.id != null) usedIds.add(art.id)
+        return art?.backdrop_path ?? null
+      }
+
+      // Las marcas van primero: son el atajo más buscado y tienen el arte más
+      // reconocible, así se quedan con las mejores portadas del reparto.
+      const brands = BRANDS.map((key, i) => ({
+        name: STUDIOS[key].name,
+        type: STUDIOS[key].primary,
+        studioKey: key,
+        genreId: null,
+        backdrop_path: pickArt(settledList(brandResults[i])),
+      })).filter((c) => c.backdrop_path)
+
+      const genres = CATS.map(([name, type, genreId], i) => ({
+        name,
+        type,
+        studioKey: null,
+        genreId,
+        backdrop_path: pickArt(settledList(genreResults[i])),
+      })).filter((c) => c.backdrop_path)
+
+      return [...brands, ...genres]
     })
   )
 

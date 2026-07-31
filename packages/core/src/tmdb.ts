@@ -51,7 +51,10 @@ export type Paged<T> = { results: T[]; page: number; total_pages: number }
 export type Category = {
   name: string
   type: 'movie' | 'tv'
-  genreId: number
+  // Una tarjeta es de GÉNERO (genreId, va a /browse) o de MARCA (studioKey, va
+  // a /studio/:key). Nunca las dos: la que no aplica viene en null.
+  genreId: number | null
+  studioKey: string | null
   backdrop_path: string | null
 }
 

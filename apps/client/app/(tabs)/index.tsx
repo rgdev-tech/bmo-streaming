@@ -18,7 +18,6 @@ import { FeaturedCard } from '@/components/FeaturedCard'
 import { HeroCarousel } from '@/components/HeroCarousel'
 import { ContinueRow } from '@/components/ContinueRow'
 import { HomeSkeleton } from '@/components/Skeleton'
-import { RowsList, type RowSection } from '@/components/RowsList'
 import { Touchable } from '@/components/Touchable'
 import { EmptyState } from '@/components/EmptyState'
 import { screenTitle, rowHeading } from '@/lib/typography'
@@ -69,62 +68,70 @@ export default function HomeScreen() {
     ? data.trending.results.filter((i) => i.id !== spotlight.id)
     : data.trending.results
 
-  // Las filas se declaran como datos y no como JSX apilado: así RowsList puede
-  // virtualizarlas (montar sólo las cercanas al viewport) en vez de tener las
-  // once vivas todo el tiempo, cada una con su carrusel de imágenes.
-  const sections: RowSection[] = [
-    {
-      key: 'continue',
-      node: (
-        <ContinueRow
-          items={watching}
-          onChange={loadWatching}
-          onSeeAll={() => router.navigate('/library')}
-        />
-      ),
-    },
-    { key: 'trending', node: <PosterRow title="Tendencias" items={trendingRest} /> },
-    ...(spotlight
-      ? [{
-          key: 'spotlight',
-          node: (
-            <View style={styles.featuredWrap}>
-              <Text style={styles.rowTitle}>Destacado hoy</Text>
-              <FeaturedCard item={spotlight} />
-            </View>
-          ),
-        }]
-      : []),
-    { key: 'top-movies', node: <RankedRow title="Top 10 películas" items={data.topMovies.results} /> },
-    ...(collections
-      ? [
-          { key: 'netflix', node: <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} /> },
-          { key: 'hbo', node: <BackdropRow title="Lo mejor de HBO Max" items={collections.hbo.results} /> },
-          { key: 'appletv', node: <PosterRow title="Lo mejor de Apple TV+" items={collections.appletv.results} /> },
-          { key: 'disney', node: <BackdropRow title="Lo mejor de Disney+" items={collections.disney.results} /> },
-          { key: 'prime', node: <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} /> },
-        ]
-      : []),
-    { key: 'popular-movies', node: <PosterRow title="Películas populares" items={data.popularMovies.results} /> },
-    { key: 'popular-series', node: <RankedRow title="Series del momento" items={data.popularSeries.results} /> },
-    { key: 'top-rated', node: <BackdropRow title="Mejor valoradas" items={data.topMovies.results} /> },
-  ]
-
   return (
     <View style={styles.container}>
-      <RowsList
-        header={
-          <>
-            <HeroCarousel items={data.trending.results} scrollY={scrollY} />
-            <View style={styles.rowsTop} />
-          </>
-        }
-        sections={sections}
+      <Animated.ScrollView
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="never"
+        scrollEventThrottle={16}
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
           { useNativeDriver: true }
         )}
-      />
+      >
+        <HeroCarousel items={data.trending.results} scrollY={scrollY} />
+
+        <View style={styles.rows}>
+          {/* Continuar viendo */}
+          <ContinueRow
+            items={watching}
+            onChange={loadWatching}
+            onSeeAll={() => router.navigate('/library')}
+          />
+
+          {/* Tendencias: fila de posters */}
+          <PosterRow title="Tendencias" items={trendingRest} />
+
+          {/* Spotlight: tarjeta grande con descripción */}
+          {spotlight && (
+            <View style={styles.featuredWrap}>
+              <Text style={styles.rowTitle}>Destacado hoy</Text>
+              <FeaturedCard item={spotlight} />
+            </View>
+          )}
+
+          {/* Top 10: fila rankeada */}
+          <RankedRow title="Top 10 películas" items={data.topMovies.results} />
+
+          {collections && (
+            <>
+              {/* Netflix: posters */}
+              <PosterRow title="Lo mejor de Netflix" items={collections.netflix.results} />
+
+              {/* HBO: landscape backdrops */}
+              <BackdropRow title="Lo mejor de HBO Max" items={collections.hbo.results} />
+
+              {/* Apple TV+: posters */}
+              <PosterRow title="Lo mejor de Apple TV+" items={collections.appletv.results} />
+
+              {/* Disney+: landscape backdrops */}
+              <BackdropRow title="Lo mejor de Disney+" items={collections.disney.results} />
+
+              {/* Prime: posters */}
+              <PosterRow title="Lo mejor de Prime Video" items={collections.prime.results} />
+            </>
+          )}
+
+          {/* Películas populares: posters */}
+          <PosterRow title="Películas populares" items={data.popularMovies.results} />
+
+          {/* Series del momento: rankeadas */}
+          <RankedRow title="Series del momento" items={data.popularSeries.results} />
+
+          {/* Mejor valoradas: landscape backdrops */}
+          <BackdropRow title="Mejor valoradas" items={data.topMovies.results} />
+        </View>
+      </Animated.ScrollView>
 
       {/* Header overlay que se desvanece al hacer scroll */}
       <Animated.View
@@ -154,10 +161,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
-  // Respiro entre el hero y la primera fila. Antes era el paddingTop del bloque
-  // que envolvía a todas; ahora que las filas son ítems de una lista, va como
-  // cola del encabezado.
-  rowsTop: { height: 16 },
+  rows: { paddingTop: 16, paddingBottom: 90 },
   featuredWrap: { marginBottom: 24 },
   rowTitle: {
     ...rowHeading,

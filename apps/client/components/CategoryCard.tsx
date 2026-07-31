@@ -15,10 +15,15 @@ export function CategoryCard({ cat, width }: { cat: Category; width: number }) {
       style={[styles.card, { width, height: width * 1.4 }]}
       haptic="light"
       onPress={() =>
-        router.push({
-          pathname: '/browse/[type]/[id]',
-          params: { type: cat.type, id: String(cat.genreId), name: cat.name },
-        })
+        cat.studioKey
+          ? router.push({
+              pathname: '/studio/[key]',
+              params: { key: cat.studioKey },
+            })
+          : router.push({
+              pathname: '/browse/[type]/[id]',
+              params: { type: cat.type, id: String(cat.genreId), name: cat.name },
+            })
       }
     >
       {img ? (

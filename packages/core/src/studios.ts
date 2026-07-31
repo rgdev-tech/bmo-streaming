@@ -16,6 +16,7 @@ export const STUDIO_BRANDS: StudioBrand[] = [
   { key: 'netflix', name: 'Netflix', aliases: ['netflix'], colors: ['#E50914', '#7A0009'] },
   { key: 'prime', name: 'Prime Video', aliases: ['prime', 'prime video', 'amazon prime', 'amazon'], colors: ['#1FA2FF', '#0B5C9E'] },
   { key: 'appletv', name: 'Apple TV+', aliases: ['apple', 'apple tv', 'apple tv+', 'appletv'], colors: ['#4A4A4A', '#111111'] },
+  { key: 'peacock', name: 'Peacock', aliases: ['peacock', 'peacock tv'], colors: ['#5A2FD6', '#1B0B4D'] },
   { key: 'marvel', name: 'Marvel', aliases: ['marvel', 'mcu'], colors: ['#ED1D24', '#7A0F13'] },
   { key: 'dc', name: 'DC', aliases: ['dc', 'dc comics', 'dceu'], colors: ['#1D6FB8', '#0A1B3D'] },
   { key: 'pixar', name: 'Pixar', aliases: ['pixar'], colors: ['#2AA5E0', '#F2C230'] },
