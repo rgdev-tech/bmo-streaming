@@ -202,19 +202,75 @@ function dedupeStreams(streams: TorrentioStream[]): TorrentioStream[] {
 // Consulta TODOS los indexadores activos en paralelo y fusiona los resultados.
 // allSettled: que un indexador falle (timeout, caído) no debe tumbar al otro —
 // el catálogo se arma con lo que sí respondió.
+// Cuánto se espera a un indexador REZAGADO una vez que otro ya trajo resultados.
+// Es el precio que pagamos por más catálogo: pasado esto, se arranca con lo que
+// haya. Un indexador que tarda más de un segundo extra rara vez aporta algo que
+// el otro no tuviera.
+const STRAGGLER_GRACE_MS = 1_200
+
+/**
+ * Consulta a todos los indexadores en paralelo y devuelve en cuanto haya con qué
+ * trabajar, sin esperar a los que se cuelgan.
+ *
+ * Antes esto era un `Promise.allSettled` pelado: se esperaba a TODAS las fuentes,
+ * así que una sola colgada arrastraba el tramo hasta el timeout completo aunque
+ * la otra hubiera respondido en un segundo. Medido en producción, esta etapa se
+ * llevaba 8.16 s de 9.2 s totales — el 88% del arranque, y justo pegada al
+ * timeout de 8 s, que es la firma de "alguien no contesta" y no de "todos son
+ * lentos".
+ *
+ * Ahora: apenas una fuente trae streams, a las demás les queda una gracia corta
+ * para sumar los suyos. Si ninguna trajo nada, se espera a todas (no hay nada
+ * mejor que hacer). El resultado se fusiona igual que antes, así que no se
+ * pierde catálogo salvo el de una fuente que ya venía llegando tarde.
+ */
+async function fetchStreamsTimed(
+  imdbId: string,
+  type: 'movie' | 'tv',
+  season?: number,
+  episode?: number
+): Promise<{ streams: TorrentioStream[]; perSource: Record<string, number> }> {
+  const sources = activeSources()
+  if (!sources.length) return { streams: [], perSource: {} }
+
+  const perSource: Record<string, number> = {}
+  const collected: TorrentioStream[][] = sources.map(() => [])
+  let pending = sources.length
+
+  const tasks = sources.map((src, i) => {
+    const t = Date.now()
+    return fetchFromSource(src, imdbId, type, season, episode)
+      .catch(() => [] as TorrentioStream[])
+      .then((v) => {
+        collected[i] = v
+        perSource[src.name] = Date.now() - t
+        pending--
+        return v
+      })
+  })
+
+  const all = Promise.allSettled(tasks)
+  // Lo que ocurra primero: que alguna traiga streams, o que terminen todas.
+  await Promise.race([
+    all,
+    new Promise<void>((resolve) => {
+      for (const t of tasks) t.then((v) => { if (v.length) resolve() })
+    }),
+  ])
+  if (pending > 0) {
+    await Promise.race([all, new Promise((r) => setTimeout(r, STRAGGLER_GRACE_MS))])
+  }
+
+  return { streams: dedupeStreams(collected.flat()), perSource }
+}
+
 async function fetchStreams(
   imdbId: string,
   type: 'movie' | 'tv',
   season?: number,
   episode?: number
 ): Promise<TorrentioStream[]> {
-  const sources = activeSources()
-  if (!sources.length) return []
-  const settled = await Promise.allSettled(
-    sources.map((src) => fetchFromSource(src, imdbId, type, season, episode))
-  )
-  const all = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
-  return dedupeStreams(all)
+  return (await fetchStreamsTimed(imdbId, type, season, episode)).streams
 }
 
 // El `url` que trae cada stream es el endpoint de RESOLUCIÓN de Torrentio (no
@@ -408,10 +464,15 @@ export async function debridTiming(req: DebridRequest): Promise<Record<string, u
   const imdbId = await stage('imdbId_tmdb', async () => req.imdbId ?? await imdbIdOf(req.type, req.tmdbId))
   if (!imdbId) return { error: 'sin imdbId', marks }
 
-  // fetchStreams (no la variante cacheada): interesa el costo real del indexador.
-  const streams = await stage('indexers', () =>
-    fetchStreams(imdbId, req.type, req.season, req.episode)
-  )
+  // La variante NO cacheada: interesa el costo real del indexador. Trae además
+  // el tiempo de CADA fuente por separado — sin eso sólo se ve el total y no se
+  // puede saber cuál es la que cuelga.
+  let perSource: Record<string, number> = {}
+  const streams = await stage('indexers', async () => {
+    const r = await fetchStreamsTimed(imdbId, req.type, req.season, req.episode)
+    perSource = r.perSource
+    return r.streams
+  })
 
   const tRank = Date.now()
   const r = rankCandidates(streams, req.media, req.hwTier)
@@ -428,6 +489,9 @@ export async function debridTiming(req: DebridRequest): Promise<Record<string, u
   marks.total = Date.now() - total
   return {
     marks,
+    // Cuánto tardó CADA indexador. Si uno está cerca del timeout y el otro
+    // respondió rápido, ese es el que hay que revisar o sacar.
+    perSource,
     streams: streams.length,
     runnable: runnable.length,
     cacheCounts: r.cacheCounts,
