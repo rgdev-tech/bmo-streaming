@@ -20,7 +20,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { stream, type AudioLang, type Subtitle, type SourceOption } from '@/lib/stream'
 // Persistir estilo/sincronía ya no se hace acá: lo maneja useSubtitlePrefs.
 // De este módulo solo quedan los mapas que traducen la preferencia a estilos RN.
-import { SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS } from '@/lib/subtitleStyle'
+import {
+  SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS,
+  SUBTITLE_OUTLINE, SUBTITLE_POSITION_BOTTOM, SUBTITLE_OPACITY_VALUE,
+} from '@/lib/subtitleStyle'
 import { decodeSrtBytes, parseSrt, findActiveCue, type SrtCue } from '@/lib/srt'
 import { getProgress, setUpNext, type Progress } from '@/lib/library'
 // Guardado de progreso y helpers compartidos con apps/tv (headless).
@@ -53,14 +56,28 @@ const NEXT_PILL_S = 50      // segundos finales en que aparece el pill "Siguient
 // dl.opensubtitles.org). Corre en paralelo DESPUÉS de montar el player (no
 // bloquea el arranque del video) — el overlay JS solo recoge las cues cuando
 // llegan, sin ninguna carrera con el montaje nativo.
+// Además de las cues devuelve un DIAGNÓSTICO legible de por qué no hay
+// subtítulo, que el menú muestra en pantalla. Antes esto solo iba a console.log,
+// o sea que para saber por qué faltaba el español había que tener el teléfono
+// enchufado a Metro — imposible de averiguar para quien solo usa la app.
+export type SubsOutcome = { cues: SrtCue[]; diagnosis: string }
+
 async function downloadSpanishSubs(
   subs: Subtitle[], type: string, id: string, season?: number, episode?: number,
-): Promise<SrtCue[]> {
+): Promise<SubsOutcome> {
   const esSubs = subs.filter((s) => s.lang === 'es')
-  if (!esSubs.length) { console.log('[subs] sin candidatos en español'); return [] }
+  if (!esSubs.length) {
+    console.log('[subs] sin candidatos en español')
+    return { cues: [], diagnosis: 'La fuente no ofreció ningún subtítulo en español.' }
+  }
   const dir = `${FileSystem.cacheDirectory}subs/`
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {})
   console.log(`[subs] ${esSubs.length} candidato(s) español para ${type}/${id} T${season}:E${episode}`)
+
+  // Se queda con el motivo del ÚLTIMO intento fallido: es el más informativo
+  // porque los candidatos se prueban en orden de preferencia.
+  let lastFailure = 'Ningún candidato en español se pudo descargar.'
+
   for (const s of esSubs) {
     const localPath = `${dir}${type}-${id}-${season ?? 0}-${episode ?? 0}-${s.i}.srt`
     // No confiar solo en "existe": una descarga vieja/interrumpida puede haber
@@ -69,7 +86,7 @@ async function downloadSpanishSubs(
     if (cached.exists && cached.size > 200) {
       console.log(`[subs] caché (${cached.size}b): ${localPath}`)
       const cues = await readAndParseSrt(localPath)
-      if (cues.length) return cues
+      if (cues.length) return { cues, diagnosis: '' }
       await FileSystem.deleteAsync(localPath, { idempotent: true })
     } else if (cached.exists) {
       await FileSystem.deleteAsync(localPath, { idempotent: true })
@@ -78,25 +95,31 @@ async function downloadSpanishSubs(
       try {
         const dl = await FileSystem.downloadAsync(url, localPath)
         console.log(`[subs] GET ${url} → ${dl.status}`)
-        if (dl.status !== 200) continue
+        if (dl.status !== 200) {
+          lastFailure = `El servidor de subtítulos respondió ${dl.status}.`
+          continue
+        }
         // Un .srt real nunca es text/html; una página de bloqueo de Cloudflare sí.
         const ct = Object.entries(dl.headers ?? {}).find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? ''
         if (/text\/html/i.test(ct)) {
           console.log(`[subs] content-type=${ct} → bloqueo, descarto`)
+          lastFailure = 'El host devolvió una página en vez del archivo (cuota de OpenSubtitles agotada o bloqueo).'
           await FileSystem.deleteAsync(localPath, { idempotent: true })
           continue
         }
         const cues = await readAndParseSrt(localPath)
         console.log(`[subs] OK: ${cues.length} cues parseadas de ${localPath}`)
-        if (cues.length) return cues
+        if (cues.length) return { cues, diagnosis: '' }
+        lastFailure = 'El archivo se descargó pero no se pudo interpretar como subtítulo.'
         await FileSystem.deleteAsync(localPath, { idempotent: true })
       } catch (e) {
         console.log(`[subs] excepción ${url}: ${String(e)}`)
+        lastFailure = `La descarga falló: ${String((e as Error)?.message ?? e).slice(0, 90)}`
       }
     }
   }
   console.log('[subs] ningún candidato dio cues válidas')
-  return []
+  return { cues: [], diagnosis: lastFailure }
 }
 
 // Lee el archivo como base64 (a salvo de encoding: no interpreta bytes) y
@@ -248,8 +271,17 @@ export default function PlayerScreen() {
   // cues viejas) es la misma que en la TV y vive en useSpanishSubs; lo único
   // propio del teléfono es CÓMO se baja: acá se cachea a disco, mientras que la
   // TV lo lee en memoria porque no tiene expo-file-system.
+  // Por qué NO hay subtítulo español, para mostrarlo en el menú. El fetcher es
+  // una función nuestra, así que reporta el motivo por acá y el contrato de
+  // @bmo/player (que devuelve solo cues) queda intacto — la TV no se entera.
+  const [subsDiagnosis, setSubsDiagnosis] = useState('')
   const fetchSubsToDisk = useCallback<SpanishSubsFetcher>(
-    (subs) => downloadSpanishSubs(subs, type, id, seasonN, episodeN),
+    async (subs) => {
+      setSubsDiagnosis('')
+      const { cues, diagnosis } = await downloadSpanishSubs(subs, type, id, seasonN, episodeN)
+      setSubsDiagnosis(diagnosis)
+      return cues
+    },
     [type, id, seasonN, episodeN]
   )
   // Con `info` en null (reproducción local) devuelve [] y no baja nada.
@@ -470,6 +502,7 @@ export default function PlayerScreen() {
           // Un archivo local no necesita Referer (y pasárselo confunde a VLC).
           referer={localIsFile ? '' : referer}
           srtCues={srtCues}
+          subsDiagnosis={subsDiagnosis}
           startAt={startAt}
           meta={meta}
           title={baseTitle}
@@ -657,7 +690,7 @@ function isLatinTrack(t: TrackInfo): boolean {
 }
 
 function VlcPlayer({
-  uri, referer, srtCues, startAt, meta, hasNext, title, episodeLabel,
+  uri, referer, srtCues, subsDiagnosis, startAt, meta, hasNext, title, episodeLabel,
   audioLang, hasLatinoAlternative, onChangeAudioLang,
   sources, sourcesLoading, activeSourceIndex, onPickSource, onPosition,
   onCast,
@@ -666,6 +699,9 @@ function VlcPlayer({
 }: {
   uri: string; referer: string; startAt: number
   srtCues: SrtCue[]
+  // Vacío = hay subtítulo español. Si no, explica por qué falta (ver
+  // downloadSpanishSubs); se muestra en el menú de subtítulos.
+  subsDiagnosis: string
   meta: Omit<Progress, 'position' | 'duration' | 'updatedAt'>
   title: string
   episodeLabel?: string
@@ -1068,13 +1104,21 @@ function VlcPlayer({
             onEnd={onEnded}
           />
           {activeCue && (
-            // bottom fijo, sin insets.bottom: en landscape forzado por
-            // lockAsync (no una rotación física real), el safe-area-context
-            // a veces no vuelve a medir bien y arrastra el inset de portrait
-            // — sumaba altura de más sin que se note por qué.
+            // El `bottom` sale de la preferencia y NO se le suma insets.bottom:
+            // en landscape forzado por lockAsync (no una rotación física real),
+            // el safe-area-context a veces no vuelve a medir bien y arrastra el
+            // inset de portrait — sumaba altura de más sin que se note por qué.
             <View
               pointerEvents="none"
-              style={[styles.subtitleOverlay, { bottom: 22 }]}
+              style={[
+                styles.subtitleOverlay,
+                {
+                  bottom: SUBTITLE_POSITION_BOTTOM[subStyle.position],
+                  // La opacidad va en el contenedor para que atenúe texto y
+                  // fondo juntos (ver SUBTITLE_OPACITY_VALUE).
+                  opacity: SUBTITLE_OPACITY_VALUE[subStyle.opacity],
+                },
+              ]}
             >
               <Text
                 style={[
@@ -1083,6 +1127,9 @@ function VlcPlayer({
                     fontSize: SUBTITLE_FONT_SIZE[subStyle.size],
                     color: SUBTITLE_COLOR_CSS[subStyle.color],
                     backgroundColor: subStyle.background === 'semi' ? 'rgba(0,0,0,0.6)' : 'transparent',
+                    textShadowColor: SUBTITLE_OUTLINE[subStyle.outline].color,
+                    textShadowRadius: SUBTITLE_OUTLINE[subStyle.outline].radius,
+                    textShadowOffset: { width: 0, height: SUBTITLE_OUTLINE[subStyle.outline].offsetY },
                   },
                 ]}
               >
@@ -1367,6 +1414,36 @@ function VlcPlayer({
                     ]}
                     onChange={(background) => changeSubStyle({ background })}
                   />
+                  <SubtitleStyleRow
+                    label="Borde"
+                    value={subStyle.outline}
+                    options={[
+                      { value: 'none', label: 'Ninguno' },
+                      { value: 'soft', label: 'Suave' },
+                      { value: 'strong', label: 'Fuerte' },
+                    ]}
+                    onChange={(outline) => changeSubStyle({ outline })}
+                  />
+                  <SubtitleStyleRow
+                    label="Posición"
+                    value={subStyle.position}
+                    options={[
+                      { value: 'low', label: 'Abajo' },
+                      { value: 'mid', label: 'Medio' },
+                      { value: 'high', label: 'Alto' },
+                    ]}
+                    onChange={(position) => changeSubStyle({ position })}
+                  />
+                  <SubtitleStyleRow
+                    label="Opacidad"
+                    value={subStyle.opacity}
+                    options={[
+                      { value: 'full', label: '100%' },
+                      { value: 'high', label: '85%' },
+                      { value: 'medium', label: '70%' },
+                    ]}
+                    onChange={(opacity) => changeSubStyle({ opacity })}
+                  />
 
                   {/* Sincronía. Los .srt vienen cronometrados para otro release
                       que el archivo que sirve Real-Debrid, así que casi siempre
@@ -1536,6 +1613,13 @@ function VlcPlayer({
                       })}
                       {srtCues.length === 0 && textTracks.length === 0 && (
                         <Text style={styles.vlcPickerEmpty}>Esta fuente no trae subtítulos</Text>
+                      )}
+                      {/* Por qué falta el español. Se muestra aunque el archivo
+                          traiga pistas propias: es justamente el caso confuso
+                          —hay subtítulos, pero ninguno en español y sin poder
+                          estilizar— y hasta ahora no se explicaba en ningún lado. */}
+                      {srtCues.length === 0 && !!subsDiagnosis && (
+                        <Text style={styles.vlcPickerEmpty}>{subsDiagnosis}</Text>
                       )}
                     </>
                   )}
@@ -1742,9 +1826,7 @@ const styles = StyleSheet.create({
   subtitleText: {
     fontWeight: '700',
     textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.9)',
-    textShadowRadius: 4,
-    textShadowOffset: { width: 0, height: 1 },
+    // El contorno ya no vive acá: lo define subStyle.outline en el render.
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,

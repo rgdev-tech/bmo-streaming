@@ -3,17 +3,33 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 export type SubtitleSize = 'small' | 'medium' | 'large'
 export type SubtitleColor = 'white' | 'yellow' | 'cyan'
 export type SubtitleBackground = 'none' | 'semi'
+// Contorno para que el texto se lea sobre escenas claras (cielo, nieve).
+export type SubtitleOutline = 'none' | 'soft' | 'strong'
+// Altura sobre el borde inferior. 'low' es donde estuvo siempre; subirlo sirve
+// para esquivar subtítulos quemados en la imagen o la barra de progreso.
+export type SubtitlePosition = 'low' | 'mid' | 'high'
+export type SubtitleOpacity = 'full' | 'high' | 'medium'
 
 export type SubtitleStyle = {
   size: SubtitleSize
   color: SubtitleColor
   background: SubtitleBackground
+  outline: SubtitleOutline
+  position: SubtitlePosition
+  opacity: SubtitleOpacity
 }
 
+// Los tres campos nuevos arrancan en el valor que reproduce EXACTAMENTE el
+// aspecto anterior, así que a quien ya tenía preferencias guardadas no le
+// cambia nada hasta que toque los controles (getSubtitleStyle mezcla sobre
+// estos defaults, de modo que las preferencias viejas se completan solas).
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   size: 'medium',
   color: 'white',
   background: 'none',
+  outline: 'soft',
+  position: 'low',
+  opacity: 'full',
 }
 
 const KEY = 'bmo:subtitleStyle'
@@ -79,4 +95,31 @@ export const SUBTITLE_COLOR_CSS: Record<SubtitleColor, string> = {
   white: '#ffffff',
   yellow: '#ffe135',
   cyan: '#66ffff',
+}
+
+// Contorno. Es una SOMBRA, no un trazo real: RN Text admite una sola sombra por
+// nodo, y un contorno de verdad exigiría apilar varias copias desplazadas del
+// texto. La sombra a radio corto y negro pleno lee como borde y sale gratis.
+// 'soft' son los valores que el overlay tenía fijos hasta ahora.
+export const SUBTITLE_OUTLINE: Record<SubtitleOutline, {
+  color: string; radius: number; offsetY: number
+}> = {
+  none: { color: 'transparent', radius: 0, offsetY: 0 },
+  soft: { color: 'rgba(0,0,0,0.9)', radius: 4, offsetY: 1 },
+  strong: { color: '#000000', radius: 7, offsetY: 1 },
+}
+
+// Distancia al borde inferior, en puntos.
+export const SUBTITLE_POSITION_BOTTOM: Record<SubtitlePosition, number> = {
+  low: 22,
+  mid: 70,
+  high: 120,
+}
+
+// Se aplica al contenedor, no al texto: así atenúa por igual la letra y el
+// fondo semitransparente, en vez de dejar una caja opaca con texto pálido.
+export const SUBTITLE_OPACITY_VALUE: Record<SubtitleOpacity, number> = {
+  full: 1,
+  high: 0.85,
+  medium: 0.7,
 }
