@@ -76,6 +76,19 @@ describe('isSpanish', () => {
   test('sin language ni label → false', () => {
     expect(isSpanish({})).toBe(false)
   })
+
+  test('pistas de MKV rotuladas solo como latino, sin código de idioma', () => {
+    // Cobertura que tenía el detector propio del teléfono y no podía perderse
+    // al mover la selección de subtítulo a useSubtitlePrefs.
+    expect(isSpanish({ label: 'MEX' })).toBe(true)
+    expect(isSpanish({ label: 'Audio 419' })).toBe(true)
+    expect(isSpanish({ label: 'Latinoamericano' })).toBe(true)
+  })
+
+  test('es-419 / es-MX entran por el código ISO', () => {
+    expect(isSpanish({ language: 'es-419' })).toBe(true)
+    expect(isSpanish({ language: 'es-MX' })).toBe(true)
+  })
 })
 
 describe('audioLangLabel', () => {

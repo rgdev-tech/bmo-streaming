@@ -189,3 +189,62 @@ describe('usePlaybackSource — lista de fuentes para el menú', () => {
     expect(result.current.sourcesLoading).toBe(false)
   })
 })
+
+describe('usePlaybackSource — enabled (reproducción local)', () => {
+  test('enabled:false no toca el API', async () => {
+    const { result } = await mount({ type: 'movie', id: 603, enabled: false })
+    expect(mockStream.resolveMovie).not.toHaveBeenCalled()
+    expect(mockStream.sources).not.toHaveBeenCalled()
+    expect(result.current.info).toBeNull()
+    expect(result.current.error).toBeNull()
+  })
+
+  test('al pasar a enabled:true recién ahí resuelve', async () => {
+    const { result, rerender } = await mount({ type: 'movie', id: 603, enabled: false })
+    expect(mockStream.resolveMovie).not.toHaveBeenCalled()
+
+    await act(async () => { rerender({ type: 'movie', id: 603, enabled: true }) })
+    await act(async () => {})
+
+    expect(mockStream.resolveMovie).toHaveBeenCalledWith(603, 'latino', [])
+    expect(result.current.info).not.toBeNull()
+  })
+})
+
+describe('usePlaybackSource — retry', () => {
+  test('limpia el error y vuelve a resolver conservando las exclusiones', async () => {
+    const { result } = await mount({ type: 'movie', id: 603, maxFallbacks: 1 })
+
+    // Una fuente muere y se excluye; la segunda también → error visible.
+    act(() => result.current.onSourceFailed('source-a', 'falló A'))
+    await act(async () => {})
+    await act(async () => {})
+    act(() => result.current.onSourceFailed('source-b', 'falló B'))
+    await act(async () => {})
+    expect(result.current.error).toBe('falló B')
+
+    const callsBefore = mockStream.resolveMovie.mock.calls.length
+    act(() => result.current.retry())
+    await act(async () => {})
+    await act(async () => {})
+
+    expect(result.current.error).toBeNull()
+    expect(mockStream.resolveMovie.mock.calls.length).toBe(callsBefore + 1)
+    // No se olvida de lo aprendido: la fuente muerta sigue excluida.
+    expect(mockStream.resolveMovie).toHaveBeenLastCalledWith(603, 'latino', ['source-a'])
+  })
+
+  test('tras un error de red, el retry vuelve a intentar', async () => {
+    mockStream.resolveMovie.mockRejectedValueOnce(new Error('network down'))
+    const { result } = await mount({ type: 'movie', id: 603 })
+    expect(result.current.error).toBe('network down')
+
+    mockStream.resolveMovie.mockResolvedValue(makeResolveInfo())
+    act(() => result.current.retry())
+    await act(async () => {})
+    await act(async () => {})
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.info).not.toBeNull()
+  })
+})

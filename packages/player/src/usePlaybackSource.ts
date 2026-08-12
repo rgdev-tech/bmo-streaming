@@ -21,6 +21,10 @@ export type PlaybackSourceParams = {
   episode?: number
   // Tope de fuentes a probar antes de mostrar el error. Default 4.
   maxFallbacks?: number
+  // false = no resolver nada contra el API. Lo usa el teléfono cuando el título
+  // está descargado (reproduce el archivo local) y mientras averigua si lo está:
+  // sin esto se dispararía un resolve remoto que no se va a usar. Default true.
+  enabled?: boolean
 }
 
 export type PlaybackSource = {
@@ -44,6 +48,11 @@ export type PlaybackSource = {
   // El motor reporta su posición actual para conservarla al cambiar de fuente.
   reportPosition: (t: number) => void
   setError: (message: string) => void
+  // Reintento explícito del usuario. Limpia el error y vuelve a resolver
+  // CONSERVANDO las exclusiones ya aprendidas. Sirve para fallos transitorios
+  // (timeout, sin red); los fallos de fuente no llegan acá porque los absorbe
+  // onSourceFailed antes de que se vea la pantalla de error.
+  retry: () => void
 }
 
 /**
@@ -63,6 +72,7 @@ export function usePlaybackSource(params: PlaybackSourceParams): PlaybackSource 
   const id = params.id
   const isTv = type === 'tv'
   const maxFallbacks = params.maxFallbacks ?? MAX_SOURCE_FALLBACKS
+  const enabled = params.enabled ?? true
 
   const [info, setInfo] = useState<ResolveInfo | null>(null)
   const [startAt, setStartAt] = useState(0)
@@ -85,7 +95,12 @@ export function usePlaybackSource(params: PlaybackSourceParams): PlaybackSource 
   // Corre en el primer render y cada vez que cambia `excluded` (una fuente
   // falló) o `audioLang`. La elección manual de calidad NO pasa por acá (es
   // imperativa, en pickSource).
+  // `attempt` sube con cada retry manual: es lo único que fuerza a repetir el
+  // effect cuando ningún otro input cambió.
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     async function resolve() {
       const pos = await getProgress(Number(id), isTv ? 'tv' : 'movie', season, episode)
@@ -100,12 +115,12 @@ export function usePlaybackSource(params: PlaybackSourceParams): PlaybackSource 
     }
     resolve().catch((e) => !cancelled && setErrorState(String(e?.message ?? e)))
     return () => { cancelled = true }
-  }, [id, isTv, season, episode, excluded, audioLang])
+  }, [id, isTv, season, episode, excluded, audioLang, enabled, attempt])
 
   // ── Lista de fuentes (para el menú de calidad) ─────────────────────────────
   // Se pide en segundo plano DESPUÉS de que hay stream: es info para un menú que
   // quizá nunca se abra, no debe competir con el arranque de la reproducción.
-  const ready = !!info
+  const ready = !!info && enabled
   useEffect(() => {
     if (!ready) return
     let cancelled = false
@@ -165,6 +180,11 @@ export function usePlaybackSource(params: PlaybackSourceParams): PlaybackSource 
   const reportPosition = useCallback((t: number) => { lastPositionRef.current = t }, [])
   const setError = useCallback((message: string) => setErrorState(message), [])
 
+  const retry = useCallback(() => {
+    setErrorState(null)
+    setAttempt((n) => n + 1)
+  }, [])
+
   return {
     info,
     startAt,
@@ -179,5 +199,6 @@ export function usePlaybackSource(params: PlaybackSourceParams): PlaybackSource 
     pickSource,
     reportPosition,
     setError,
+    retry,
   }
 }

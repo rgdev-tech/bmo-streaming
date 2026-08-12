@@ -37,7 +37,11 @@ export function fmt(sec: number): string {
 export function isSpanish(t: TrackLike): boolean {
   const lang = (t.language ?? '').toLowerCase()
   if (lang.startsWith('es') || lang.startsWith('spa')) return true
-  return /\b(?:spa|esp|spanish|español|castellano|latino)\b/i.test(t.label ?? '')
+  // "MEX"/"419" y "latinoamericano" van acá porque hay MKV que no traen código
+  // de idioma y solo rotulan la pista así. Los cubría el detector propio del
+  // teléfono; al pasar esa selección a este hook había que no perderlos.
+  return /\b(?:spa|esp|spanish|español|castellano|latino|latinoamerican[oa]|mex|419)\b/i
+    .test(t.label ?? '')
 }
 
 // Etiqueta del idioma de audio de una fuente, priorizando el español (lo que el

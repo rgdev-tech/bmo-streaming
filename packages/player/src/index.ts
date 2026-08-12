@@ -15,6 +15,7 @@ export {
   resolvePlaybackUri,
 } from './format'
 export { usePlaybackSource, type PlaybackSource, type PlaybackSourceParams } from './usePlaybackSource'
+export { describePlaybackError, type FriendlyError } from './errors'
 export {
   useSpanishSubs,
   fetchSpanishSubsInMemory,

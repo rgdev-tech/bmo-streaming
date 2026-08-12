@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, ActivityIndicator,
   Animated, Pressable, ScrollView, useWindowDimensions,
@@ -17,16 +17,18 @@ import Slider from '@react-native-community/slider'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { stream, getAudioLang, setAudioLang as persistAudioLang, type AudioLang, type Subtitle, type SourceOption } from '@/lib/stream'
-import {
-  getSubtitleStyle, setSubtitleStyle, getSubtitleOffset, setSubtitleOffset, DEFAULT_SUBTITLE_STYLE,
-  SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS,
-  type SubtitleStyle as SubtitleStyleT,
-} from '@/lib/subtitleStyle'
+import { stream, type AudioLang, type Subtitle, type SourceOption } from '@/lib/stream'
+// Persistir estilo/sincronía ya no se hace acá: lo maneja useSubtitlePrefs.
+// De este módulo solo quedan los mapas que traducen la preferencia a estilos RN.
+import { SUBTITLE_FONT_SIZE, SUBTITLE_COLOR_CSS } from '@/lib/subtitleStyle'
 import { decodeSrtBytes, parseSrt, findActiveCue, type SrtCue } from '@/lib/srt'
 import { getProgress, setUpNext, type Progress } from '@/lib/library'
 // Guardado de progreso y helpers compartidos con apps/tv (headless).
-import { useProgressSaver, describeSource, audioLangLabel, fmt } from '@bmo/player'
+import {
+  usePlaybackSource, useProgressSaver, useSpanishSubs, useSubtitlePrefs,
+  describeSource, describePlaybackError, audioLangLabel, fmt,
+  type SpanishSubsFetcher,
+} from '@bmo/player'
 import { backdropUrl, tmdb } from '@/lib/tmdb'
 import { getLocalPath, smartDownloadNext } from '@/lib/download'
 import { Touchable } from '@/components/Touchable'
@@ -120,15 +122,70 @@ export default function PlayerScreen() {
   // El episodio es estado interno → cambiar de episodio NO renavega (transición fluida)
   const [episodeN, setEpisodeN] = useState(episode ? Number(episode) : undefined)
 
-  const [ready, setReady] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [startAt, setStartAt] = useState(0)
-  const [streamUrl, setStreamUrl] = useState<string | null>(null)
-  const [streamType, setStreamType] = useState<'hls' | 'file'>('hls')
-  const [referer, setReferer] = useState('')
-  const [hasLatinoAlternative, setHasLatinoAlternative] = useState(false)
   const [showNext, setShowNext] = useState(false)
-  const [retryCount, setRetryCount] = useState(0)
+
+  // ── Descarga local ──
+  // Si el título está descargado se reproduce el archivo y NO se resuelve nada
+  // contra el API. Hay que saberlo ANTES de dejar resolver: si no, se dispara un
+  // resolve remoto que después se descarta.
+  //
+  // El resultado se guarda junto a la clave del episodio al que pertenece y solo
+  // se acepta si esa clave sigue siendo la actual. Sin eso, al pasar de un
+  // episodio descargado a uno que no lo está, el `localUri` viejo seguía vigente
+  // durante unos renders y se reproducía el episodio equivocado.
+  const localKey = `${id}-${isTv ? 'tv' : 'movie'}-${seasonN ?? 0}-${episodeN ?? 0}`
+  const [localFound, setLocalFound] = useState<{ key: string; uri: string | null; startAt: number } | null>(
+    params.localPath ? { key: localKey, uri: params.localPath, startAt: 0 } : null
+  )
+  useEffect(() => {
+    let cancelled = false
+    const mediaType = isTv ? 'tv' : 'movie'
+    Promise.all([
+      params.localPath
+        ? Promise.resolve(params.localPath)
+        : getLocalPath(Number(id), mediaType, seasonN, episodeN).catch(() => null),
+      getProgress(Number(id), mediaType, seasonN, episodeN).catch(() => 0),
+    ]).then(([uri, pos]) => {
+      if (!cancelled) setLocalFound({ key: localKey, uri, startAt: pos })
+    })
+    return () => { cancelled = true }
+  }, [localKey, params.localPath, id, isTv, seasonN, episodeN])
+
+  // Solo vale si es del episodio que se está mirando ahora.
+  const local = localFound?.key === localKey ? localFound : null
+  const localUri = local?.uri ?? null
+
+  // Toda la orquestación (resolver, fallback multi-fuente por `exclude`, menú de
+  // calidad, idioma de audio) vive en @bmo/player, compartida con apps/tv. Antes
+  // el teléfono tenía su propia copia SIN fallback: cuando la fuente elegida no
+  // reproducía, la pantalla moría en "No se pudo cargar" y "Reintentar" volvía a
+  // pedir la MISMA fuente (misma clave de caché en el API).
+  const src = usePlaybackSource({
+    type: isTv ? 'tv' : 'movie',
+    id,
+    season: seasonN,
+    episode: episodeN,
+    enabled: !!local && !local.uri,
+  })
+
+  // Posición a la que arrancar. La trae el hook, salvo en reproducción local
+  // (que no pasa por él) o cuando el salto a AirPlay / la caída a otra fuente la
+  // pisan con la posición en curso.
+  const [startAtOverride, setStartAtOverride] = useState<number | null>(null)
+  const startAt = startAtOverride ?? (localUri ? local!.startAt : src.startAt)
+  const ready = localUri ? true : !!src.info
+
+  // El error que se muestra es una frase, no el string técnico. El crudo se
+  // manda a consola: sigue haciendo falta para diagnosticar desde Metro, pero
+  // no es lo que tiene que leer alguien que solo quiere ver una película.
+  const error = src.error
+  const friendlyError = useMemo(() => describePlaybackError(error), [error])
+  useEffect(() => {
+    if (error) console.log(`[player] error: ${error}`)
+  }, [error])
+
+  const referer = src.info?.referer ?? ''
+  const hasLatinoAlternative = src.info?.hasLatinoAlternative ?? false
 
   // Casting: al conectar una TV por AirPlay forzamos la vía HLS. AVPlayer
   // (expo-video) castea solo a AirPlay; las fuentes VLC/mkv de Real-Debrid no
@@ -136,13 +193,6 @@ export default function PlayerScreen() {
   // (proxeado, ya inyecta el Referer). Sticky: una vez casteando seguimos en
   // HLS aunque cambie de episodio, para no parpadear montando VLC de nuevo.
   const [castForceHls, setCastForceHls] = useState(false)
-
-  // Idioma de audio: 'original' (subtitulado) | 'latino' (doblaje). Persistido.
-  // Default 'latino' — coincide con el default de getAudioLang() en lib/stream.ts,
-  // así no dispara un resolve de más con 'original' antes de que cargue la
-  // preferencia real desde AsyncStorage.
-  const [audioLang, setAudioLangState] = useState<AudioLang>('latino')
-  useEffect(() => { getAudioLang().then(setAudioLangState) }, [])
 
   // La rotación entrada/salida se CUBRE con un overlay negro. iOS no puede
   // sincronizar el fade del modal (fullScreenModal) con el lockAsync imperativo,
@@ -186,71 +236,24 @@ export default function PlayerScreen() {
   const nextEpisodeN = (episodeN ?? 1) + 1
   const hasNextEpisode = isTv && seasonEps.includes(nextEpisodeN)
 
-  function retry() {
-    setError(null)
-    setReady(false)
-    setStreamUrl(null)
-    setRetryCount((c) => c + 1)
-  }
-
+  // Pre-resuelve el siguiente episodio en segundo plano, ya con el video andando.
   useEffect(() => {
-    let cancelled = false
+    if (!src.info || !isTv) return
+    stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, src.audioLang)
+  }, [src.info, isTv, id, seasonN, episodeN, src.audioLang])
 
-    async function resolve() {
-      // 1. Chequear si hay descarga local para este contenido
-      const local = params.localPath
-        || await getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN)
-
-      const pos = await getProgress(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN)
-      if (cancelled) return
-
-      if (local) {
-        // Reproducción offline: la URI ya es el m3u8 local
-        setReferer('')
-        setStartAt(pos)
-        setReady(true)
-        return
-      }
-
-      // 2. Resolución normal vía API (con el idioma de audio preferido)
-      const resolveP = isTv
-        ? stream.resolveTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-        : stream.resolveMovie(id, audioLang)
-
-      const info = await resolveP
-      if (cancelled) return
-
-      setStreamUrl(info.streamUrl)
-      setStreamType(info.type ?? 'hls')
-      setReferer(info.referer)
-      setHasLatinoAlternative(info.hasLatinoAlternative ?? false)
-      setStartAt(pos)
-      setReady(true)
-
-      // Pre-resuelve el siguiente episodio en segundo plano
-      if (isTv) stream.prewarm('tv', id, seasonN ?? 1, (episodeN ?? 1) + 1, audioLang)
-
-      // El subtítulo en español NO bloquea el arranque — es la única espera
-      // "innecesaria" que quedaba entre resolver y ver video: se baja en
-      // paralelo, mientras el player ya está montado y bufferizando, y el
-      // overlay JS lo recoge apenas llega (es solo estado, sin carrera con
-      // el montaje nativo). Antes esto vivía ACÁ, adelante de setReady(true).
-      if (info.type === 'file') {
-        downloadSpanishSubs(info.subtitles ?? [], type, id, seasonN, episodeN)
-          .then((cues) => { if (!cancelled) setSrtCues(cues) })
-          .catch(() => {})
-      }
-    }
-
-    resolve().catch((e) => !cancelled && setError(String(e)))
-    return () => { cancelled = true }
-  }, [type, id, seasonN, episodeN, retryCount, audioLang])
-
-  // Si existe descarga local, el player la usará directamente (sin pasar por API)
-  const [localUri, setLocalUri] = useState<string | null>(params.localPath ?? null)
-  useEffect(() => {
-    getLocalPath(Number(id), isTv ? 'tv' : 'movie', seasonN, episodeN).then(setLocalUri)
-  }, [id, isTv, seasonN, episodeN])
+  // El subtítulo en español NO bloquea el arranque: se baja en paralelo mientras
+  // el player ya está montado y bufferizando, y el overlay JS lo recoge apenas
+  // llega. La orquestación (cuándo bajarlo, re-bajarlo por fuente, limpiar las
+  // cues viejas) es la misma que en la TV y vive en useSpanishSubs; lo único
+  // propio del teléfono es CÓMO se baja: acá se cachea a disco, mientras que la
+  // TV lo lee en memoria porque no tiene expo-file-system.
+  const fetchSubsToDisk = useCallback<SpanishSubsFetcher>(
+    (subs) => downloadSpanishSubs(subs, type, id, seasonN, episodeN),
+    [type, id, seasonN, episodeN]
+  )
+  // Con `info` en null (reproducción local) devuelve [] y no baja nada.
+  const srtCues = useSpanishSubs(src.info, { fetcher: fetchSubsToDisk })
 
   // Una descarga puede ser de dos formas y cada una necesita un player
   // distinto: un m3u8 recompuesto a partir de segmentos (HLS → expo-video) o
@@ -262,20 +265,23 @@ export default function PlayerScreen() {
   // URI final para la vía expo-video/HLS:
   //  - local: m3u8 descargado
   //  - hls: master proxeado por nuestro servidor (variantes + segmentos + subs)
+  // Va con `src.excluded` para que el servidor salte las fuentes que ya fallaron
+  // acá. No se usa resolvePlaybackUri porque el caso de AirPlay necesita un
+  // master HLS incluso cuando la fuente resuelta es un mkv (ver castForceHls).
   const masterUrl = (localUri && !localIsFile ? localUri : null)
     ?? (isTv
-      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, audioLang)
-      : stream.masterMovie(id, audioLang))
+      ? stream.masterTv(id, seasonN ?? 1, episodeN ?? 1, src.audioLang, src.excluded)
+      : stream.masterMovie(id, src.audioLang, src.excluded))
 
   // Fuentes "file" → VLCKit: soporta mkv nativo y permite sideload/selección de
   // subtítulos y pistas de audio sin re-resolver. Cubre tanto el streaming
   // directo de Real-Debrid como un archivo ya descargado.
-  const isVlcSource = localIsFile || (streamType === 'file' && !localUri && !!streamUrl)
+  const isVlcSource = localIsFile || (src.info?.type === 'file' && !localUri)
   // Al castear forzamos HLS (ver castForceHls): aunque la fuente sea VLC/mkv,
   // pasamos a NativePlayer con el master HLS para que AVPlayer lo mande a la TV.
   const useVlc = isVlcSource && !castForceHls
   // Para VLCKit: el archivo local manda sobre la URL remota.
-  const vlcUri = localIsFile ? localUri! : streamUrl
+  const vlcUri = localIsFile ? localUri! : src.info?.streamUrl ?? null
 
   // Orientación a nivel de PANTALLA, no por instancia de VlcPlayer ni por tipo
   // de fuente (el mismo lock sirve para VLC y para el fullscreen nativo de Apple).
@@ -312,69 +318,51 @@ export default function PlayerScreen() {
     return () => { ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP) }
   }, [])
 
-  // ── Selector de calidad ──
-  // Las fuentes se piden una sola vez, en segundo plano y DESPUÉS de que el
-  // video ya arrancó: es información para un menú que quizá nunca se abra, y
-  // no debe competir con el arranque de la reproducción.
-  const [sources, setSources] = useState<SourceOption[]>([])
-  const [sourcesLoading, setSourcesLoading] = useState(false)
-  const [pickedSource, setPickedSource] = useState<number | null>(null)
+  // El menú de calidad no aplica a un archivo ya descargado: no hay fuentes
+  // alternativas que ofrecer. El hook las pide igual (no sabe de descargas), así
+  // que acá simplemente no se muestran.
+  const sources = localIsFile ? [] : src.sources
+  const sourcesLoading = localIsFile ? false : src.sourcesLoading
 
-  useEffect(() => {
-    if (!ready || !isVlcSource || localIsFile) return
-    let cancelled = false
-    setSourcesLoading(true)
-    stream.sources(isTv ? 'tv' : 'movie', id, seasonN, episodeN, audioLang)
-      .then((list) => { if (!cancelled) setSources(list) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setSourcesLoading(false) })
-    return () => { cancelled = true }
-  }, [ready, isVlcSource, localIsFile, id, seasonN, episodeN, audioLang])
-
-  // Última posición conocida, para conservarla al cambiar de fuente.
+  // Última posición conocida. El hook lleva la suya para el cambio de calidad;
+  // acá hace falta una propia porque el salto a AirPlay la necesita leída.
   const lastPositionRef = useRef(0)
+  function reportPosition(t: number) {
+    lastPositionRef.current = t
+    src.reportPosition(t)
+  }
 
   // Fuente VLC/mkv + TV conectada por AirPlay → saltar a la vía HLS retomando
   // la posición actual (el master HLS lo castea AVPlayer). Ver castForceHls.
   function forceCastHls() {
     if (castForceHls) return
-    setStartAt(lastPositionRef.current)
+    setStartAtOverride(lastPositionRef.current)
     setCastForceHls(true)
   }
 
-  // Cambiar de fuente re-resuelve y remonta el player desde la posición actual.
+  // Cambiar de calidad lo maneja el hook (retoma desde la posición reportada).
+  // Acá solo se suelta el override del cast, que si no pisaría el startAt nuevo
+  // con una posición vieja.
   async function pickSource(i: number) {
-    setPickedSource(i)
-    setReady(false)
-    try {
-      const info = await stream.pickSource(isTv ? 'tv' : 'movie', id, i, seasonN, episodeN, audioLang)
-      setStreamUrl(info.streamUrl)
-      setStreamType(info.type ?? 'file')
-      setReferer(info.referer)
-      // Se retoma donde iba, no desde cero: cambiar de calidad no debería
-      // costar el progreso.
-      setStartAt(lastPositionRef.current)
-      setReady(true)
-    } catch {
-      setError('No se pudo abrir esa fuente')
-    }
+    setStartAtOverride(null)
+    await src.pickSource(i)
   }
 
-  // Subtítulo español: descargado y parseado en segundo plano por resolve()
-  // (ver downloadSpanishSubs) — llega después de que el player ya arrancó.
-  // Se renderiza como overlay JS, no vía VLCKit — así el estilo cambia al
-  // instante (ver VlcPlayer/SubtitleOverlay más abajo).
-  const [srtCues, setSrtCues] = useState<SrtCue[]>([])
-
-  // Cambia el idioma de audio: persiste, resetea y deja que el effect re-resuelva
-  function changeAudioLang(lang: AudioLang) {
-    if (lang === audioLang) return
-    persistAudioLang(lang)
-    setReady(false)
-    setStreamUrl(null)
-    setError(null)
-    setAudioLangState(lang)
+  // El motor no pudo reproducir (URL muerta, señuelo que pasó el filtro del
+  // servidor, un códec que este iPhone no decodifica). Antes esto iba directo a
+  // la pantalla de error; ahora se excluye esa fuente y se prueba la siguiente,
+  // igual que hace la TV. Solo cuando se agotan las fuentes se muestra el error.
+  // Un archivo local no tiene fuente que excluir → cae directo al error.
+  function handlePlaybackError(msg: string) {
+    const message = msg || 'Error de reproducción'
+    if (localUri) { src.setError(message); return }
+    // Si la fuente llegó a reproducir algo, la siguiente retoma ahí. Si murió en
+    // el arranque (posición ~0) NO se pisa el startAt: hay que conservar el
+    // punto guardado del usuario, que es lo que el hook ya trae.
+    if (lastPositionRef.current > 5) setStartAtOverride(lastPositionRef.current)
+    src.onSourceFailed(src.info?.source ?? '', message)
   }
+
 
   // Título base: quita el sufijo "· T_:E_" si vino en el param
   const baseTitle = (title ?? '').replace(/\s*·\s*T\d+:E\d+\s*$/, '')
@@ -431,12 +419,12 @@ export default function PlayerScreen() {
     }
   }
 
-  // Cambia de episodio SIN renavegar: resetea y deja que el effect re-resuelva
+  // Cambia de episodio SIN renavegar: mover episodeN alcanza para que el hook
+  // re-resuelva (y traiga el progreso guardado del episodio nuevo). Solo hay que
+  // soltar el override de posición, que es del episodio anterior.
   function playNextEpisode() {
     setShowNext(false)
-    setReady(false)
-    setStreamUrl(null)
-    setStartAt(0)
+    setStartAtOverride(null)
     setEpisodeN(nextEpisodeN)
   }
 
@@ -459,10 +447,10 @@ export default function PlayerScreen() {
       {error ? (
         <View style={styles.center}>
           <SymbolView name="film.stack" tintColor={colors.textMuted} style={styles.errIcon} />
-          <Text style={styles.errText}>No se pudo cargar</Text>
-          <Text style={styles.errSub}>{error}</Text>
+          <Text style={styles.errText}>{friendlyError.title}</Text>
+          <Text style={styles.errSub}>{friendlyError.detail}</Text>
           <View style={styles.errButtons}>
-            <Touchable scaleTo={0.95} haptic="light" style={styles.retry} onPress={retry}>
+            <Touchable scaleTo={0.95} haptic="light" style={styles.retry} onPress={src.retry}>
               <SymbolView name="arrow.clockwise" tintColor="#000" style={styles.retryIcon} />
               <Text style={styles.retryText}>Reintentar</Text>
             </Touchable>
@@ -473,9 +461,11 @@ export default function PlayerScreen() {
         </View>
       ) : ready && useVlc && vlcUri ? (
         <VlcPlayer
-          // La fuente entra en la key: al cambiar de calidad hay que remontar
-          // el player, no solo cambiarle la uri.
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-${pickedSource ?? 'auto'}-vlc`}
+          // La fuente entra en la key: al cambiar de calidad —o al caer a otra
+          // fuente tras un fallo— hay que remontar el player, no solo cambiarle
+          // la uri. El remonta resetea el guard de "ya arranqué" y deja que
+          // vuelva a buscar startAt (ver handleLoad/startedRef).
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${src.pickedSource ?? 'auto'}-${src.excluded.length}-vlc`}
           uri={vlcUri}
           // Un archivo local no necesita Referer (y pasárselo confunde a VLC).
           referer={localIsFile ? '' : referer}
@@ -485,26 +475,26 @@ export default function PlayerScreen() {
           title={baseTitle}
           episodeLabel={isTv ? `T${seasonN ?? 1}:E${episodeN ?? 1}` : undefined}
           hasNext={hasNextEpisode}
-          audioLang={audioLang}
+          audioLang={src.audioLang}
           hasLatinoAlternative={hasLatinoAlternative}
-          onChangeAudioLang={changeAudioLang}
+          onChangeAudioLang={src.changeAudioLang}
           sources={sources}
           sourcesLoading={sourcesLoading}
-          activeSourceIndex={pickedSource}
+          activeSourceIndex={src.pickedSource}
           // Sin fuentes alternativas no se ofrece la pestaña (descarga local).
           onPickSource={localIsFile ? undefined : pickSource}
           // Sin fuente remota (descarga local) no hay HLS al que castear.
           onCast={localIsFile ? undefined : forceCastHls}
-          onPosition={(t) => { lastPositionRef.current = t }}
+          onPosition={reportPosition}
           offsetKey={`${type}-${id}-${seasonN ?? 0}-${episodeN ?? 0}`}
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
-          onError={(msg) => setError(msg || 'Player error')}
+          onError={handlePlaybackError}
         />
       ) : ready && (!isVlcSource || castForceHls) && masterUrl ? (
         <NativePlayer
-          key={`${seasonN ?? 0}-${episodeN ?? 0}-hls`}
+          key={`${seasonN ?? 0}-${episodeN ?? 0}-${src.excluded.length}-hls`}
           uri={masterUrl}
           referer={referer}
           startAt={startAt}
@@ -515,7 +505,7 @@ export default function PlayerScreen() {
           onClose={handleClose}
           onEnded={handleEnded}
           onPlayNext={playNextEpisode}
-          onError={(msg) => setError(msg || 'Player error')}
+          onError={handlePlaybackError}
         />
       ) : (
         // Carga mínima: solo un spinner centrado. Se ve bien en cualquier
@@ -758,57 +748,31 @@ function VlcPlayer({
   const [selectedAudioTrack, setSelectedAudioTrack] = useState(-1)
   const [trackPicker, setTrackPicker] = useState<'audio' | 'text' | 'style' | 'quality' | null>(null)
 
-  // Selección de subtítulo: 'external' = el .srt en español que bajamos y
-  // renderizamos nosotros (overlay JS); 'none' = apagado; number = id de una
-  // pista embebida en el archivo (nativa de VLCKit). Si hay español
-  // disponible arranca ahí — es la razón de todo este trabajo.
-  const [subMode, setSubMode] = useState<'external' | 'none' | number>(
-    srtCues.length > 0 ? 'external' : 'none'
+  // Preferencias de subtítulo (modo activo, estilo y sincronía) en @bmo/player,
+  // compartidas con la TV. El hook trabaja con ids de pista en string; VLCKit
+  // los da numéricos, así que se adaptan en los dos sentidos.
+  //
+  // El modo se auto-elige una sola vez y sin pisar la elección manual:
+  //   1. El .srt externo, si llegó: lo dibujamos nosotros, así que el estilo se
+  //      puede cambiar al instante.
+  //   2. Si no hay .srt, una pista en español embebida en el propio MKV.
+  const subtitleTracks = useMemo(
+    () => textTracks.map((t) => ({ id: String(t.id), language: t.lang, label: t.label })),
+    [textTracks]
   )
-  // srtCues ya no está listo al montar (la descarga corre en paralelo, no
-  // bloquea el arranque — ver resolve() en PlayerScreen), así que el
-  // useState de arriba casi siempre inicializa en 'none'. Este efecto elige
-  // solo, con precedencia explícita, y nunca pisa una elección manual:
-  //
-  //   1. El .srt externo, si llegó: lo renderizamos nosotros, así que el
-  //      estilo (tamaño/color/fondo) se puede cambiar al instante.
-  //   2. Si no hay .srt, una pista embebida en español del propio MKV.
-  //
-  // El paso 2 es nuevo: antes, si Wyzie no tenía español para ese título, el
-  // video arrancaba sin subtítulos aunque el archivo trajera pistas.
-  // Ambas dependencias en el array: cualquiera de las dos puede llegar
-  // primero (la descarga del .srt compite con el onLoad de VLCKit).
-  const subModeChosenByUser = useRef(false)
-  useEffect(() => {
-    if (subModeChosenByUser.current) return
-    if (srtCues.length > 0) { setSubMode('external'); return }
-    const embedded = textTracks.find(isSpanishTrack)
-    if (embedded) setSubMode(embedded.id)
-  }, [srtCues, textTracks])
-  function chooseSubMode(mode: 'external' | 'none' | number) {
-    subModeChosenByUser.current = true
-    setSubMode(mode)
-  }
-  // Desfase de subtítulos. Se RESTA de la posición: con offset positivo hay que
-  // "mirar más atrás" en las cues, o sea que el texto aparece más tarde.
-  const [subOffset, setSubOffsetState] = useState(0)
-  useEffect(() => { getSubtitleOffset(offsetKey).then(setSubOffsetState) }, [offsetKey])
-  function bumpOffset(delta: number) {
-    // Tope: más de ±30s ya no es desincronización, es el subtítulo equivocado.
-    const next = Math.round(Math.min(30, Math.max(-30, subOffset + delta)) * 10) / 10
-    setSubOffsetState(next)
-    setSubtitleOffset(offsetKey, next)
-  }
+  const {
+    subStyle, subOffset, subMode, chooseSubMode, changeSubStyle, bumpOffset,
+  } = useSubtitlePrefs({ offsetKey, srtCues, subtitleTracks })
 
+  // Id de pista nativa para VLCKit, o -1 cuando el subtítulo no es del archivo
+  // (overlay externo o apagado). Number('external') sería NaN, de ahí el chequeo
+  // explícito en vez de un cast.
+  const isNativeSub = subMode !== 'external' && subMode !== 'none'
+  const nativeTextTrack = isNativeSub ? Number(subMode) : -1
+
+  // El offset se RESTA de la posición: con offset positivo hay que "mirar más
+  // atrás" en las cues, o sea que el texto aparece más tarde.
   const activeCue = subMode === 'external' ? findActiveCue(srtCues, position - subOffset) : null
-
-  const [subStyle, setSubStyleState] = useState<SubtitleStyleT>(DEFAULT_SUBTITLE_STYLE)
-  useEffect(() => { getSubtitleStyle().then(setSubStyleState) }, [])
-  function changeSubStyle(patch: Partial<SubtitleStyleT>) {
-    const next = { ...subStyle, ...patch }
-    setSubStyleState(next)
-    setSubtitleStyle(next)
-  }
 
   function scheduleHide() {
     if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -1096,7 +1060,7 @@ function VlcPlayer({
             resizeMode={filled ? 'cover' : 'none'}
             progressUpdateInterval={500}
             selectedAudioTrack={selectedAudioTrack}
-            selectedTextTrack={typeof subMode === 'number' ? subMode : -1}
+            selectedTextTrack={nativeTextTrack}
             onLoad={handleLoad}
             onProgress={handleProgress}
             onBuffer={handleBuffer}
@@ -1446,7 +1410,7 @@ function VlcPlayer({
                       control de apariencia — ver el comentario de
                       lib/subtitleStyle.ts. Se avisa en vez de dejar que el
                       usuario mueva controles que no hacen nada. */}
-                  {typeof subMode === 'number' && (
+                  {isNativeSub && (
                     <Text style={styles.vlcPickerNotice}>
                       Estás viendo una pista incrustada en el archivo: estos ajustes solo
                       se aplican al subtítulo en español que descargamos.
@@ -1554,14 +1518,14 @@ function VlcPlayer({
                         {subMode === 'none' && <SymbolView name="checkmark.circle.fill" tintColor="#fff" style={styles.vlcIcon} />}
                       </Touchable>
                       {textTracks.map((t) => {
-                        const selected = subMode === t.id
+                        const selected = subMode === String(t.id)
                         return (
                           <Touchable
                             key={t.id}
                             scaleTo={0.98}
                             haptic="selection"
                             style={styles.vlcPickerRow}
-                            onPress={() => { chooseSubMode(t.id); setTrackPicker(null) }}
+                            onPress={() => { chooseSubMode(String(t.id)); setTrackPicker(null) }}
                           >
                             <Text style={[styles.vlcPickerRowText, selected && styles.vlcPickerRowTextActive]} numberOfLines={1}>
                               {t.label}

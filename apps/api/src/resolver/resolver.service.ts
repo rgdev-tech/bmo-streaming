@@ -6,7 +6,7 @@ import {
   type ScrapeMedia,
   type RunOutput,
 } from '@p-stream/providers'
-import { TTLCache } from './cache'
+import { TTLCache, sharedStoreFromEnv } from './cache'
 import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
 import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio, debridTiming, imdbIdOf } from './torrentio'
@@ -22,7 +22,25 @@ const PROXY_URL = process.env.STREAM_PROXY_URL
 const CACHE_FILE = process.env.VERCEL
   ? '/tmp/bmo-streams.json'
   : '.cache/streams.json'
-const cache = new TTLCache<StreamResult | null>(STREAM_TTL, CACHE_FILE)
+
+// Este es el cache que hace que el pre-calentamiento sirva. Con `/tmp` solo,
+// prewarm y play caían en instancias distintas de Vercel y no se cruzaban
+// nunca: el usuario pagaba los ~3 s de resolución igual. Con el almacén
+// compartido, cualquier instancia aprovecha lo que resolvió otra.
+//
+// Sin UPSTASH_REDIS_REST_URL/TOKEN (o sus equivalentes KV_REST_API_*) esto
+// devuelve undefined y el cache se comporta igual que antes.
+const shared = sharedStoreFromEnv()
+console.error(`[cache] almacén compartido: ${shared ? 'activo' : 'no configurado (solo memoria + disco)'}`)
+
+const cache = new TTLCache<StreamResult | null>(STREAM_TTL, {
+  persistPath: CACHE_FILE,
+  shared,
+  // La versión sube cuando cambia la FORMA de StreamResult. v2: los captions
+  // pasaron a elegirse emparejando release (ver subtitles.ts) — las entradas
+  // viejas traían el subtítulo sin emparejar y no queremos servirlas.
+  namespace: 'bmo:stream:v2',
+})
 
 // altUrls: candidatos de respaldo para el mismo idioma (mismo uso que el
 // fallback de fuentes de video) — algunos hosts de subtítulos (dl.opensubtitles.org)
