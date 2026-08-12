@@ -93,6 +93,17 @@ describe('parseYear — títulos que parecen años', () => {
   test('descarta años futuros implausibles', () => {
     expect(parseYear('Some.Movie.9999.1080p.mkv')).toBeNull()
   })
+
+  test('lee el año aunque le siga una coma dentro del corchete', () => {
+    // Caso real de MediaFusion: sin esto el año quedaba en null, rejectionOf no
+    // podía marcar wrong-year y este Superman del 78 competía por el de 2025.
+    expect(parseYear('Superman [1978, BDRemux 1080p] MVO Original Eng')).toBe(1978)
+  })
+
+  test('el Superman del 78 se rechaza para la peli de 2025', () => {
+    const ref = movieRef({ title: 'Superman', originalTitle: 'Superman', year: 2025, runtimeMin: 130 })
+    expect(rejectionOf(parse('Superman [1978, BDRemux 1080p] MVO Original Eng'), ref)).toBe('wrong-year')
+  })
 })
 
 describe('parseEpisodeTag', () => {
@@ -286,6 +297,16 @@ describe('procedencia del release', () => {
     expect(parse('M.2020.1080p.ts').releaseKind).toBeNull()
   })
 
+  test('un "TS" suelto entre puntos SÍ es telesync', () => {
+    // Caso real: este rip rankeaba tercero en Superman (2025) con score 178
+    // porque nada lo marcaba como grabación de sala.
+    const p = parse('Superman.2025.1080p.TS.READNFO.x264.AC3-AOC.mkv')
+    expect(p.releaseKind).toBe('cam')
+    const ref = movieRef({ title: 'Superman', originalTitle: 'Superman', year: 2025, runtimeMin: 130 })
+    expect(scoreStream(parse('Superman.2025.1080p.BluRay.x264-GROUP.mkv'), ref).score)
+      .toBeGreaterThan(scoreStream(p, ref).score)
+  })
+
   test('BluRay y WEB-DL no se penalizan', () => {
     const ref = movieRef({ year: 2020 })
     expect(scoreStream(parse('M.2020.1080p.BluRay.x264.mkv'), ref).parts.release).toBe(0)
@@ -350,6 +371,26 @@ describe('scoreStream — desglose por término', () => {
     const a = scoreStream(p, movieRef({ year: 2020, runtimeMin: 90 }))
     const b = scoreStream(p, movieRef({ year: 2020, runtimeMin: 180 }))
     expect(a.parts.bitrate).toBeLessThanOrEqual(b.parts.bitrate)
+  })
+
+  test('"BDRemux" pegado cuenta como remux y pierde contra un WEB-DL', () => {
+    // Caso real: este era el ganador de Superman (2025) — un remux ucraniano.
+    // \bremux\b no lo veía, así que esquivaba la penalización de -40 entera.
+    const ref = movieRef({ title: 'Superman', originalTitle: 'Superman', year: 2025, runtimeMin: 130 })
+    const remux = parse('Superman (2025) BDRemux 1080p 2xUkr Eng [Hurtom].mkv')
+    expect(remux.isRemux).toBe(true)
+    expect(scoreStream(parse('Superman.2025.1080p.WEB-DL.x264-GROUP.mkv 💾 3.4 GB'), ref).score)
+      .toBeGreaterThan(scoreStream(remux, ref).score)
+  })
+
+  test('tamaño ilegible penaliza: no puede empatarle a un archivo medido y liviano', () => {
+    // Los candidatos de MediaFusion no publican GB en el texto. Con bitrate 0
+    // le ganaban a un WEB-DL 1080p honesto solo por no ser medibles.
+    const ref = movieRef({ year: 2020, runtimeMin: 120 })
+    const sinPeso = scoreStream(parse('M.2020.1080p.x264.mkv'), ref)
+    const medido = scoreStream(parse('M.2020.1080p.x264.mkv 💾 3.5 GB'), ref)
+    expect(sinPeso.parts.bitrate).toBeLessThan(0)
+    expect(medido.score).toBeGreaterThan(sinPeso.score)
   })
 
   test('DV penaliza más que HDR10, y ambos penalizan', () => {

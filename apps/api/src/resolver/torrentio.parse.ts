@@ -138,7 +138,11 @@ export function cacheSignalHealth(parsed: ParsedStream[]): 'ok' | 'absent' | 'un
 // "1917", "2012" son TÍTULOS que parecen años. Por eso exigimos delimitadores,
 // preferimos el que está entre paréntesis, y si hay varios candidatos nos
 // quedamos con el ÚLTIMO (el título va primero, el año del release después).
-const YEAR_PAREN_RE = /[([](19\d{2}|20\d{2})[)\]]/g
+// El cierre va por lookahead y admite coma: los packs rusos/ucranianos escriben
+// "[1978, BDRemux 1080p]", y exigir ")"/"]" pegado dejaba ese año sin parsear —
+// con lo cual rejectionOf no podía descartar la peli equivocada (un Superman
+// del 78 competía contra el de 2025).
+const YEAR_PAREN_RE = /[([](19\d{2}|20\d{2})(?=[)\],;])/g
 const YEAR_LOOSE_RE = /(?:^|[.\s_\-])(19\d{2}|20\d{2})(?=$|[.\s_\-])/g
 
 export function parseYear(text: string, now = new Date()): number | null {
@@ -226,12 +230,20 @@ export function parseLangs(text: string): Set<AudioTag> {
 const NON_VIDEO_EXT_RE = /\.(?:rar|zip|7z|iso|exe|nfo|txt|srt|sub|idx|jpe?g|png)$/i
 
 // Grabaciones de sala y pre-estrenos: se ven mal a cualquier resolución.
-// "TS" a secas no se usa: choca con DTS y con la extensión .ts.
 const CAM_RE = /\b(?:cam|hdcam|camrip|hdts|telesync|telecine|hdtc|pre[\s._-]?hd|pre[\s._-]?dvd)\b/i
 const SCREENER_RE = /\b(?:scr|screener|dvdscr|r5)\b/i
 
+// "TS" a secas SÍ se usa, pero solo tras sacar las extensiones de contenedor.
+// El \b ya lo separa de "DTS" (la D pega con la T y no hay borde), así que la
+// única colisión real era el archivo ".ts" — y esa se resuelve quitando la
+// extensión antes de mirar. Sin esto, un telesync como
+// "Superman.2025.1080p.TS.READNFO.x264-AOC.mkv" pasaba por release limpio y
+// rankeaba entre los tres primeros.
+const CONTAINER_EXT_RE = /\.(?:mkv|mp4|avi|ts|m2ts|mov|wmv|flv|webm|mpg|mpeg)(?=\s|$)/gi
+const TS_RE = /\bts\b/i
+
 function parseReleaseKind(text: string): ReleaseKind {
-  if (CAM_RE.test(text)) return 'cam'
+  if (CAM_RE.test(text) || TS_RE.test(text.replace(CONTAINER_EXT_RE, ''))) return 'cam'
   if (SCREENER_RE.test(text)) return 'screener'
   if (/\b(?:blu[\s._-]?ray|bdrip|brrip|bdremux|remux|bdmux)\b/i.test(text)) return 'bluray'
   if (/\b(?:web[\s._-]?dl|web[\s._-]?rip|webrip|amzn|nf|dsnp|web)\b/i.test(text)) return 'web'
@@ -278,7 +290,11 @@ export function parseStream(s: TorrentioStream): ParsedStream {
     codec,
     bitDepth: /\b10[\s._-]?bits?\b/i.test(text) ? 10 : /\b8[\s._-]?bits?\b/i.test(text) ? 8 : null,
     hdr,
-    isRemux: /\bremux\b/i.test(text),
+    // "BDRemux"/"UHDRemux" van pegados y \bremux\b no los ve (entre la D y la R
+    // no hay borde de palabra). Era una clase entera de archivos —los más
+    // pesados y los más lentos en empezar a bufferear— esquivando la
+    // penalización de remux por completo.
+    isRemux: /\bremux\b|\b(?:bd|br|uhd|dvd)[\s._-]?remux\b/i.test(text),
     releaseKind: parseReleaseKind(text),
     // "4Kreescalado", "upscaled": 4K falso hecho a partir de un 1080p. Pesa
     // como 4K y no aporta nada de calidad.
@@ -453,7 +469,12 @@ export function scoreStream(
   } else if (p.sizeGB != null) {
     parts.bitrate = p.sizeGB > 20 ? -40 : p.sizeGB > 10 ? -20 : p.sizeGB > 6 ? -8 : 5
   } else {
-    parts.bitrate = 0
+    // Peso desconocido: prior negativo, no neutro. MediaFusion no publica el
+    // tamaño en el texto, así que sus candidatos salían con bitrate 0 — o sea
+    // EMPATANDO con un archivo medido y liviano y GANÁNDOLE a un WEB-DL 1080p
+    // honesto de 8-15 Mbps (-25). Sus remuxes flotaban al tope por no poder
+    // medirlos. -12 los deja debajo de lo medido-bueno y encima de lo medido-pesado.
+    parts.bitrate = -12
   }
 
   parts.seeders = p.seeders ? Math.min(10, Math.log2(p.seeders + 1)) : 0

@@ -11,6 +11,7 @@ import { tmdbService } from '../tmdb/tmdb.service'
 import { resolveRelativeUrls } from './hls'
 import { resolveDebridStream, listDebridSources, debridEnabled, debugTorrentio, debridTiming, imdbIdOf } from './torrentio'
 import type { HwTier, MediaRef } from './torrentio.parse'
+import { pickCaptions, type SubCandidate } from './subtitles'
 
 const STREAM_TTL = 30 * 60 * 1000  // 30 min — los tokens del CDN suelen expirar antes de 90 min
 
@@ -229,12 +230,16 @@ function toStreamResult(output: RunOutput): StreamResult | null {
 // por TMDB id). Key gratuita en https://store.wyzie.io/redeem → WYZIE_API_KEY.
 const WYZIE_KEY = process.env.WYZIE_API_KEY
 
-async function fetchSubtitles(
+// Trae TODOS los candidatos de Wyzie sin recortar. El recorte a 3 por idioma se
+// hace después (ver pickCaptions), cuando ya sabemos qué archivo eligió el
+// debrid y podemos emparejar por release — que es lo que decide si el subtítulo
+// entra sincronizado o corrido.
+async function fetchSubCandidates(
   type: 'movie' | 'tv',
   tmdbId: number,
   season?: number,
   episode?: number
-): Promise<Caption[]> {
+): Promise<SubCandidate[]> {
   if (!WYZIE_KEY) return []
   try {
     const u = new URL('https://sub.wyzie.io/search')
@@ -248,28 +253,40 @@ async function fetchSubtitles(
     }
     const arr = await fetch(u.toString(), { signal: AbortSignal.timeout(6000) }).then((r) => r.json())
     if (!Array.isArray(arr)) return []
-    // Hasta 3 candidatos por idioma (Wyzie ordena por relevancia) — el primero
-    // es el preferido, el resto queda como respaldo si ese host está bloqueado.
-    const byLang = new Map<string, { display: string; type: string; urls: string[] }>()
-    for (const s of arr) {
+    return arr.flatMap((s: any): SubCandidate[] => {
       const lang = (s?.language ?? '').toLowerCase()
-      if (!s?.url || !lang) continue
-      const entry = byLang.get(lang)
-      if (!entry) {
-        byLang.set(lang, { display: s.display || s.language, type: s.format === 'vtt' ? 'vtt' : 'srt', urls: [s.url] })
-      } else if (entry.urls.length < 3) {
-        entry.urls.push(s.url)
-      }
-    }
-    const out: Caption[] = [...byLang.values()].map((e) => ({
-      language: e.display, type: e.type, url: e.urls[0], altUrls: e.urls.slice(1),
-    }))
-    console.error(`[subs] wyzie: ${out.map((c) => `${c.language}(${1 + (c.altUrls?.length ?? 0)})`).join(', ') || 'ninguno'}`)
-    return out
+      if (!s?.url || !lang) return []
+      return [{
+        lang,
+        display: s.display || s.language,
+        type: s.format === 'vtt' ? 'vtt' : 'srt',
+        url: s.url,
+        // `releases` es un array de nombres alternativos del mismo subtítulo;
+        // todos sirven para emparejar, así que van al mismo texto.
+        release: [s.release, s.fileName, ...(Array.isArray(s.releases) ? s.releases : [])]
+          .filter(Boolean).join(' '),
+        origin: s.origin ?? '',
+        downloadCount: Number(s.downloadCount) || 0,
+        hearingImpaired: !!s.isHearingImpaired,
+        ai: !!s.ai,
+      }]
+    })
   } catch (e) {
     console.error(`[subs] wyzie error: ${(e as Error).message}`)
     return []
   }
+}
+
+// Rankea los candidatos contra el archivo elegido y arma los Caption finales.
+// `videoFilename` null (camino de los scrapers, que no exponen nombre de
+// archivo) → se ordena solo por idioma/popularidad, como antes.
+function captionsFor(cands: SubCandidate[], videoFilename: string | null): Caption[] {
+  const out = pickCaptions(cands, videoFilename)
+  console.error(
+    `[subs] ${cands.length} candidatos → ${out.map((c) => `${c.language}(${1 + (c.altUrls?.length ?? 0)})`).join(', ') || 'ninguno'}` +
+    (videoFilename ? ` emparejados contra "${videoFilename}"` : ' (sin archivo de referencia)')
+  )
+  return out
 }
 
 // ── Detección de señuelos ───────────────────────────────────────────────────
@@ -418,8 +435,8 @@ async function scrape(
     // mire una pantalla negra esperando.
     const SUBS_BUDGET_MS = 1_500
     const subsP = Promise.race([
-      fetchSubtitles(type, tmdbId, season, episode),
-      new Promise<Caption[]>((r) => setTimeout(() => r([]), SUBS_BUDGET_MS)),
+      fetchSubCandidates(type, tmdbId, season, episode),
+      new Promise<SubCandidate[]>((r) => setTimeout(() => r([]), SUBS_BUDGET_MS)),
     ])
 
     // Real-Debrid primero: sirve la MEJOR fuente cacheada, que RD entrega con un
@@ -431,10 +448,13 @@ async function scrape(
       try {
         const debrid = await resolveDebridStream({ type, tmdbId, media: ref, imdbId, season, episode, hwTier })
         if (debrid) {
+          // `debrid.label` es el nombre del archivo que se va a reproducir: con
+          // él se elige el subtítulo del MISMO release, que es la diferencia
+          // entre que entre sincronizado o corrido de punta a punta.
           const result: StreamResult = {
             url: debrid.url,
             type: 'file',
-            captions: await subsP,
+            captions: captionsFor(await subsP, debrid.label),
             headers: {},
             source: 'realdebrid',
             language: debrid.language,
@@ -484,8 +504,10 @@ async function scrape(
       return null
     }
 
-    // Wyzie (es/en/pt) primero, luego lo que haya traído la fuente
-    result.captions = [...(await subsP), ...result.captions]
+    // Wyzie (es/en/pt) primero, luego lo que haya traído la fuente. Los
+    // scrapers no exponen nombre de archivo, así que acá no hay con qué
+    // emparejar: el orden lo deciden idioma y popularidad.
+    result.captions = [...captionsFor(await subsP, null), ...result.captions]
     console.error(
       `[resolve] OK via ${winner} (${result.type}, ${result.language}, ${result.captions.length} subs) en ${Date.now() - t0}ms`
     )
@@ -583,7 +605,7 @@ export async function resolvePickedSource(
   const built = await buildMedia(type, tmdbId, season, episode)
   if (!built) return null
 
-  const subsP = fetchSubtitles(type, tmdbId, season, episode)
+  const subsP = fetchSubCandidates(type, tmdbId, season, episode)
   const debrid = await resolveDebridStream(
     { type, tmdbId, media: built.ref, season, episode, hwTier },
     pick
@@ -593,7 +615,7 @@ export async function resolvePickedSource(
   return {
     url: debrid.url,
     type: 'file',
-    captions: await subsP,
+    captions: captionsFor(await subsP, debrid.label),
     headers: {},
     source: 'realdebrid',
     language: debrid.language,
@@ -634,7 +656,7 @@ export async function debugTiming(
   if (!built) return { error: 'buildMedia falló', buildMediaMs }
 
   const tSubs = Date.now()
-  const subs = await fetchSubtitles(type, tmdbId, season, episode)
+  const subs = await fetchSubCandidates(type, tmdbId, season, episode)
   const subsMs = Date.now() - tSubs
 
   const debrid = await debridTiming({ type, tmdbId, media: built.ref, season, episode })
